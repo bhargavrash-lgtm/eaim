@@ -2,10 +2,14 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
     tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [main, master]
+
+permissions:
+  contents: write
+  packages: write
 
 # Cancel in-flight runs for the same branch/PR on new pushes
 concurrency:
@@ -57,11 +61,11 @@ jobs:
       - name: Compute image tags
         id: tags
         run: |
-          SHA_TAG="ghcr.io/eami/${{ matrix.service }}:${{ github.sha }}"
-          LATEST_TAG="ghcr.io/eami/${{ matrix.service }}:latest"
+          SHA_TAG="ghcr.io/bhargavrash-lgtm/${{ matrix.service }}:${{ github.sha }}"
+          LATEST_TAG="ghcr.io/bhargavrash-lgtm/${{ matrix.service }}:latest"
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             VERSION="${{ github.ref_name }}"
-            VERSION_TAG="ghcr.io/eami/${{ matrix.service }}:${VERSION}"
+            VERSION_TAG="ghcr.io/bhargavrash-lgtm/${{ matrix.service }}:${VERSION}"
             echo "tags=${SHA_TAG},${VERSION_TAG},${LATEST_TAG}" >> "$GITHUB_OUTPUT"
           else
             echo "tags=${SHA_TAG}" >> "$GITHUB_OUTPUT"
