@@ -20,18 +20,20 @@ WORKDIR /build
 # Matches go.work and go.work.sum (copied if present).
 COPY go.work* ./
 
-# Local dependency: no network fetch needed, must be present before go mod download
+# All local modules referenced by go.work — must be present before go mod download.
+# Only go.mod/go.sum copied first so this layer is cached independently of source.
 COPY eami-policy/ ./eami-policy/
-
-# Module manifests only — this layer is cached independently of source changes,
-# so go mod download only re-runs when go.mod or go.sum change.
 COPY eami-gateway/go.mod eami-gateway/go.sum ./eami-gateway/
+COPY eami-api/go.mod eami-api/go.sum ./eami-api/
+COPY eami-collector/go.mod eami-collector/go.sum ./eami-collector/
+COPY eami-agent/go.mod eami-agent/go.sum ./eami-agent/
 
 WORKDIR /build/eami-gateway
 RUN go mod download
 
 # Full gateway source (overwrites the manifests copied above; content is identical)
 COPY eami-gateway/ ./
+COPY eami-policy/ ./eami-policy/
 
 # Build static binary — CGO_ENABLED=0 ensures no libc dependency in the runtime image
 RUN mkdir -p /out && \

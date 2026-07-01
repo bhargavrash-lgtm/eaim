@@ -33,12 +33,12 @@ WORKDIR /app
 
 # Install dependencies separately from source copy so this layer is cached
 # unless package.json or package-lock.json changes.
-COPY package*.json ./
+COPY eami-ui/package*.json ./
 RUN npm ci
 
-# Copy source (overridden by the ./eami-ui/src volume mount in docker-compose
-# for hot reload — this COPY is the fallback for bare `docker build` runs).
-COPY . .
+# Copy source and the openapi spec (needed for generate-client at dev time)
+COPY eami-ui/ .
+COPY api/openapi.yaml /api/openapi.yaml
 
 # 5173 — Vite dev server default port
 EXPOSE 5173
@@ -54,15 +54,17 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY eami-ui/package*.json ./
 RUN npm ci
 
-COPY . .
+# Copy UI source and the openapi spec that generate-client needs.
+# The script references ../api/openapi.yaml relative to WORKDIR /app,
+# which resolves to /api/openapi.yaml — place it there directly.
+COPY eami-ui/ .
+COPY api/openapi.yaml /api/openapi.yaml
 
-# generate-client runs openapi-typescript against api/openapi.yaml and writes
+# generate-client runs openapi-typescript against ../api/openapi.yaml and writes
 # typed client code to src/api/. Must run before vite build so types are available.
-# The openapi.yaml is expected at: eami-ui/../api/openapi.yaml
-# FE-Dashboard: make sure the generate-client script can find the spec file.
 RUN npm run generate-client && npm run build
 
 # =============================================================================

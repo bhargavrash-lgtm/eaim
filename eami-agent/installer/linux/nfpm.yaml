@@ -32,12 +32,6 @@ rpm:
   summary: "EAMI AI asset discovery endpoint agent"
   group: "System/Monitoring"
 
-# deb-specific metadata
-deb:
-  lintian-overrides:
-    # Agent runs as root intentionally (see eami-agent.service comments)
-    - "setuid-binary"
-
 contents:
   # Agent binary
   - src: ./eami-agent-linux-amd64

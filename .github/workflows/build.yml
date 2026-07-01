@@ -44,7 +44,7 @@ jobs:
             context: ./eami-collector
             dockerfile: eami-collector/Dockerfile
           - service: eami-ui
-            context: ./eami-ui
+            context: .
             dockerfile: eami-ui/Dockerfile
     steps:
       - uses: actions/checkout@v4
@@ -191,7 +191,7 @@ jobs:
           path: eami-agent/
 
       - name: Install WiX Toolset v4
-        run: dotnet tool install --global wix
+        run: dotnet tool install --global wix --version "4.0.6"
         shell: pwsh
 
       - name: Compute version
