@@ -199,9 +199,10 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            MSI_VERSION="${{ github.ref_name }}"
-            MSI_VERSION="${MSI_VERSION#v}"
-            FILE_VERSION="${MSI_VERSION}"
+            FILE_VERSION="${{ github.ref_name }}"
+            FILE_VERSION="${FILE_VERSION#v}"
+            # MSI version must be purely numeric (major.minor.build) — strip pre-release suffix
+            MSI_VERSION=$(echo "$FILE_VERSION" | sed 's/[-~].*//')
           else
             MSI_VERSION="0.0.0"
             FILE_VERSION="0.0.0-${{ github.sha }}"
@@ -213,7 +214,7 @@ jobs:
         shell: pwsh
         run: |
           .\eami-agent\installer\build.ps1 `
-            -Version     "${{ steps.version.outputs.file_version }}" `
+            -Version     "${{ steps.version.outputs.msi_version }}" `
             -BinaryPath  "eami-agent\eami-agent-windows-amd64.exe" `
             -OutputDir   "eami-agent\installer\dist" `
             -SkipWixInstall
