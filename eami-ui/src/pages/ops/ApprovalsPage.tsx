@@ -209,7 +209,7 @@ const ALL_COLUMNS = [
 
 export default function ApprovalsPage() {
   const [tab, setTab] = useState<Tab>('pending')
-  const [allPage, setAllPage] = useState(1)
+  const [allPage] = useState(1)
 
   const [confirmState, setConfirmState] = useState<{
     approval: ApprovalRequest
@@ -227,7 +227,7 @@ export default function ApprovalsPage() {
   const pendingData = pendingQuery.data?.data ?? []
   const pendingTotal = pendingQuery.data?.meta?.total ?? 0
   const allData = allQuery.data?.data ?? []
-  const allTotal = allQuery.data?.meta?.total ?? 0
+  const _allTotal = allQuery.data?.meta?.total ?? 0
 
   function handleDecide(approval: ApprovalRequest, decision: 'approved' | 'denied') {
     setDecideError(null)
@@ -339,12 +339,7 @@ export default function ApprovalsPage() {
               columns={ALL_COLUMNS}
               data={allData}
               loading={allQuery.isFetching}
-              pagination={{
-                page: allPage,
-                perPage: 25,
-                total: allTotal,
-                onPageChange: setAllPage,
-              }}
+              pageSize={25}
             />
           )}
         </>
