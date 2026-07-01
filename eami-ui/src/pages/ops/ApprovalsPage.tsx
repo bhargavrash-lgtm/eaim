@@ -227,7 +227,7 @@ export default function ApprovalsPage() {
   const pendingData = pendingQuery.data?.data ?? []
   const pendingTotal = pendingQuery.data?.meta?.total ?? 0
   const allData = allQuery.data?.data ?? []
-  const _allTotal = allQuery.data?.meta?.total ?? 0
+
 
   function handleDecide(approval: ApprovalRequest, decision: 'approved' | 'denied') {
     setDecideError(null)
