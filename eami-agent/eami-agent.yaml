@@ -1,0 +1,27 @@
+agent:
+  # id: ""            # auto = hostname; override to set a stable identifier
+  interval_secs: 300
+  log_level: info
+
+collector:
+  # url: "http://collector.internal:8888"
+  # api_key: ""
+  # Windows: if url/api_key are empty here, they are read from:
+  #   HKLM\SOFTWARE\EAMI\Agent\CollectorURL
+  #   HKLM\SOFTWARE\EAMI\Agent\CollectorAPIKey
+  # macOS:  set here or via /etc/eami/agent.yaml (installed by .pkg)
+  # Linux:  set here or via /etc/eami/agent.yaml (installed by .deb/.rpm)
+  timeout_seconds: 30
+
+detection:
+  # Minimum model file size to report (smaller files are likely config, not weights)
+  model_file_size_mb: 100
+
+  # Extra directories to scan for model files (in addition to auto-detected paths)
+  # Windows defaults: %LOCALAPPDATA%\LM-Studio\models, %LOCALAPPDATA%\nomic.ai\GPT4All
+  # macOS defaults:   ~/Documents/LM Studio/models, ~/Library/Application Support/nomic.ai/GPT4All
+  # Linux defaults:   ~/lm-studio/models, ~/.local/share/nomic.ai/GPT4All
+  # HuggingFace cache (~/.cache/huggingface/hub) is always scanned on all platforms.
+  model_file_scan_paths: []
+  # - "/mnt/models"
+  # - "/opt/ai/models"

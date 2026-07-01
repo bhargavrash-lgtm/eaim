@@ -1,0 +1,31 @@
+[Unit]
+Description=EAMI Endpoint Agent
+Documentation=https://docs.eami.io/agent
+# Start after the network stack is up so the agent can reach the collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/eami-agent
+Restart=on-failure
+RestartSec=10
+# Cap restart attempts: if the service crashes 5 times in 5 minutes, stop trying
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Logging — journald captures stdout/stderr automatically for Type=simple
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=eami-agent
+
+# Security hardening
+# The agent runs as root to access all system information (processes, GPU, etc.)
+# If the agent is updated to drop privileges, replace with a dedicated user here.
+User=root
+
+# Prevent the service from acquiring new privileges
+NoNewPrivileges=false
+
+[Install]
+WantedBy=multi-user.target

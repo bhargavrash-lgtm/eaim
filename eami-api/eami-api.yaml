@@ -1,0 +1,27 @@
+server:
+  port: 8080
+  read_timeout_seconds: 30
+  write_timeout_seconds: 60
+  idle_timeout_seconds: 120
+
+database:
+  dsn: "postgres://eami_app:changeme@localhost:5432/eami?sslmode=disable"
+  max_open_conns: 25
+  max_idle_conns: 5
+
+auth:
+  # Path to PEM-encoded RSA private key for JWT signing (RS256).
+  # If empty, a new 2048-bit key is generated at startup (dev mode).
+  rsa_private_key_path: ""
+  # JWT access token TTL in seconds (default 1 hour).
+  access_token_ttl_seconds: 3600
+  # Refresh token TTL in seconds (default 30 days).
+  refresh_token_ttl_seconds: 2592000
+
+log:
+  level: "info"   # debug | info | warn | error
+  format: "text"  # text | json
+
+# Shared secret for the collector agent write path (POST /v1/reports).
+# Override in production with API_SERVICE_KEY env var.
+service_key: "changeme"

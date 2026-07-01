@@ -1,0 +1,15 @@
+collector:
+  listen_port: 8888
+  tls_cert_path: ""   # empty = HTTP only (internal network)
+  tls_key_path: ""
+
+buffer:
+  db_path: "./data/buffer.db"
+  max_rows: 100000
+
+forwarder:
+  saas_url: "https://api.eami.io"
+  api_key: ""
+  batch_size: 100
+  interval_seconds: 10
+  timeout_seconds: 30

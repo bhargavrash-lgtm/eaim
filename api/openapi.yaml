@@ -1,0 +1,2319 @@
+openapi: 3.1.0
+info:
+  title: EAMI API
+  description: |
+    Enterprise AI Monitoring & Intelligence — REST API.
+
+    **Authentication:**
+    - UI users: Bearer JWT (RS256). Obtain via POST /v1/auth/login.
+    - Collector → SaaS ingest: X-API-Key header (org-scoped key).
+    - All endpoints require authentication unless marked public.
+
+    **Base URL (SaaS):** https://api.eami.io
+    **Base URL (on-prem gateway local API):** http://gateway-host:8080
+
+    **Versioning:** All endpoints are prefixed with /v1. Breaking changes increment the version.
+  version: 0.1.0
+  contact:
+    name: EAMI Engineering
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.eami.io
+    description: SaaS production
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: auth
+    description: Authentication and API key management
+  - name: ingest
+    description: Endpoint agent data ingestion (collector → SaaS)
+  - name: endpoints
+    description: Discovered endpoint inventory
+  - name: gateway-agents
+    description: AI agent registry (gateway configuration)
+  - name: gateway-policies
+    description: Policy rule management
+  - name: gateway-tools
+    description: Tool connection management
+  - name: gateway-nodes
+    description: Gateway cluster node management
+  - name: gateway-tokens
+    description: AI token issuance (gateway-local only)
+  - name: approvals
+    description: Approval request queue and webhook
+  - name: audit
+    description: Audit log queries
+  - name: finops
+    description: Token spend and ROI analytics
+  - name: memory
+    description: Episode library and knowledge base
+  - name: mcp
+    description: MCP gateway transport (SSE session + message endpoints)
+  - name: settings
+    description: Org-level settings and notification configuration
+  - name: users
+    description: User management and invitations
+  - name: alerts
+    description: Alert rules and notification history
+
+# ─────────────────────────────────────────────────────────
+# SECURITY SCHEMES
+# ─────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT (RS256) issued by POST /v1/auth/login
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Org-scoped API key for collector→SaaS ingest
+    ServiceKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Service-Key
+      description: Service API key used by the on-prem collector forwarder for POST /v1/reports
+
+  # ─────────────────────────────────────────────────────
+  # SHARED SCHEMAS
+  # ─────────────────────────────────────────────────────
+  schemas:
+
+    # ── Pagination ──────────────────────────────────────
+    PaginationMeta:
+      type: object
+      required: [total, page, per_page]
+      properties:
+        total:    { type: integer, example: 142 }
+        page:     { type: integer, example: 1 }
+        per_page: { type: integer, example: 25 }
+
+    # ── Error ────────────────────────────────────────────
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:    { type: string, example: "not_found" }
+        message: { type: string, example: "Agent not found" }
+        details: { type: object }
+
+    # ── Auth ─────────────────────────────────────────────
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:    { type: string, format: email }
+        password: { type: string, minLength: 8 }
+
+    LoginResponse:
+      type: object
+      required: [access_token, refresh_token, expires_in]
+      properties:
+        access_token:  { type: string }
+        refresh_token: { type: string }
+        expires_in:    { type: integer, description: "Seconds until access_token expires", example: 3600 }
+        user:          { $ref: '#/components/schemas/User' }
+
+    User:
+      type: object
+      required: [id, email, role, org_id]
+      properties:
+        id:       { type: string, format: uuid }
+        email:    { type: string, format: email }
+        name:     { type: string }
+        role:     { type: string, enum: [admin, operator, viewer] }
+        org_id:   { type: string, format: uuid }
+
+    ApiKey:
+      type: object
+      required: [id, name, prefix, created_at]
+      properties:
+        id:         { type: string, format: uuid }
+        name:       { type: string }
+        prefix:     { type: string, example: "eami_k_abc123" }
+        scopes:     { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+        last_used:  { type: string, format: date-time, nullable: true }
+
+    # ── Ingest ───────────────────────────────────────────
+    IngestBatch:
+      type: object
+      required: [reports]
+      properties:
+        reports:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { $ref: '#/components/schemas/EndpointReport' }
+
+    EndpointReport:
+      type: object
+      required: [schema_version, agent_id, agent_version, hostname, collected_at]
+      properties:
+        schema_version: { type: string, example: "1.0" }
+        agent_id:       { type: string }
+        agent_version:  { type: string, example: "0.9.1" }
+        hostname:       { type: string }
+        collected_at:   { type: string, format: date-time }
+        ai_processes:
+          type: array
+          items: { $ref: '#/components/schemas/AIProcess' }
+        ai_apps:
+          type: array
+          items: { $ref: '#/components/schemas/AIApp' }
+        gpus:
+          type: array
+          items: { $ref: '#/components/schemas/GPU' }
+        model_files:
+          type: array
+          items: { $ref: '#/components/schemas/ModelFile' }
+        python_envs:
+          type: array
+          items: { $ref: '#/components/schemas/PythonEnv' }
+        mcp_servers:
+          type: array
+          description: MCP servers detected on the endpoint (TASK-017).
+          items: { $ref: '#/components/schemas/MCPServer' }
+        node_projects:
+          type: array
+          description: Node.js projects with AI packages detected on the endpoint (TASK-017).
+          items: { $ref: '#/components/schemas/NodeProject' }
+        platform:
+          description: Host OS and architecture metadata (TASK-017). Optional — not all agent versions emit this.
+          $ref: '#/components/schemas/Platform'
+        local_models:
+          type: array
+          description: Local AI model files discovered on the endpoint (TASK-012).
+          items: { $ref: '#/components/schemas/LocalModel' }
+        cloud_clients:
+          type: array
+          description: Cloud AI provider client configurations detected on the endpoint (TASK-012).
+          items: { $ref: '#/components/schemas/CloudClient' }
+        network_activity:
+          type: array
+          description: Active or recent network connections to known AI API hostnames (TASK-012).
+          items: { $ref: '#/components/schemas/NetworkConnection' }
+        errors:
+          type: array
+          items: { type: string }
+
+    AIProcess:
+      type: object
+      required: [pid, name, detected_at]
+      properties:
+        pid:          { type: integer }
+        name:         { type: string }
+        exe_path:     { type: string }
+        command_line: { type: string }
+        detected_at:  { type: string, format: date-time }
+
+    AIApp:
+      type: object
+      required: [name, source]
+      properties:
+        name:    { type: string }
+        version: { type: string }
+        path:    { type: string }
+        source:  { type: string }
+
+    GPU:
+      type: object
+      required: [name, source]
+      properties:
+        name:           { type: string }
+        vram_bytes:     { type: integer, format: int64, description: "VRAM capacity in bytes." }
+        driver_version: { type: string }
+        source:         { type: string }
+
+    ModelFile:
+      type: object
+      properties:
+        path:       { type: string }
+        name:       { type: string }
+        size_mb:    { type: number }
+        format:     { type: string }
+        source:     { type: string, enum: [ollama, lmstudio, huggingface, unknown] }
+        detected_at: { type: string, format: date-time }
+
+    PythonEnv:
+      type: object
+      required: [path, type, detected_at]
+      properties:
+        path:        { type: string }
+        type:        { type: string, enum: [venv, conda, conda_base] }
+        ai_packages:
+          type: array
+          items: { type: string }
+        detected_at: { type: string, format: date-time }
+
+    NodeJSAI:
+      type: object
+      properties:
+        packages:
+          type: array
+          items:
+            type: object
+            properties:
+              name:    { type: string }
+              version: { type: string }
+              path:    { type: string }
+
+    MCPScanResult:
+      type: object
+      properties:
+        servers:
+          type: array
+          items:
+            type: object
+            properties:
+              name:       { type: string }
+              command:    { type: string }
+              transport:  { type: string, enum: [stdio, sse, socket] }
+              port:       { type: integer, nullable: true }
+              source:     { type: string, enum: [claude_desktop, vscode, cursor, live_port] }
+              config_path: { type: string }
+
+    LocalModel:
+      type: object
+      description: A local AI model file discovered on the endpoint.
+      required: [name, source]
+      properties:
+        name:          { type: string, description: "Model name or filename as it appears on disk or in the runtime registry." }
+        source:        { type: string, enum: [ollama, lm_studio, huggingface, gpt4all], description: "Runtime or distribution channel through which the model was detected." }
+        size_bytes:    { type: integer, format: int64, description: "File size in bytes." }
+        architecture:  { type: string, description: "Model architecture class, e.g. \"LlamaForCausalLM\". Sourced from HuggingFace config.json where available." }
+        last_modified: { type: string, format: date-time, description: "Last-modified timestamp of the model file." }
+
+    CloudClient:
+      type: object
+      description: >
+        Cloud AI provider client detected on the endpoint. Captures credential
+        presence and provenance — never full credential values.
+      required: [provider, configured, source]
+      properties:
+        provider:   { type: string, enum: [openai, anthropic, aws_bedrock, azure_openai, google_vertex], description: "Cloud AI provider." }
+        configured: { type: boolean, description: "true if valid credentials were found for this provider." }
+        key_prefix:
+          type: string
+          maxLength: 7
+          description: >
+            First 7 characters of the API key only, used for identification purposes.
+            MUST NOT contain more than 7 characters. Full API key values must never
+            be included in this field or anywhere else in a report payload.
+        source:     { type: string, enum: [env_var, config_file], description: "Where the credentials were discovered." }
+
+    NetworkConnection:
+      type: object
+      description: An active or recently-observed network connection to a known AI API hostname.
+      required: [remote_host, remote_port, process_name, pid, state, detected_at]
+      properties:
+        remote_host:  { type: string, description: "Matched AI API hostname, e.g. \"api.openai.com\"." }
+        remote_port:  { type: integer, description: "Remote TCP port number." }
+        process_name: { type: string, description: "Name of the process holding the connection." }
+        pid:          { type: integer, description: "Process ID of the process holding the connection." }
+        state:        { type: string, enum: [ESTABLISHED, TIME_WAIT, dns_cache], description: "TCP connection state or detection method." }
+        detected_at:  { type: string, format: date-time, description: "RFC 3339 timestamp when this connection was observed." }
+
+    # ── TASK-017 schemas ─────────────────────────────────
+
+    MCPServer:
+      type: object
+      description: An MCP server detected on the endpoint.
+      required: [name, source, active]
+      properties:
+        name:    { type: string }
+        command: { type: string }
+        args:
+          type: array
+          items: { type: string }
+        source:  { type: string, enum: [claude_desktop, cursor, vscode] }
+        port:    { type: integer }
+        active:  { type: boolean }
+
+    NodeProject:
+      type: object
+      description: A Node.js project with AI packages detected on the endpoint.
+      required: [path, detected_at]
+      properties:
+        path:        { type: string }
+        ai_packages:
+          type: array
+          items: { type: string }
+        detected_at: { type: string, format: date-time }
+
+    Platform:
+      type: object
+      description: Host OS and CPU architecture metadata.
+      properties:
+        os:         { type: string, enum: [windows, darwin, linux] }
+        arch:       { type: string, enum: [amd64, arm64] }
+        os_version: { type: string, description: "e.g. '14.4.1' (macOS), '22.04' (Ubuntu), '10.0.19045' (Windows)" }
+
+    # ── Endpoint inventory ───────────────────────────────
+    Endpoint:
+      type: object
+      required: [id, hostname, org_id, last_seen]
+      properties:
+        id:             { type: string, format: uuid }
+        hostname:       { type: string }
+        org_id:         { type: string, format: uuid }
+        agent_id:       { type: string }
+        agent_version:  { type: string }
+        last_seen:      { type: string, format: date-time }
+        os:             { type: string }
+        ai_app_count:   { type: integer }
+        local_model_count: { type: integer }
+        mcp_server_count:  { type: integer }
+        gpu_count:      { type: integer }
+        risk_score:     { type: number, minimum: 0, maximum: 100 }
+        latest_report:  { $ref: '#/components/schemas/EndpointReport' }
+
+    # ── Gateway: Agents ──────────────────────────────────
+    Agent:
+      type: object
+      required: [id, name, model, owner, scope, risk_tier, status, created_at]
+      properties:
+        id:          { type: string, format: uuid }
+        name:        { type: string, example: "claude-support-01" }
+        model:       { type: string, example: "claude-sonnet-4-6" }
+        owner:       { type: string, description: "Team or individual owner" }
+        scope:       { type: string, description: "Declared task scope in plain language" }
+        risk_tier:   { type: string, enum: [low, medium, high] }
+        status:      { type: string, enum: [active, suspended, revoked] }
+        token_ttl_seconds: { type: integer, default: 900 }
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+        last_seen:   { type: string, format: date-time, nullable: true }
+
+    AgentCreate:
+      type: object
+      required: [name, model, owner, scope, risk_tier]
+      properties:
+        name:       { type: string }
+        model:      { type: string }
+        owner:      { type: string }
+        scope:      { type: string }
+        risk_tier:  { type: string, enum: [low, medium, high] }
+        token_ttl_seconds: { type: integer, default: 900, minimum: 60, maximum: 14400 }
+
+    AgentUpdate:
+      type: object
+      properties:
+        scope:      { type: string }
+        risk_tier:  { type: string, enum: [low, medium, high] }
+        status:     { type: string, enum: [active, suspended, revoked] }
+        token_ttl_seconds: { type: integer, minimum: 60, maximum: 14400 }
+
+    # ── Gateway: AI Tokens ───────────────────────────────
+    AITokenRequest:
+      type: object
+      required: [agent_name, task]
+      properties:
+        agent_name: { type: string }
+        task:       { type: string, description: "Plain-language description of what the agent will do" }
+        ttl_seconds: { type: integer, minimum: 60, maximum: 14400 }
+
+    AITokenResponse:
+      type: object
+      required: [token, expires_at]
+      properties:
+        token:      { type: string, description: "Signed JWT AI token" }
+        expires_at: { type: string, format: date-time }
+
+    # ── Gateway: Policies ────────────────────────────────
+    Policy:
+      type: object
+      required: [id, name, priority, conditions, action, status, created_at]
+      properties:
+        id:          { type: string, format: uuid }
+        name:        { type: string }
+        description: { type: string }
+        priority:    { type: integer, minimum: 1 }
+        conditions:  { $ref: '#/components/schemas/PolicyConditions' }
+        action:      { type: string, enum: [allow, deny, escalate] }
+        alert:       { type: boolean, default: false, description: "Send alert on match" }
+        status:      { type: string, enum: [active, draft, disabled] }
+        created_by:  { type: string }
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+
+    PolicyConditions:
+      type: object
+      description: "All specified conditions must match (AND logic). Omitted fields match anything."
+      properties:
+        agent_name_pattern:
+          type: string
+          description: "Glob pattern matching agent name. e.g. 'claude-support-*'"
+        tool_names:
+          type: array
+          items: { type: string }
+          description: "Match if tool is in this list. Empty = any tool."
+        action_types:
+          type: array
+          items: { type: string }
+          description: "Match if action verb is in this list. e.g. ['delete','drop']"
+        environments:
+          type: array
+          items: { type: string, enum: [production, staging, development, any] }
+        record_count_gt:
+          type: integer
+          description: "Match if estimated affected record count > this value"
+        semantic_rule:
+          type: string
+          description: "Natural-language rule evaluated by LLM. e.g. 'Agent must not exfiltrate PII'"
+        scope_drift:
+          type: boolean
+          description: "If true, match when agent acts outside its declared task scope"
+
+    PolicyCreate:
+      type: object
+      required: [name, priority, conditions, action]
+      properties:
+        name:        { type: string }
+        description: { type: string }
+        priority:    { type: integer, minimum: 1 }
+        conditions:  { $ref: '#/components/schemas/PolicyConditions' }
+        action:      { type: string, enum: [allow, deny, escalate] }
+        alert:       { type: boolean, default: false }
+        status:      { type: string, enum: [active, draft], default: draft }
+
+    PolicyUpdate:
+      type: object
+      properties:
+        name:        { type: string }
+        description: { type: string }
+        priority:    { type: integer, minimum: 1 }
+        conditions:  { $ref: '#/components/schemas/PolicyConditions' }
+        action:      { type: string, enum: [allow, deny, escalate] }
+        alert:       { type: boolean }
+        status:      { type: string, enum: [active, draft, disabled] }
+
+    # ── Gateway: Tools ───────────────────────────────────
+    Tool:
+      type: object
+      required: [id, name, type, status, created_at]
+      properties:
+        id:          { type: string, format: uuid }
+        name:        { type: string, example: "Salesforce" }
+        type:        { type: string, enum: [mcp, rest_api, database] }
+        status:      { type: string, enum: [connected, degraded, disconnected] }
+        auth_type:   { type: string, enum: [oauth2, api_key, basic, db_connection_string] }
+        mcp_command: { type: string, description: "MCP server command (for type=mcp)", nullable: true }
+        base_url:    { type: string, description: "Base URL (for type=rest_api)", nullable: true }
+        last_used:   { type: string, format: date-time, nullable: true }
+        created_at:  { type: string, format: date-time }
+
+    ToolCreate:
+      type: object
+      required: [name, type, auth_type]
+      properties:
+        name:        { type: string }
+        type:        { type: string, enum: [mcp, rest_api, database] }
+        auth_type:   { type: string, enum: [oauth2, api_key, basic, db_connection_string] }
+        mcp_command: { type: string, nullable: true }
+        mcp_args:    { type: array, items: { type: string }, nullable: true }
+        base_url:    { type: string, nullable: true }
+        credentials:
+          type: object
+          description: "Sensitive. Written to encrypted gateway config. Never returned in GET responses."
+          properties:
+            api_key:           { type: string }
+            oauth_client_id:   { type: string }
+            oauth_client_secret: { type: string }
+            connection_string: { type: string }
+
+    # ── Gateway: Nodes ───────────────────────────────────
+    Node:
+      type: object
+      required: [id, name, role, status, address]
+      properties:
+        id:           { type: string, format: uuid }
+        name:         { type: string }
+        role:         { type: string, enum: [primary, edge, dr_standby] }
+        status:       { type: string, enum: [healthy, degraded, standby, offline] }
+        address:      { type: string, description: "IP:port of the node" }
+        hostname:     { type: string }
+        version:      { type: string }
+        cpu_pct:      { type: number, nullable: true }
+        requests_per_min: { type: integer, nullable: true }
+        uptime_seconds: { type: integer, nullable: true }
+        replication_lag_ms: { type: integer, nullable: true, description: "For DR standby only" }
+        last_heartbeat: { type: string, format: date-time }
+
+    # ── Approvals ────────────────────────────────────────
+    ApprovalRequest:
+      type: object
+      required: [id, agent_id, agent_name, tool_name, action, justification, risk_level, status, created_at]
+      properties:
+        id:            { type: string, format: uuid }
+        agent_id:      { type: string, format: uuid }
+        agent_name:    { type: string }
+        tool_name:     { type: string }
+        action:        { type: string, description: "Human-readable action description" }
+        parameters:    { type: object, description: "Action parameters (sanitised, no PII)" }
+        justification: { type: string, description: "Agent's stated reason for the action" }
+        risk_level:    { type: string, enum: [low, medium, high, critical] }
+        blast_radius:  { $ref: '#/components/schemas/BlastRadius' }
+        status:        { type: string, enum: [pending, approved, denied, expired, cancelled] }
+        policy_id:     { type: string, format: uuid, description: "Policy that triggered escalation" }
+        approved_by:   { type: string, nullable: true }
+        decided_at:    { type: string, format: date-time, nullable: true }
+        expires_at:    { type: string, format: date-time }
+        created_at:    { type: string, format: date-time }
+
+    BlastRadius:
+      type: object
+      properties:
+        estimated_records: { type: integer, nullable: true }
+        reversible:        { type: boolean }
+        environment:       { type: string, enum: [production, staging, development, unknown] }
+        data_types:        { type: array, items: { type: string }, description: "e.g. ['PII','financial']" }
+
+    ApprovalDecision:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [approved, denied] }
+        reason:   { type: string }
+
+    # ── Audit ─────────────────────────────────────────────
+    AuditEntry:
+      type: object
+      required: [id, agent_name, tool_name, action, decision, timestamp, hash]
+      properties:
+        id:            { type: string, format: uuid }
+        agent_id:      { type: string, format: uuid }
+        agent_name:    { type: string }
+        tool_name:     { type: string }
+        action:        { type: string }
+        parameters:    { type: object }
+        decision:      { type: string, enum: [allowed, denied, escalated] }
+        policy_id:     { type: string, format: uuid, nullable: true }
+        approval_id:   { type: string, format: uuid, nullable: true }
+        approved_by:   { type: string, nullable: true }
+        latency_ms:    { type: integer }
+        token_in:      { type: integer }
+        token_out:     { type: integer }
+        timestamp:     { type: string, format: date-time }
+        prev_hash:     { type: string, description: "SHA-256 of previous row" }
+        hash:          { type: string, description: "SHA-256 of this row + prev_hash" }
+
+    # ── FinOps ────────────────────────────────────────────
+    TokenSpendSummary:
+      type: object
+      properties:
+        period_start:  { type: string, format: date }
+        period_end:    { type: string, format: date }
+        total_cost_usd: { type: number }
+        total_tokens_in:  { type: integer }
+        total_tokens_out: { type: integer }
+        avg_cost_per_outcome: { type: number }
+        by_agent:
+          type: array
+          items: { $ref: '#/components/schemas/AgentSpend' }
+        by_team:
+          type: array
+          items: { $ref: '#/components/schemas/TeamSpend' }
+        by_model:
+          type: array
+          items: { $ref: '#/components/schemas/ModelSpend' }
+
+    AgentSpend:
+      type: object
+      properties:
+        agent_id:   { type: string, format: uuid }
+        agent_name: { type: string }
+        cost_usd:   { type: number }
+        tokens_in:  { type: integer }
+        tokens_out: { type: integer }
+        request_count: { type: integer }
+
+    TeamSpend:
+      type: object
+      properties:
+        team:       { type: string }
+        cost_usd:   { type: number }
+        tokens_in:  { type: integer }
+        tokens_out: { type: integer }
+
+    ModelSpend:
+      type: object
+      properties:
+        model:      { type: string }
+        cost_usd:   { type: number }
+        tokens_in:  { type: integer }
+        tokens_out: { type: integer }
+
+    SpendTimeSeries:
+      type: object
+      properties:
+        granularity: { type: string, enum: [hour, day, week] }
+        series:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp: { type: string, format: date-time }
+              cost_usd:  { type: number }
+              tokens:    { type: integer }
+
+    # ── Memory / Episodes ────────────────────────────────
+    Episode:
+      type: object
+      required: [id, agent_name, task, outcome, created_at]
+      properties:
+        id:          { type: string, format: uuid }
+        agent_id:    { type: string, format: uuid }
+        agent_name:  { type: string }
+        task:        { type: string }
+        steps:
+          type: array
+          items: { $ref: '#/components/schemas/EpisodeStep' }
+        outcome:     { type: string, enum: [success, blocked, failed, partial] }
+        token_total: { type: integer }
+        approved_by: { type: string, nullable: true }
+        similarity_score: { type: number, nullable: true, description: "Set when returned from similarity search" }
+        created_at:  { type: string, format: date-time }
+
+    EpisodeStep:
+      type: object
+      properties:
+        step_number: { type: integer }
+        tool:        { type: string }
+        action:      { type: string }
+        reasoning:   { type: string }
+        decision:    { type: string, enum: [allowed, denied, escalated] }
+        token_in:    { type: integer }
+        token_out:   { type: integer }
+
+    EpisodeSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:    { type: string, description: "Natural language description of the task to find similar episodes for" }
+        limit:    { type: integer, default: 10, maximum: 50 }
+        outcome:  { type: string, enum: [success, blocked, failed, partial], nullable: true }
+
+    # ── Alerts ───────────────────────────────────────────
+    AlertRule:
+      type: object
+      required: [id, name, condition, severity, enabled]
+      properties:
+        id:        { type: string, format: uuid }
+        name:      { type: string }
+        condition: { type: string, description: "Human-readable alert condition" }
+        severity:  { type: string, enum: [info, warning, high, critical] }
+        channels:  { type: array, items: { type: string, enum: [slack, email, teams, webhook] } }
+        enabled:   { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    Alert:
+      type: object
+      required: [id, rule_id, rule_name, severity, message, fired_at, status]
+      properties:
+        id:              { type: string, format: uuid }
+        rule_id:         { type: string, format: uuid }
+        rule_name:       { type: string }
+        severity:        { type: string, enum: [info, warning, high, critical] }
+        message:         { type: string }
+        metric_value:    { type: number, nullable: true }
+        context:         { type: object }
+        fired_at:        { type: string, format: date-time }
+        resolved_at:     { type: string, format: date-time, nullable: true }
+        status:          { type: string, enum: [open, acknowledged, resolved] }
+        acknowledged_by: { type: string, nullable: true }
+        acknowledged_at: { type: string, format: date-time, nullable: true }
+
+    # ── Alert rule write schemas ─────────────────────────
+
+    AlertRuleCreate:
+      type: object
+      required: [name, metric, condition, threshold, window, severity]
+      properties:
+        name:      { type: string }
+        metric:    { type: string, enum: [denied_actions_count, escalated_actions_count, scope_drift_count, new_endpoints_count, token_spend_usd, failed_delivery_count] }
+        condition: { type: string, enum: [gt], description: "Comparison operator. Only 'gt' supported." }
+        threshold: { type: number }
+        window:    { type: integer, enum: [5, 15, 60, 1440], description: "Evaluation window in minutes." }
+        severity:  { type: string, enum: [low, medium, high, critical] }
+        channels:  { type: array, items: { type: string, enum: [slack, email, teams, webhook] } }
+        enabled:   { type: boolean, default: true }
+
+    AlertRuleUpdate:
+      type: object
+      properties:
+        name:      { type: string }
+        metric:    { type: string, enum: [denied_actions_count, escalated_actions_count, scope_drift_count, new_endpoints_count, token_spend_usd, failed_delivery_count] }
+        condition: { type: string, enum: [gt] }
+        threshold: { type: number }
+        window:    { type: integer, enum: [5, 15, 60, 1440] }
+        severity:  { type: string, enum: [low, medium, high, critical] }
+        channels:  { type: array, items: { type: string, enum: [slack, email, teams, webhook] } }
+        enabled:   { type: boolean }
+
+    # ── Settings schemas ─────────────────────────────────
+
+    NotificationConfig:
+      type: object
+      description: >
+        Org-level notification delivery config matching the notification_config table.
+        `slack_webhook_url` is masked in GET responses — only the first 8 characters are returned.
+        Full webhook URL values must never be logged or returned in API responses.
+      properties:
+        slack_webhook_url: { type: string, description: "Masked in GET: only first 8 chars returned." }
+        slack_enabled:     { type: boolean }
+        email_smtp_host:   { type: string }
+        email_smtp_port:   { type: integer, example: 587 }
+        email_from:        { type: string, format: email }
+        email_enabled:     { type: boolean }
+    OrgSettings:
+      type: object
+      required: [id, name, slug, plan, timezone, default_risk_tier]
+      properties:
+        id:                { type: string, format: uuid }
+        name:              { type: string }
+        slug:              { type: string, description: "URL-safe org identifier. Read-only." }
+        plan:              { type: string, enum: [free, starter, enterprise] }
+        timezone:          { type: string, description: "IANA timezone string, e.g. America/New_York" }
+        default_risk_tier: { type: string, enum: [low, medium, high, critical] }
+
+    OrgSettingsUpdate:
+      type: object
+      properties:
+        name:              { type: string }
+        timezone:          { type: string }
+        default_risk_tier: { type: string, enum: [low, medium, high, critical] }
+
+    NotificationSettings:
+      type: object
+      properties:
+        slack:
+          type: object
+          properties:
+            configured: { type: boolean }
+            webhook_url_set: { type: boolean, description: "true if a webhook URL is stored; the URL itself is never returned" }
+        email:
+          type: object
+          properties:
+            configured: { type: boolean }
+            smtp_host:  { type: string, nullable: true }
+            smtp_port:  { type: integer, nullable: true }
+            from_address: { type: string, nullable: true }
+
+    NotificationSettingsUpdate:
+      type: object
+      properties:
+        slack_webhook_url: { type: string, description: "Set a new Slack webhook URL. Send empty string to clear." }
+
+    OrgUser:
+      type: object
+      required: [id, email, role, created_at]
+      properties:
+        id:         { type: string, format: uuid }
+        email:      { type: string, format: email }
+        name:       { type: string, nullable: true }
+        role:       { type: string, enum: [admin, operator, approver, viewer] }
+        last_login: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+
+    DiscoveredEndpoint:
+      type: object
+      required: [id, org_id, source_host, method, path, host, tls, first_seen, last_seen, hit_count, tags, created_at]
+      properties:
+        id:          { type: string, format: uuid }
+        org_id:      { type: string, format: uuid }
+        source_host: { type: string, description: "Hostname or IP of the reporting endpoint agent." }
+        method:      { type: string, enum: [GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS] }
+        path:        { type: string, example: /api/v2/completions }
+        host:        { type: string, description: "Destination host observed in network traffic." }
+        port:        { type: integer, nullable: true }
+        tls:         { type: boolean }
+        first_seen:  { type: string, format: date-time }
+        last_seen:   { type: string, format: date-time }
+        hit_count:   { type: integer, minimum: 1 }
+        tags:        { type: array, items: { type: string }, example: [llm, openai] }
+        raw_headers: { type: object, nullable: true, description: "Sampled headers — auth values must be stripped before submission." }
+        created_at:  { type: string, format: date-time }
+
+
+# ─────────────────────────────────────────────────────────
+# PATHS
+# ─────────────────────────────────────────────────────────
+paths:
+
+  # ── Auth ──────────────────────────────────────────────
+  /v1/auth/login:
+    post:
+      tags: [auth]
+      summary: Log in and obtain JWT tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /v1/auth/refresh:
+    post:
+      tags: [auth]
+      summary: Refresh access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200':
+          description: New access token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+
+  /v1/auth/api-keys:
+    get:
+      tags: [auth]
+      summary: List API keys for the org
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: API key list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ApiKey' } }
+    post:
+      tags: [auth]
+      summary: Create a new API key
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:   { type: string }
+                scopes: { type: array, items: { type: string } }
+      responses:
+        '201':
+          description: Created. Returns key value once only.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:  { type: string, description: "Full API key — shown once only" }
+                  meta: { $ref: '#/components/schemas/ApiKey' }
+
+  /v1/auth/api-keys/{keyId}:
+    delete:
+      tags: [auth]
+      summary: Revoke an API key
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: keyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Revoked }
+
+  # ── Ingest ────────────────────────────────────────────
+  /v1/ingest/batch:
+    post:
+      tags: [ingest]
+      summary: Submit a batch of endpoint reports from collector
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IngestBatch' }
+      responses:
+        '202':
+          description: Accepted for processing
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted: { type: integer }
+                  rejected: { type: integer }
+                  errors:   { type: array, items: { type: string } }
+
+  # ── Endpoints ─────────────────────────────────────────
+  /v1/endpoints:
+    get:
+      tags: [endpoints]
+      summary: List discovered endpoints
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 25, maximum: 100 }
+        - name: has_ai
+          in: query
+          schema: { type: boolean }
+          description: Filter to endpoints with AI activity
+        - name: has_local_model
+          in: query
+          schema: { type: boolean }
+        - name: search
+          in: query
+          schema: { type: string }
+          description: Search by hostname or username
+      responses:
+        '200':
+          description: Endpoint list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Endpoint' } }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+
+  /v1/endpoints/{endpointId}:
+    get:
+      tags: [endpoints]
+      summary: Get a single endpoint with latest report
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: endpointId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Endpoint detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Endpoint' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ── Gateway: Agents ────────────────────────────────────
+  /v1/gateway/agents:
+    get:
+      tags: [gateway-agents]
+      summary: List registered AI agents
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, suspended, revoked] }
+        - name: risk_tier
+          in: query
+          schema: { type: string, enum: [low, medium, high] }
+      responses:
+        '200':
+          description: Agent list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Agent' } }
+    post:
+      tags: [gateway-agents]
+      summary: Register a new AI agent
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentCreate' }
+      responses:
+        '201':
+          description: Agent registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agent' }
+
+  /v1/gateway/agents/{agentId}:
+    get:
+      tags: [gateway-agents]
+      summary: Get agent detail
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Agent detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agent' }
+    patch:
+      tags: [gateway-agents]
+      summary: Update agent registration
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentUpdate' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agent' }
+    delete:
+      tags: [gateway-agents]
+      summary: Revoke and delete agent registration
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Deleted }
+
+  # ── Gateway: AI Tokens (gateway-local) ─────────────────
+  /v1/gateway/tokens:
+    post:
+      tags: [gateway-tokens]
+      summary: Issue an AI token for an agent session
+      description: "Gateway-local endpoint. Not proxied through SaaS. AI agent calls this before connecting to tools."
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AITokenRequest' }
+      responses:
+        '200':
+          description: AI token issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AITokenResponse' }
+        '403':
+          description: Agent not registered or revoked
+
+  /v1/gateway/tokens/{token}/revoke:
+    post:
+      tags: [gateway-tokens]
+      summary: Revoke an active AI token
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Revoked and broadcast to all nodes }
+
+  # ── Gateway: Policies ─────────────────────────────────
+  /v1/gateway/policies:
+    get:
+      tags: [gateway-policies]
+      summary: List all policy rules in priority order
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, draft, disabled] }
+      responses:
+        '200':
+          description: Policy list (ordered by priority asc)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Policy' } }
+    post:
+      tags: [gateway-policies]
+      summary: Create a new policy rule
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PolicyCreate' }
+      responses:
+        '201':
+          description: Policy created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Policy' }
+
+  /v1/gateway/policies/{policyId}:
+    get:
+      tags: [gateway-policies]
+      summary: Get a policy rule
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: policyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Policy detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Policy' }
+    patch:
+      tags: [gateway-policies]
+      summary: Update a policy rule
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: policyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PolicyUpdate' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Policy' }
+    delete:
+      tags: [gateway-policies]
+      summary: Delete a policy rule
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: policyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Deleted }
+
+  /v1/gateway/policies/reorder:
+    post:
+      tags: [gateway-policies]
+      summary: Reorder policy priorities
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order]
+              properties:
+                order:
+                  type: array
+                  items: { type: string, format: uuid }
+                  description: "Policy IDs in desired priority order (first = priority 1)"
+      responses:
+        '200':
+          description: Reordered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Policy' } }
+
+  # ── Gateway: Tools ────────────────────────────────────
+  /v1/gateway/tools:
+    get:
+      tags: [gateway-tools]
+      summary: List connected tools
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Tool list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Tool' } }
+    post:
+      tags: [gateway-tools]
+      summary: Add a tool connection
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ToolCreate' }
+      responses:
+        '201':
+          description: Tool added
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tool' }
+
+  /v1/gateway/tools/{toolId}:
+    get:
+      tags: [gateway-tools]
+      summary: Get tool detail
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Tool detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tool' }
+    delete:
+      tags: [gateway-tools]
+      summary: Remove a tool connection
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Removed }
+
+  /v1/gateway/tools/{toolId}/test:
+    post:
+      tags: [gateway-tools]
+      summary: Test a tool connection
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Test result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:     { type: boolean }
+                  latency_ms:  { type: integer }
+                  error:       { type: string, nullable: true }
+
+  # ── Gateway: Nodes ────────────────────────────────────
+  /v1/gateway/nodes:
+    get:
+      tags: [gateway-nodes]
+      summary: List gateway cluster nodes
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Node list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Node' } }
+
+  /v1/gateway/nodes/{nodeId}:
+    get:
+      tags: [gateway-nodes]
+      summary: Get node detail
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: nodeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Node detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Node' }
+    delete:
+      tags: [gateway-nodes]
+      summary: Remove a node from the cluster
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: nodeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Node removed from mesh }
+
+  # ── MCP transport ────────────────────────────────────
+  /v1/mcp/sse:
+    get:
+      tags: [mcp]
+      summary: Open an MCP SSE session
+      description: >
+        Agent connects here to open an MCP session over Server-Sent Events.
+        The first event is type `endpoint` and contains the `sessionId` the agent
+        must supply on all subsequent `POST /v1/mcp/messages` calls.
+        Subsequent events are type `message` carrying JSON-RPC response objects.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: SSE stream established
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: >
+                  Newline-delimited SSE stream.
+                  First event — `event: endpoint` with `data` containing the sessionId.
+                  Subsequent events — `event: message` with `data` containing a JSON-RPC response object.
+        '401':
+          description: Missing or invalid AI token JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Token valid but not authorised for MCP access
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /v1/mcp/messages:
+    post:
+      tags: [mcp]
+      summary: Send a JSON-RPC message on an MCP session
+      description: >
+        Posts a JSON-RPC request to the gateway for an active MCP session.
+        Returns 202 immediately; the JSON-RPC response arrives asynchronously
+        on the agent's SSE stream.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: sessionId
+          in: query
+          required: true
+          schema: { type: string }
+          description: Session ID received in the `endpoint` SSE event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [method]
+              properties:
+                method:
+                  type: string
+                  description: JSON-RPC method name.
+                params:
+                  type: object
+                  description: JSON-RPC method parameters. Structure depends on the method.
+      responses:
+        '202':
+          description: Message accepted. Result will arrive on the SSE stream.
+        '400':
+          description: Malformed request or missing sessionId
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Missing or invalid AI token JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Token valid but not authorised for MCP access
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: sessionId not found or session expired
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ── Approvals ─────────────────────────────────────────
+  /v1/approvals:
+    get:
+      tags: [approvals]
+      summary: List approval requests
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, approved, denied, expired, cancelled] }
+        - name: risk_level
+          in: query
+          schema: { type: string, enum: [low, medium, high, critical] }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 25 }
+      responses:
+        '200':
+          description: Approval list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ApprovalRequest' } }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+
+  /v1/approvals/{approvalId}:
+    get:
+      tags: [approvals]
+      summary: Get approval request detail
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: approvalId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Approval detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalRequest' }
+
+  /v1/approvals/{approvalId}/decide:
+    post:
+      tags: [approvals]
+      summary: Approve or deny an approval request
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: approvalId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalDecision' }
+      responses:
+        '200':
+          description: Decision recorded and gateway notified
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalRequest' }
+        '409':
+          description: Already decided or expired
+
+  # ── Audit ─────────────────────────────────────────────
+  /v1/audit:
+    get:
+      tags: [audit]
+      summary: Query audit log
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: agent_name
+          in: query
+          schema: { type: string }
+        - name: tool_name
+          in: query
+          schema: { type: string }
+        - name: decision
+          in: query
+          schema: { type: string, enum: [allowed, denied, escalated] }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 50, maximum: 500 }
+      responses:
+        '200':
+          description: Audit entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/AuditEntry' } }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+
+  /v1/audit/export:
+    get:
+      tags: [audit]
+      summary: Export audit log as CSV
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+          required: true
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+          required: true
+      responses:
+        '200':
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string }
+
+  # ── FinOps ────────────────────────────────────────────
+  /v1/finops/summary:
+    get:
+      tags: [finops]
+      summary: Get token spend summary for a period
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Spend summary
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenSpendSummary' }
+
+  /v1/finops/timeseries:
+    get:
+      tags: [finops]
+      summary: Get spend time series
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: granularity
+          in: query
+          schema: { type: string, enum: [hour, day, week], default: day }
+        - name: agent_id
+          in: query
+          schema: { type: string, format: uuid }
+
+          description: Filter to a single agent
+      responses:
+        '200':
+          description: Time series data
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpendTimeSeries' }
+
+  # ── Memory ────────────────────────────────────────────
+  /v1/memory/episodes:
+    get:
+      tags: [memory]
+      summary: List episodes
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: agent_name
+          in: query
+          schema: { type: string }
+        - name: outcome
+          in: query
+          schema: { type: string, enum: [success, blocked, failed, partial] }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 25 }
+      responses:
+        '200':
+          description: Episode list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Episode' } }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+
+  /v1/memory/episodes/search:
+    post:
+      tags: [memory]
+      summary: Semantic search for similar episodes
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EpisodeSearchRequest' }
+      responses:
+        '200':
+          description: Similar episodes ranked by similarity
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Episode' } }
+
+  /v1/memory/episodes/{episodeId}:
+    get:
+      tags: [memory]
+      summary: Get episode detail including all steps
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: episodeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Episode detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Episode' }
+
+  # ── Alerts ────────────────────────────────────────────
+  /v1/alerts/rules:
+    get:
+      tags: [alerts]
+      summary: List alert rules
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Alert rules
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/AlertRule' } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    post:
+      tags: [alerts]
+      summary: Create an alert rule
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlertRuleCreate' }
+      responses:
+        '201':
+          description: Alert rule created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertRule' }
+        '400': { description: Invalid request body, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Rule name already exists, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/alerts/rules/{id}:
+    put:
+      tags: [alerts]
+      summary: Update an alert rule
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlertRuleUpdate' }
+      responses:
+        '200':
+          description: Updated alert rule
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertRule' }
+        '400': { description: Invalid request body, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Rule not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      tags: [alerts]
+      summary: Delete an alert rule
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Deleted }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Rule not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/alerts/rules/{id}/test:
+    post:
+      tags: [alerts]
+      summary: Dry-run evaluate an alert rule against current data
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Dry-run result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [would_fire, metric_value]
+                properties:
+                  would_fire:   { type: boolean }
+                  metric_value: { type: number }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Rule not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/alerts:
+    get:
+      tags: [alerts]
+      summary: List fired alerts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: severity
+          in: query
+          schema: { type: string, enum: [info, warning, high, critical] }
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, acknowledged, resolved] }
+          description: Filter by alert status.
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 25, maximum: 100 }
+      responses:
+        '200':
+          description: Alert list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Alert' } }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/alerts/{id}/acknowledge:
+    post:
+      tags: [alerts]
+      summary: Acknowledge a fired alert
+      description: Sets status=acknowledged and records acknowledged_by from the JWT subject.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Updated alert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Alert' }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Alert not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Alert already resolved, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/alerts/{id}/resolve:
+    post:
+      tags: [alerts]
+      summary: Resolve a fired alert
+      description: Sets status=resolved and resolved_at to now.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Updated alert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Alert' }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Alert not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Alert already resolved, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Settings: Org ─────────────────────────────────────
+  /v1/settings/org:
+    get:
+      tags: [settings]
+      summary: Get organisation settings
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Org settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrgSettings' }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    put:
+      tags: [settings]
+      summary: Update organisation settings
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrgSettingsUpdate' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrgSettings' }
+        '400': { description: Invalid request body, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Settings: Notifications ────────────────────────────
+  /v1/settings/notifications:
+    get:
+      tags: [settings]
+      summary: Get notification configuration
+      description: Returns notification config. slack_webhook_url is masked — only the first 8 characters are returned.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Notification config
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationConfig' }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    put:
+      tags: [settings]
+      summary: Update notification configuration (merge-patch)
+      description: Merges supplied fields into the existing config. Omitted fields are unchanged.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationConfig' }
+      responses:
+        '200':
+          description: Updated notification config (webhook URL masked)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationConfig' }
+        '400': { description: Invalid request body, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/settings/notifications/test:
+    post:
+      tags: [settings]
+      summary: Send a test notification
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel]
+              properties:
+                channel:   { type: string, enum: [slack, email] }
+                recipient: { type: string, description: "Email address for channel=email. Ignored for channel=slack." }
+      responses:
+        '200':
+          description: Test notification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  error:   { type: string, nullable: true }
+        '400': { description: Invalid request body, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Users ─────────────────────────────────────────────
+  /v1/users:
+    get:
+      tags: [users]
+      summary: List users in the organisation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 25, maximum: 100 }
+        - name: include_deleted
+          in: query
+          schema: { type: boolean, default: false }
+          description: Include soft-deleted users.
+      responses:
+        '200':
+          description: Paginated user list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/OrgUser' } }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/users/invite:
+    post:
+      tags: [users]
+      summary: Invite a user to the organisation
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email }
+                role:  { type: string, enum: [admin, operator, approver, viewer] }
+      responses:
+        '201':
+          description: Invite created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invite_link]
+                properties:
+                  invite_link: { type: string, description: "Single-use invitation URL. Expires after 72 hours." }
+        '400': { description: Invalid request body, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: User already exists, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/users/{userId}/role:
+    put:
+      tags: [users]
+      summary: Change a user's role
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { type: string, enum: [admin, operator, approver, viewer] }
+      responses:
+        '200':
+          description: Role updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrgUser' }
+        '400': { description: Invalid role, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: User not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/users/{userId}:
+    delete:
+      tags: [users]
+      summary: Soft-delete a user
+      description: Sets deleted_at on the user record. The user can no longer log in but their audit history is preserved.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: User soft-deleted }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: User not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Discover ──────────────────────────────────────────
+  /v1/discover/endpoints:
+    get:
+      tags: [discover]
+      summary: List discovered endpoints
+      description: Returns all network-observed API endpoints for the authenticated org, written by the collector forwarder via POST /v1/reports.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 25, maximum: 100 }
+        - name: host
+          in: query
+          schema: { type: string }
+          description: Filter by destination host
+        - name: source_host
+          in: query
+          schema: { type: string }
+          description: Filter by reporting agent hostname
+        - name: method
+          in: query
+          schema: { type: string, enum: [GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS] }
+        - name: tag
+          in: query
+          schema: { type: string }
+          description: Filter by tag (e.g. llm, openai)
+      responses:
+        '200':
+          description: Paginated list of discovered endpoints
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/DiscoveredEndpoint' }
+                  meta:
+                    type: object
+                    required: [total, page, per_page]
+                    properties:
+                      total:    { type: integer }
+                      page:     { type: integer }
+                      per_page: { type: integer }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/discover/endpoints/{endpointId}:
+    get:
+      tags: [discover]
+      summary: Get a discovered endpoint
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: endpointId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Discovered endpoint record
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DiscoveredEndpoint' }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Endpoint not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Collector Ingest ───────────────────────────────────
+  /v1/reports:
+    post:
+      tags: [ingest]
+      summary: Submit a collector report (service API key)
+      description: |
+        Internal endpoint used by the on-prem collector forwarder to submit
+        network-observed endpoint data. Requires a service API key in the
+        X-Service-Key header — not a user JWT. Upserts rows in discovered_endpoints
+        keyed on (org_id, source_host, method, host, path).
+      security:
+        - ServiceKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_host, endpoints]
+              properties:
+                source_host:
+                  type: string
+                  description: Hostname or IP of the reporting agent
+                endpoints:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [method, path, host]
+                    properties:
+                      method:      { type: string, enum: [GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS] }
+                      path:        { type: string, example: /api/v2/completions }
+                      host:        { type: string }
+                      port:        { type: integer }
+                      tls:         { type: boolean, default: false }
+                      hit_count:   { type: integer, minimum: 1, default: 1 }
+                      tags:        { type: array, items: { type: string } }
+                      raw_headers: { type: object, description: "Sampled headers — strip auth values before sending." }
+      responses:
+        '200':
+          description: Report accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [upserted, errors]
+                properties:
+                  upserted: { type: integer, description: "Rows created or updated" }
+                  errors:   { type: array, items: { type: string } }
+        '400': { description: Invalid request body, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Missing or invalid X-Service-Key, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Service key not authorised for this org, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Conflict, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }

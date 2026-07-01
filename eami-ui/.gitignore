@@ -1,0 +1,16 @@
+node_modules
+dist
+.env.local
+.env.*.local
+
+# Generated API client — regenerate with: npm run generate-client
+src/api/schema.ts
+
+# Editor
+.vscode
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

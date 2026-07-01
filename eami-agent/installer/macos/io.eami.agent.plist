@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd daemon plist for eami-agent
+  Location: /Library/LaunchDaemons/io.eami.agent.plist
+  Owner:    root:wheel  (mode 0644)
+
+  To load manually:   sudo launchctl load /Library/LaunchDaemons/io.eami.agent.plist
+  To unload manually: sudo launchctl unload /Library/LaunchDaemons/io.eami.agent.plist
+  To check status:    sudo launchctl list io.eami.agent
+-->
+<plist version="1.0">
+<dict>
+    <!-- Unique reverse-DNS label — also used as the service identifier -->
+    <key>Label</key>
+    <string>io.eami.agent</string>
+
+    <!-- Binary entrypoint -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/eami-agent</string>
+    </array>
+
+    <!-- Start automatically when the plist is loaded (boot / launchctl load) -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart the process if it exits for any reason -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Throttle restarts: do not restart more than once every 10 seconds -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Log stdout and stderr to a single file -->
+    <key>StandardOutPath</key>
+    <string>/var/log/eami-agent.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/eami-agent.log</string>
+
+    <!--
+      The agent reads its config from /etc/eami/agent.yaml.
+      Written by the pkg postinstall script using COLLECTOR_URL and
+      COLLECTOR_API_KEY values supplied at install time.
+    -->
+</dict>
+</plist>

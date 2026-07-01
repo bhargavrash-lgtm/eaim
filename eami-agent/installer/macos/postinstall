@@ -1,0 +1,55 @@
+#!/bin/bash
+# postinstall — runs as root after pkg payload is extracted
+#
+# This script is invoked by macOS Installer after the files have been placed.
+# It is also called by MDM systems (Jamf Pro, Mosyle, Kandji) as a postinstall
+# action. When invoked by Jamf, script parameters $4 and $5 carry the
+# COLLECTOR_URL and COLLECTOR_API_KEY values respectively.
+#
+# Config resolution order:
+#   1. Jamf-style positional args: $4 = COLLECTOR_URL, $5 = COLLECTOR_API_KEY
+#   2. Environment variables:      EAMI_COLLECTOR_URL, EAMI_COLLECTOR_API_KEY
+#   3. Fallback placeholder values (operator must edit /etc/eami/agent.yaml)
+
+set -e
+
+# ── Resolve config values ────────────────────────────────────────────────────
+# $4/$5 are Jamf Pro script parameter conventions (parameters 4 and 5 in
+# the Jamf policy → Scripts → Script Parameters fields).
+COLLECTOR_URL="${4:-${EAMI_COLLECTOR_URL:-http://localhost:8888}}"
+COLLECTOR_API_KEY="${5:-${EAMI_COLLECTOR_API_KEY:-REPLACE_WITH_YOUR_API_KEY}}"
+
+# ── Write agent config ────────────────────────────────────────────────────────
+mkdir -p /etc/eami
+chmod 755 /etc/eami
+
+cat > /etc/eami/agent.yaml <<EOF
+agent:
+  id: "$(hostname)"
+  interval_secs: 300
+  log_level: info
+
+collector:
+  url: "${COLLECTOR_URL}"
+  api_key: "${COLLECTOR_API_KEY}"
+  timeout_seconds: 30
+
+detection:
+  model_file_scan_paths: []
+  model_file_size_mb: 100
+EOF
+
+chmod 600 /etc/eami/agent.yaml
+echo "eami-agent: config written to /etc/eami/agent.yaml"
+
+# ── Load launchd daemon ───────────────────────────────────────────────────────
+PLIST="/Library/LaunchDaemons/io.eami.agent.plist"
+chown root:wheel "$PLIST"
+chmod 644 "$PLIST"
+
+# Unload first if already loaded (handles reinstall / upgrade)
+launchctl unload "$PLIST" 2>/dev/null || true
+launchctl load "$PLIST"
+echo "eami-agent: launchd service loaded — agent is running"
+
+exit 0

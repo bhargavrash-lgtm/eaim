@@ -1,0 +1,358 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs for the same branch/PR on new pushes
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ════════════════════════════════════════════════════════════════════════
+  # Docker images — one job per service (matrix)
+  # Builds on every push to main and on every tag.
+  # Images are pushed to GHCR only on main/tags (not on PRs).
+  # ════════════════════════════════════════════════════════════════════════
+  build-images:
+    name: Docker — ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each service declares its own build context and Dockerfile path.
+        # eami-gateway uses context: . (repo root) because go.work and the
+        # local eami-policy dependency must be accessible during the Docker build.
+        # All other services use their own subdirectory as context.
+        include:
+          - service: eami-api
+            context: ./eami-api
+            dockerfile: eami-api/Dockerfile
+          - service: eami-gateway
+            context: .
+            dockerfile: eami-gateway/Dockerfile
+          - service: eami-collector
+            context: ./eami-collector
+            dockerfile: eami-collector/Dockerfile
+          - service: eami-ui
+            context: ./eami-ui
+            dockerfile: eami-ui/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          SHA_TAG="ghcr.io/eami/${{ matrix.service }}:${{ github.sha }}"
+          LATEST_TAG="ghcr.io/eami/${{ matrix.service }}:latest"
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+            VERSION_TAG="ghcr.io/eami/${{ matrix.service }}:${VERSION}"
+            echo "tags=${SHA_TAG},${VERSION_TAG},${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ════════════════════════════════════════════════════════════════════════
+  # Agent binary builds — one job per platform/arch
+  # All run on ubuntu-latest (cross-compilation; darwin/arm64 needs Go too)
+  # Each uploads a short-lived artifact consumed by the packaging jobs below.
+  # ════════════════════════════════════════════════════════════════════════
+
+  # ── Windows amd64 ──────────────────────────────────────────────────────
+  build-agent-binary:
+    name: Go — eami-agent (windows/amd64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: eami-agent/go.sum
+
+      - name: Cross-compile Windows agent
+        run: |
+          cd eami-agent
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+            go build \
+              -ldflags="-w -s -X main.Version=${{ github.ref_name }}" \
+              -o eami-agent-windows-amd64.exe \
+              ./cmd/agent/
+
+      - name: Run go vet
+        run: cd eami-agent && go vet ./...
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eami-agent-windows-binary
+          path: eami-agent/eami-agent-windows-amd64.exe
+          retention-days: 1
+
+  # ── Linux amd64 ────────────────────────────────────────────────────────
+  build-agent-linux:
+    name: Go — eami-agent (linux/amd64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: eami-agent/go.sum
+
+      - name: Build Linux agent
+        run: |
+          cd eami-agent
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+            go build \
+              -ldflags="-w -s -X main.Version=${{ github.ref_name }}" \
+              -o eami-agent-linux-amd64 \
+              ./cmd/agent/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eami-agent-linux-binary
+          path: eami-agent/eami-agent-linux-amd64
+          retention-days: 1
+
+  # ── macOS amd64 + arm64 (matrix) ───────────────────────────────────────
+  build-agent-macos:
+    name: Go — eami-agent (darwin/${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: eami-agent/go.sum
+
+      - name: Cross-compile macOS agent (${{ matrix.arch }})
+        run: |
+          cd eami-agent
+          GOOS=darwin GOARCH=${{ matrix.arch }} CGO_ENABLED=0 \
+            go build \
+              -ldflags="-w -s -X main.Version=${{ github.ref_name }}" \
+              -o eami-agent-darwin-${{ matrix.arch }} \
+              ./cmd/agent/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eami-agent-macos-${{ matrix.arch }}-binary
+          path: eami-agent/eami-agent-darwin-${{ matrix.arch }}
+          retention-days: 1
+
+  # ════════════════════════════════════════════════════════════════════════
+  # Windows MSI — built on windows-latest using WiX Toolset v4
+  # ════════════════════════════════════════════════════════════════════════
+  build-msi:
+    name: MSI — eami-agent installer
+    runs-on: windows-latest
+    needs: build-agent-binary
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download agent binary
+        uses: actions/download-artifact@v4
+        with:
+          name: eami-agent-windows-binary
+          path: eami-agent/
+
+      - name: Install WiX Toolset v4
+        run: dotnet tool install --global wix
+        shell: pwsh
+
+      - name: Compute version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            MSI_VERSION="${{ github.ref_name }}"
+            MSI_VERSION="${MSI_VERSION#v}"
+            FILE_VERSION="${MSI_VERSION}"
+          else
+            MSI_VERSION="0.0.0"
+            FILE_VERSION="0.0.0-${{ github.sha }}"
+          fi
+          echo "msi_version=${MSI_VERSION}"   >> "$GITHUB_OUTPUT"
+          echo "file_version=${FILE_VERSION}"  >> "$GITHUB_OUTPUT"
+
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          .\eami-agent\installer\build.ps1 `
+            -Version     "${{ steps.version.outputs.file_version }}" `
+            -BinaryPath  "eami-agent\eami-agent-windows-amd64.exe" `
+            -OutputDir   "eami-agent\installer\dist" `
+            -SkipWixInstall
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eami-agent-msi
+          path: eami-agent/installer/dist/*.msi
+          retention-days: 30
+
+      - name: Attach MSI to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: eami-agent/installer/dist/*.msi
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ════════════════════════════════════════════════════════════════════════
+  # macOS .pkg — macos-latest, pkgbuild (Xcode CLT)
+  # One pkg per arch: amd64 (Intel) and arm64 (Apple Silicon).
+  # ════════════════════════════════════════════════════════════════════════
+  build-pkg:
+    name: pkg — eami-agent (darwin/${{ matrix.arch }})
+    runs-on: macos-latest
+    needs: build-agent-macos
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download macOS binary (${{ matrix.arch }})
+        uses: actions/download-artifact@v4
+        with:
+          name: eami-agent-macos-${{ matrix.arch }}-binary
+          path: eami-agent/
+
+      - name: Make binary executable
+        run: chmod +x eami-agent/eami-agent-darwin-${{ matrix.arch }}
+
+      - name: Compute version
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION="0.0.0-${{ github.sha }}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build .pkg
+        run: |
+          bash eami-agent/installer/macos/build.sh \
+            "${{ steps.version.outputs.version }}" \
+            "${{ matrix.arch }}" \
+            "eami-agent/eami-agent-darwin-${{ matrix.arch }}" \
+            "eami-agent/installer/dist"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eami-agent-pkg-${{ matrix.arch }}
+          path: eami-agent/installer/dist/*.pkg
+          retention-days: 30
+
+      - name: Attach pkg to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: eami-agent/installer/dist/*.pkg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ════════════════════════════════════════════════════════════════════════
+  # Linux .deb + .rpm — ubuntu-latest, nfpm
+  # ════════════════════════════════════════════════════════════════════════
+  build-linux-packages:
+    name: deb + rpm — eami-agent (linux/amd64)
+    runs-on: ubuntu-latest
+    needs: build-agent-linux
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: eami-agent-linux-binary
+          path: eami-agent/installer/linux/
+
+      - name: Make binary executable
+        run: chmod +x eami-agent/installer/linux/eami-agent-linux-amd64
+
+      - name: Install nfpm
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Compute version
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION="0.0.0~${{ github.sha }}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build .deb
+        working-directory: eami-agent/installer/linux
+        run: |
+          mkdir -p dist
+          VERSION="${{ steps.version.outputs.version }}" \
+            nfpm package --config nfpm.yaml --packager deb --target dist/
+
+      - name: Build .rpm
+        working-directory: eami-agent/installer/linux
+        run: |
+          VERSION="${{ steps.version.outputs.version }}" \
+            nfpm package --config nfpm.yaml --packager rpm --target dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eami-agent-linux-packages
+          path: |
+            eami-agent/installer/linux/dist/*.deb
+            eami-agent/installer/linux/dist/*.rpm
+          retention-days: 30
+
+      - name: Attach packages to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            eami-agent/installer/linux/dist/*.deb
+            eami-agent/installer/linux/dist/*.rpm
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

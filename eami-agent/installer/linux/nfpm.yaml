@@ -1,0 +1,68 @@
+# nfpm.yaml — EAMI Agent Linux package configuration
+# Produces .deb (Debian/Ubuntu) and .rpm (RHEL/Rocky/Fedora) from this single file.
+#
+# Tool: nfpm v2  https://nfpm.goreleaser.com
+# Install: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+#
+# Build .deb:
+#   VERSION=1.0.0 nfpm package --config nfpm.yaml --packager deb --target dist/
+#
+# Build .rpm:
+#   VERSION=1.0.0 nfpm package --config nfpm.yaml --packager rpm --target dist/
+#
+# VERSION is read from the environment variable set before running nfpm.
+# The binary eami-agent-linux-amd64 must exist in the same directory as this file.
+
+name: eami-agent
+arch: amd64
+platform: linux
+version: "${VERSION}"
+version_schema: semver
+
+maintainer: "EAMI <support@eami.io>"
+description: |
+  EAMI AI asset discovery endpoint agent.
+  Monitors AI applications, local models, MCP servers, GPU, Python/Node environments,
+  and cloud CLI tools on this endpoint. Reports to the on-prem EAMI collector.
+homepage: "https://eami.io"
+license: Proprietary
+
+# RPM-specific metadata
+rpm:
+  summary: "EAMI AI asset discovery endpoint agent"
+  group: "System/Monitoring"
+
+# deb-specific metadata
+deb:
+  lintian-overrides:
+    # Agent runs as root intentionally (see eami-agent.service comments)
+    - "setuid-binary"
+
+contents:
+  # Agent binary
+  - src: ./eami-agent-linux-amd64
+    dst: /usr/bin/eami-agent
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
+  # systemd service unit
+  - src: ./eami-agent.service
+    dst: /lib/systemd/system/eami-agent.service
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+  # Config directory (empty; populated by postinstall script)
+  - dst: /etc/eami
+    type: dir
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
+scripts:
+  postinstall: ./postinstall.sh
+  preremove: ./preremove.sh

@@ -1,0 +1,146 @@
+# EAMI — Local Development Stack
+# Usage:
+#   1. cp .env.example .env  (edit passwords/keys as needed)
+#   2. docker-compose up
+#
+# On first start, schema/schema.sql is applied automatically by the
+# postgres init script. All services will be healthy within ~60 seconds.
+#
+# Ports exposed:
+#   5432  — PostgreSQL
+#   8081  — eami-api       (stub until BE-Policy/BE-Gateway implement it)
+#   8080  — eami-gateway   (stub until BE-Gateway implements it)
+#   3000  — eami-gateway MCP/SSE port
+#   8888  — eami-collector
+#   5173  — eami-ui        (stub until FE-Dashboard implements it)
+
+version: '3.9'
+
+services:
+  # ──────────────────────────────────────────────────────────────
+  # PostgreSQL with pgvector + TimescaleDB
+  # timescale/timescaledb-ha includes both extensions out of the box
+  # ──────────────────────────────────────────────────────────────
+  postgres:
+    image: timescale/timescaledb-ha:pg16
+    environment:
+      POSTGRES_DB: eami
+      POSTGRES_USER: eami_app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+    volumes:
+      - postgres_data:/home/postgres/pgdata/data
+      - ./schema/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "eami_app", "-d", "eami"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  # ──────────────────────────────────────────────────────────────
+  # eami-collector — on-prem data collector
+  # Build context: ./eami-collector (owned by BE-Collector)
+  # Stub Dockerfile in place until real service code lands.
+  # ──────────────────────────────────────────────────────────────
+  eami-collector:
+    build:
+      context: ./eami-collector
+      dockerfile: Dockerfile
+    environment:
+      COLLECTOR_LISTEN_PORT: "8888"
+      COLLECTOR_SAAS_URL: http://eami-api:8081
+      COLLECTOR_API_KEY: ${COLLECTOR_API_KEY}
+      COLLECTOR_BUFFER_DB_PATH: /app/data/buffer.db
+    volumes:
+      - collector_data:/app/data
+    ports:
+      - "8888:8888"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────
+  # eami-gateway — MCP control plane
+  # Build context: repo root (go.work + eami-policy required)
+  # ──────────────────────────────────────────────────────────────
+  eami-gateway:
+    build:
+      context: .
+      dockerfile: eami-gateway/Dockerfile
+    environment:
+      GATEWAY_LISTEN_API_PORT: "8080"
+      GATEWAY_LISTEN_MCP_SSE_PORT: "3000"
+      GATEWAY_DB_HOST: postgres
+      GATEWAY_DB_NAME: eami
+      GATEWAY_DB_USER: eami_app
+      GATEWAY_DB_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      GATEWAY_JWT_KEY_PATH: /certs/gateway.key
+      GATEWAY_APPROVAL_SLACK_WEBHOOK: ${GATEWAY_APPROVAL_SLACK_WEBHOOK:-}
+      GATEWAY_UI_BASE_URL: ${GATEWAY_UI_BASE_URL:-http://localhost:5173}
+      GATEWAY_API_SERVICE_KEY: ${GATEWAY_API_SERVICE_KEY}
+      GATEWAY_PPROF_ADDR: ${GATEWAY_PPROF_ADDR:-}
+    volumes:
+      - gateway_certs:/certs
+    ports:
+      - "8080:8080"
+      - "3000:3000"
+      - "7946:7946"
+      - "6060:6060"  # pprof — only active when GATEWAY_PPROF_ADDR=:6060
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────
+  # eami-api — SaaS REST API backend
+  # Build context: ./eami-api (owned by BE-Policy + Architect-EAMI)
+  # Stub in place until eami-api service code lands.
+  # ──────────────────────────────────────────────────────────────
+  eami-api:
+    build:
+      context: ./eami-api
+      dockerfile: Dockerfile
+    environment:
+      API_LISTEN_PORT: "8081"
+      API_DB_HOST: postgres
+      API_DB_NAME: eami
+      API_DB_USER: eami_app
+      API_DB_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      API_JWT_SECRET: ${API_JWT_SECRET:-dev-jwt-secret-change-in-prod}
+      API_SERVICE_KEY: ${API_SERVICE_KEY}
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────
+  # eami-ui — React web application
+  # Build context: ./eami-ui (owned by FE-Dashboard)
+  # Development target uses Vite dev server with hot reload.
+  # ──────────────────────────────────────────────────────────────
+  eami-ui:
+    build:
+      context: ./eami-ui
+      dockerfile: Dockerfile
+      target: development
+    environment:
+      # Vite proxy runs inside Docker — must use service names, not host IPs
+      VITE_API_URL: http://eami-api:8081
+      VITE_GATEWAY_URL: http://eami-gateway:8080
+    volumes:
+      - ./eami-ui/src:/app/src   # hot reload in dev
+    ports:
+      - "5173:5173"
+    depends_on:
+      - eami-api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  collector_data:
+  gateway_certs:

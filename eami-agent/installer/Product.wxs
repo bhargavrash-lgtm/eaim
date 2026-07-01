@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  EAMI Agent - WiX v4 Installer Source
+  ======================================
+  Toolchain : WiX Toolset v4  (https://wixtoolset.org)
+  Target    : Windows x64 (AMD64)
+
+  BUILD LOCALLY
+  =============
+  1. Install WiX v4 (requires .NET SDK 6+):
+       dotnet tool install -g wix
+
+  2. Run the PowerShell build script from the repo root:
+       .\eami-agent\installer\build.ps1 -Version 1.0.0
+
+     Or call wix directly:
+       wix build eami-agent\installer\Product.wxs
+           -arch x64
+           -d Version=1.0.0
+           -d BinaryPath=eami-agent\eami-agent-windows-amd64.exe
+           -o eami-agent-1.0.0-windows-amd64.msi
+
+  SILENT INSTALL (SCCM / Intune / manual)
+  ========================================
+  msiexec /i eami-agent-1.0.0-windows-amd64.msi /qn
+      COLLECTOR_URL=https://collector.corp.internal:8888
+      COLLECTOR_API_KEY=eami_k_your_key_here
+
+  UNINSTALL
+  =========
+  msiexec /x eami-agent-1.0.0-windows-amd64.msi /qn
+
+  GROUP POLICY
+  ============
+  See installer/README.md for full GP and Intune deployment instructions.
+
+  REGISTRY KEYS WRITTEN
+  =====================
+  HKLM\SOFTWARE\EAMI\Agent\
+    CollectorUrl       (REG_SZ)    value of COLLECTOR_URL property
+    CollectorApiKey    (REG_SZ)    value of COLLECTOR_API_KEY property
+    InstallDir         (REG_SZ)    resolved install directory
+    Version            (REG_SZ)    MSI version string
+    IntervalSeconds    (REG_DWORD) scan interval (default 300)
+
+  WINDOWS SERVICE
+  ===============
+  Name        : EAMIAgent
+  Display     : EAMI Endpoint Agent
+  Start type  : Automatic (starts on boot)
+  Account     : LocalSystem
+  Lifecycle   : started on install, stopped on upgrade/uninstall, deleted on uninstall
+
+  NOTE (ADR-014): The agent binary reads COLLECTOR_URL and COLLECTOR_API_KEY from the
+  registry keys above. This requires the registry-fallback feature in
+  eami-agent/internal/config/ (owned by BE-Collector). Until that is implemented,
+  the binary must be started manually or the YAML config must be edited separately.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Package
+    Name="EAMI Agent"
+    Manufacturer="EAMI"
+    Version="$(var.Version)"
+    UpgradeCode="9E8F7D6C-5B4A-3210-FEDC-BA9876543210"
+    Scope="perMachine">
+
+    <SummaryInformation
+      Description="EAMI AI asset discovery endpoint agent"
+      Keywords="EAMI;AI;monitoring;agent;endpoint" />
+
+    <!--
+      MajorUpgrade: installing a newer version automatically removes the old one.
+      AllowSameVersionUpgrades set to no - use /x then /i to reinstall same version.
+    -->
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of EAMI Agent is already installed. Uninstall it first." />
+
+    <!-- Embed all files in a single CAB inside the MSI -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <!--
+      Public install-time properties.
+      Passed via: msiexec /i eami-agent.msi COLLECTOR_URL=... COLLECTOR_API_KEY=...
+      Both values are written to HKLM\SOFTWARE\EAMI\Agent on install.
+    -->
+    <Property Id="COLLECTOR_URL" Value="http://localhost:8888" />
+    <Property Id="COLLECTOR_API_KEY" Value="" />
+
+    <!--
+      SecureCustomProperties: ensures COLLECTOR_URL and COLLECTOR_API_KEY are
+      forwarded from the client-side (user) session to the server-side (elevated)
+      installation session. Required for silent installs via SCCM or Intune where
+      properties are injected by the deployment tool.
+    -->
+    <Property Id="SecureCustomProperties" Value="COLLECTOR_URL;COLLECTOR_API_KEY" />
+
+    <!--
+      Directory layout: C:\Program Files\EAMI\Agent\
+    -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="EAMI_DIR" Name="EAMI">
+        <Directory Id="INSTALLFOLDER" Name="Agent" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- Single installable feature containing all components -->
+    <Feature Id="ProductFeature" Title="EAMI Agent" Level="1">
+      <ComponentRef Id="AgentBinary" />
+      <ComponentRef Id="AgentConfig" />
+    </Feature>
+
+    <!--
+      Component: agent binary + Windows Service.
+      KeyPath: eami-agent.exe (presence of this file = component installed).
+    -->
+    <DirectoryRef Id="INSTALLFOLDER">
+
+      <Component Id="AgentBinary" Guid="*">
+        <File
+          Id="AgentExe"
+          Source="$(var.BinaryPath)"
+          Name="eami-agent.exe"
+          KeyPath="yes"
+          Checksum="yes" />
+
+        <!--
+          Windows Service: EAMIAgent
+          Type="ownProcess"    runs as its own process (not shared svchost)
+          Start="auto"         Automatic - survives reboots
+          ErrorControl="normal" SCM logs the failure but continues boot
+          Account="LocalSystem" sufficient for registry reads and local file access
+        -->
+        <ServiceInstall
+          Id="EAMIAgentSvc"
+          Name="EAMIAgent"
+          DisplayName="EAMI Endpoint Agent"
+          Description="EAMI AI asset discovery agent - monitors AI apps, models, and MCP servers on this endpoint and reports to the on-prem collector."
+          Type="ownProcess"
+          Start="auto"
+          ErrorControl="normal"
+          Account="LocalSystem"
+          Interactive="no" />
+
+        <!--
+          Service control actions tied to MSI install sequences:
+          Start="install"    start service after InstallServices action
+          Stop="both"        stop before upgrade (reinstall) and before uninstall
+          Remove="uninstall" delete service entry on uninstall
+          Wait="yes"         block until SCM confirms the action completed
+        -->
+        <ServiceControl
+          Id="EAMIAgentSvcCtrl"
+          Name="EAMIAgent"
+          Start="install"
+          Stop="both"
+          Remove="uninstall"
+          Wait="yes" />
+
+      </Component>
+
+      <!--
+        Component: registry configuration.
+        Writes COLLECTOR_URL, COLLECTOR_API_KEY, and metadata to
+        HKLM\SOFTWARE\EAMI\Agent at install time.
+        On uninstall, WiX removes all values and the key itself.
+
+        KeyPath: CollectorUrl registry value.
+        If this value exists then this component is considered installed.
+
+        [COLLECTOR_URL] and [COLLECTOR_API_KEY] are MSI property references.
+        At install time these resolve to the values passed on the command line
+        (or the property defaults if not provided).
+      -->
+      <Component Id="AgentConfig" Guid="*">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\EAMI\Agent">
+
+          <RegistryValue
+            Name="CollectorUrl"
+            Value="[COLLECTOR_URL]"
+            Type="string"
+            KeyPath="yes" />
+
+          <RegistryValue
+            Name="CollectorApiKey"
+            Value="[COLLECTOR_API_KEY]"
+            Type="string" />
+
+          <!-- Absolute install path - useful for diagnostic scripts -->
+          <RegistryValue
+            Name="InstallDir"
+            Value="[INSTALLFOLDER]"
+            Type="string" />
+
+          <!-- MSI version - shown in Add/Remove Programs and useful for auditing -->
+          <RegistryValue
+            Name="Version"
+            Value="$(var.Version)"
+            Type="string" />
+
+          <!-- Scan interval in seconds (default 300 = every 5 minutes) -->
+          <RegistryValue
+            Name="IntervalSeconds"
+            Value="300"
+            Type="integer" />
+
+        </RegistryKey>
+      </Component>
+
+    </DirectoryRef>
+
+  </Package>
+</Wix>

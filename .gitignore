@@ -1,0 +1,43 @@
+# EAMI — .gitignore
+
+# Environment / secrets — never commit
+.env
+*.key
+*.pem
+
+# Node
+node_modules/
+dist/
+.vite/
+*.local
+
+# Go build output
+*.exe
+eami-agent-windows-amd64.exe
+eami-agent-linux-amd64
+eami-agent-darwin-amd64
+eami-agent-darwin-arm64
+
+# Installer build output
+*.msi
+*.pkg
+*.deb
+*.rpm
+eami-agent/installer/dist/
+eami-agent/installer/macos/dist/
+eami-agent/installer/linux/dist/
+
+# Docker / runtime data
+data/
+certs/
+collector_data/
+gateway_certs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp

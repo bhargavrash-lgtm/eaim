@@ -1,0 +1,9 @@
+go 1.24
+
+use (
+	./eami-api
+	./eami-gateway
+	./eami-policy
+	./eami-collector
+	./eami-agent
+)

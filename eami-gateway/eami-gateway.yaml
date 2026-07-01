@@ -1,0 +1,48 @@
+# eami-gateway configuration
+# All fields documented. Override via env vars prefixed GATEWAY_
+# (e.g. GATEWAY_LISTEN_ADDR=0.0.0.0:8080)
+
+# Gateway HTTP listen address (MCP SSE + REST endpoints)
+listen_addr: "0.0.0.0:8443"
+
+# PostgreSQL DSN for audit log, agent registry, etc.
+postgres_dsn: "postgres://eami_app:changeme@localhost:5432/eami?sslmode=disable"
+
+# AI token configuration (ADR-006)
+token:
+  # TTL for issued AI tokens (seconds). Range: 60-14400. Default: 900 (15 min).
+  default_ttl_seconds: 900
+  # Path to RSA private key PEM. Auto-generated on first start if absent.
+  keypair_path: "/var/lib/eami-gateway/gateway.key"
+
+# Policy engine configuration
+policy:
+  # Path to YAML file containing policy rules loaded by eami-policy library.
+  rules_path: "/etc/eami-gateway/rules.yaml"
+  # Semantic LLM evaluation (ADR-009). Leave endpoint empty to disable.
+  semantic_llm_endpoint: ""
+  semantic_llm_api_key: ""
+
+# Downstream MCP proxy target
+proxy:
+  # Default downstream MCP server address (SSE transport).
+  downstream_sse_addr: "http://localhost:9000"
+
+# Approval router (ADR-011). Used when policy decision is ESCALATE.
+approval:
+  # Slack incoming webhook URL. Leave empty to disable.
+  slack_webhook_url: ""
+  expiry_seconds: 3600
+  ui_base_url: "https://app.eami.io"
+
+# eami-api internal integration
+# Used by the gateway to write token usage records (FinOps) and resolve
+# org-level settings. Override via GATEWAY_API_BASE_URL / GATEWAY_API_SERVICE_KEY.
+api:
+  base_url: "http://eami-api:8081"
+  service_key: "changeme"
+
+# Logging
+log:
+  level: "info"   # debug | info | warn | error
+  format: "json"  # json | text
