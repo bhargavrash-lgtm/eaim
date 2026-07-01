@@ -84,16 +84,13 @@
       Passed via: msiexec /i eami-agent.msi COLLECTOR_URL=... COLLECTOR_API_KEY=...
       Both values are written to HKLM\SOFTWARE\EAMI\Agent on install.
     -->
-    <Property Id="COLLECTOR_URL" Value="http://localhost:8888" />
-    <Property Id="COLLECTOR_API_KEY" Value="" />
-
     <!--
-      SecureCustomProperties: ensures COLLECTOR_URL and COLLECTOR_API_KEY are
-      forwarded from the client-side (user) session to the server-side (elevated)
-      installation session. Required for silent installs via SCCM or Intune where
-      properties are injected by the deployment tool.
+      Secure="yes" replaces the WiX3 SecureCustomProperties pattern — it forwards
+      the property from the user session to the elevated server session automatically,
+      which is required for silent installs via SCCM or Intune.
     -->
-    <Property Id="SecureCustomProperties" Value="COLLECTOR_URL;COLLECTOR_API_KEY" />
+    <Property Id="COLLECTOR_URL" Value="http://localhost:8888" Secure="yes" />
+    <Property Id="COLLECTOR_API_KEY" Secure="yes" />
 
     <!--
       Directory layout: C:\Program Files\EAMI\Agent\

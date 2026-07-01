@@ -77,7 +77,7 @@ FROM nginx:alpine AS production
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 # SPA routing config: all paths serve index.html; static assets cached 1 year
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY eami-ui/nginx.conf /etc/nginx/conf.d/default.conf
 
 # 80 — nginx HTTP port
 EXPOSE 80
