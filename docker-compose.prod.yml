@@ -1,0 +1,122 @@
+# EAMI — Production Stack
+# Usage:
+#   1. Run scripts/setup.sh  (generates .env with all secrets)
+#   2. docker compose -f docker-compose.prod.yml up -d
+#
+# Differences from docker-compose.yml (dev):
+#   - Uses pinned GHCR image tags instead of local builds
+#   - eami-ui runs nginx (production target) not Vite dev server
+#   - PostgreSQL port not exposed externally
+#   - No hot-reload volume mount on eami-ui/src
+#   - pprof disabled by default (set GATEWAY_PPROF_ADDR=:6060 to enable)
+#
+# Image registry: ghcr.io/bhargavrash-lgtm/<service>:v1.0.0
+# To upgrade: update the IMAGE_TAG variable or replace v1.0.0 below.
+
+version: '3.9'
+
+services:
+  # ──────────────────────────────────────────────────────────────
+  # PostgreSQL with pgvector + TimescaleDB
+  # Port intentionally not exposed in production.
+  # ──────────────────────────────────────────────────────────────
+  postgres:
+    image: timescale/timescaledb-ha:pg16
+    environment:
+      POSTGRES_DB: eami
+      POSTGRES_USER: eami_app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/home/postgres/pgdata/data
+      - ./schema/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    # No ports: block — DB is internal only in production
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "eami_app", "-d", "eami"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  # ──────────────────────────────────────────────────────────────
+  # eami-collector — on-prem data collector
+  # ──────────────────────────────────────────────────────────────
+  eami-collector:
+    image: ghcr.io/bhargavrash-lgtm/eami-collector:v1.0.0
+    environment:
+      COLLECTOR_LISTEN_PORT: "8888"
+      COLLECTOR_SAAS_URL: http://eami-api:8081
+      COLLECTOR_API_KEY: ${COLLECTOR_API_KEY}
+      COLLECTOR_BUFFER_DB_PATH: /app/data/buffer.db
+    volumes:
+      - collector_data:/app/data
+    ports:
+      - "8888:8888"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────
+  # eami-gateway — MCP control plane
+  # ──────────────────────────────────────────────────────────────
+  eami-gateway:
+    image: ghcr.io/bhargavrash-lgtm/eami-gateway:v1.0.0
+    environment:
+      GATEWAY_LISTEN_API_PORT: "8080"
+      GATEWAY_LISTEN_MCP_SSE_PORT: "3000"
+      GATEWAY_DB_HOST: postgres
+      GATEWAY_DB_NAME: eami
+      GATEWAY_DB_USER: eami_app
+      GATEWAY_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      GATEWAY_JWT_KEY_PATH: /certs/gateway.key
+      GATEWAY_APPROVAL_SLACK_WEBHOOK: ${GATEWAY_APPROVAL_SLACK_WEBHOOK:-}
+      GATEWAY_UI_BASE_URL: ${GATEWAY_UI_BASE_URL}
+      GATEWAY_API_SERVICE_KEY: ${GATEWAY_API_SERVICE_KEY}
+      GATEWAY_PPROF_ADDR: ${GATEWAY_PPROF_ADDR:-}
+    volumes:
+      - gateway_certs:/certs
+    ports:
+      - "8080:8080"
+      - "3000:3000"
+      - "7946:7946"
+      # 6060 (pprof) intentionally not exposed — enable only for profiling sessions
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────
+  # eami-api — SaaS REST API backend
+  # ──────────────────────────────────────────────────────────────
+  eami-api:
+    image: ghcr.io/bhargavrash-lgtm/eami-api:v1.0.0
+    environment:
+      API_LISTEN_PORT: "8081"
+      API_DB_HOST: postgres
+      API_DB_NAME: eami
+      API_DB_USER: eami_app
+      API_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      API_JWT_SECRET: ${API_JWT_SECRET}
+      API_SERVICE_KEY: ${API_SERVICE_KEY}
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────
+  # eami-ui — React web application (nginx, production build)
+  # ──────────────────────────────────────────────────────────────
+  eami-ui:
+    image: ghcr.io/bhargavrash-lgtm/eami-ui:v1.0.0
+    ports:
+      - "80:80"
+    depends_on:
+      - eami-api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  collector_data:
+  gateway_certs:

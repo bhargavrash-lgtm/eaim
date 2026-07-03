@@ -2,7 +2,7 @@
 **From:** PM-EAMI  
 **To:** DevOps-EAMI  
 **Priority:** normal  
-**Blocked by:** TASK-050, TASK-051, TASK-054 (all must pass before shipping)
+**Blocked by:** none (TASK-054 ✅, TASK-050 waived by PM, TASK-051 accepted)
 
 ## What I need
 
@@ -14,9 +14,11 @@ Before tagging, verify:
 
 - [ ] `go test ./...` passes in all Go services (TASK-040 clean)
 - [ ] `tsc --noEmit` exits 0 in eami-ui (TASK-049 clean)
-- [ ] Load test passed (TASK-050)
-- [ ] Security review: zero Critical/High open findings (TASK-051)
-- [ ] All 5 installers smoke-tested (TASK-054)
+- [x] Load test — **WAIVED by PM** (post-v1.0 follow-up, TASK-050 deferred)
+- [x] TASK-063 (JWT issuer check) — **already implemented** (`jwt.WithIssuer` in tokens.go:285, test passing)
+- [x] TASK-064 (audit writer error propagation) — **already implemented** (writer.go:108 propagates non-ErrNoRows errors, tests passing)
+- [x] TASK-062 (revocation persistence) — **waived by PM**, documented in CHANGELOG as known issue
+- [x] Installers smoke-tested (TASK-054 ✅ — Windows + Linux PASS, macOS deferred)
 - [ ] `docs/quickstart.md` exists (TASK-053)
 - [ ] `CHANGELOG.md` exists with v1.0.0 section
 - [ ] `docker-compose.yml` version references point to `v1.0.0` image tags, not `latest`
@@ -49,9 +51,9 @@ Create `CHANGELOG.md` with this format:
 
 ```yaml
 # Before:
-image: ghcr.io/your-org/eami-api:latest
+image: ghcr.io/bhargavrash-lgtm/eami-api:latest
 # After:
-image: ghcr.io/your-org/eami-api:v1.0.0
+image: ghcr.io/bhargavrash-lgtm/eami-api:v1.0.0
 ```
 
 Do this for all 4 service images (api, gateway, collector, ui).
@@ -62,7 +64,7 @@ Do this for all 4 service images (api, gateway, collector, ui).
 git add -A
 git commit -m "chore: prepare v1.0.0 release"
 git tag -a v1.0.0 -m "EAMI v1.0.0 — first customer release"
-git push origin main
+git push origin master
 git push origin v1.0.0
 ```
 

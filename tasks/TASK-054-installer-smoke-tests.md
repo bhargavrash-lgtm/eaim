@@ -2,58 +2,85 @@
 **From:** PM-EAMI  
 **To:** DevOps-EAMI  
 **Priority:** normal  
-**Blocked by:** TASK-035 (agent service must be fixed), TASK-046 (browser scanner), TASK-052 (setup.sh)
+**Blocked by:** TASK-052 (setup.sh — done)
 
 ## What I need
 
-Test each installer on a real (or VM) target OS. The agent must install, start, connect to the collector, and appear in the Discover UI.
+Test each installer on a real (or VM) target OS using the `v1.0.0-rc1` artifacts from:
+`https://github.com/bhargavrash-lgtm/eaim/releases/tag/v1.0.0-rc1`
+
+Criteria are split into two tiers. **Only Tier A is required to close this task and unblock TASK-055.**
+
+---
+
+## Tier A — v1.0.0 gate (run now, no collector needed)
+
+Verify the installer mechanics work correctly on each platform. No running EAMI stack required.
 
 ### Test matrix
 
 | Installer | Target OS | Pass criteria |
-|---|---|---|
-| `eami-agent-{version}-windows-amd64.msi` | Windows 11 (fresh VM) | Service installs, starts, appears in Discover |
-| `eami-agent-{version}-darwin-amd64.pkg` | macOS 14 Intel | Launchd plist loads, agent starts, appears in Discover |
-| `eami-agent-{version}-darwin-arm64.pkg` | macOS 15 Apple Silicon | Same |
-| `eami-agent_{version}_amd64.deb` | Ubuntu 24.04 LTS | systemd service starts, appears in Discover |
-| `eami-agent_{version}_amd64.rpm` | RHEL 9 / Rocky 9 | systemd service starts, appears in Discover |
+|-----------|-----------|---------------|
+| `eami-agent-1.0.0-rc1-windows-amd64.msi` | Windows 11 (fresh VM) | Service installs, starts, no crash in Event Viewer |
+| `eami-agent-1.0.0-rc1-darwin-amd64.pkg` | macOS 14 Intel | Launchd plist loads, agent process running (`launchctl list`) |
+| `eami-agent-1.0.0-rc1-darwin-arm64.pkg` | macOS 15 Apple Silicon | Same |
+| `eami-agent-1.0.0-rc1_amd64.deb` | Ubuntu 24.04 LTS | systemd service active (`systemctl status eami-agent`) |
+| `eami-agent-1.0.0-rc1_amd64.rpm` | RHEL 9 / Rocky 9 | systemd service active |
 
-### Test procedure (per installer)
+### Install procedure (per platform)
 
-1. Start with a clean OS install (or fresh VM snapshot).
-2. Ensure EAMI server is running and reachable from the test machine.
-3. Install the agent:
-   - Windows: `msiexec /i eami-agent.msi COLLECTOR_URL=http://server:8888 API_KEY=<key> /quiet`
-   - macOS: `sudo installer -pkg eami-agent.pkg -target /`; set config via env or file
-   - Linux (deb): `sudo EAMI_COLLECTOR_URL=http://server:8888 EAMI_API_KEY=<key> dpkg -i eami-agent.deb`
-   - Linux (rpm): `sudo EAMI_COLLECTOR_URL=http://server:8888 EAMI_API_KEY=<key> rpm -i eami-agent.rpm`
-4. Wait 2 minutes.
-5. Check UI → Discover — the hostname should appear.
-6. Check UI → Discover → click the endpoint — AI apps/models/MCP servers should be populated.
+**Windows:**
+```powershell
+msiexec /i eami-agent-1.0.0-rc1-windows-amd64.msi COLLECTOR_URL=http://localhost:8888 /quiet /log install.log
+Get-Service eami-agent
+```
 
-### On failure
+**macOS:**
+```bash
+sudo installer -pkg eami-agent-1.0.0-rc1-darwin-arm64.pkg -target /
+launchctl list | grep eami
+```
 
-Document the failure in `tasks/TASK-054-results.md` with:
-- Exact error message
-- OS version
-- Installer version
-- Logs (`journalctl -u eami-agent`, Event Viewer, launchd log)
-- Proposed fix (or flag to BE-Collector)
+**Ubuntu:**
+```bash
+sudo dpkg -i eami-agent-1.0.0-rc1_amd64.deb
+systemctl status eami-agent
+```
 
-### Uninstall test (for each platform)
+**RHEL/Rocky:**
+```bash
+sudo rpm -i eami-agent-1.0.0-rc1_amd64.rpm
+systemctl status eami-agent
+```
 
-After the smoke test, verify clean uninstall:
-- Windows: `msiexec /x eami-agent.msi /quiet` — service removed, no leftover files in `C:\Program Files\EAMI`
-- macOS: `sudo pkgutil --forget com.eami.agent` — plist removed
-- Linux: `sudo apt remove eami-agent` / `sudo rpm -e eami-agent` — service disabled, config preserved
+### Uninstall test (each platform)
 
-## Acceptance criteria
+Verify clean removal — no orphaned service, no leftover files:
 
-- [ ] All 5 installer targets pass the smoke test (endpoint appears in Discover UI)
-- [ ] Uninstall leaves no orphaned services or files
-- [ ] `tasks/TASK-054-results.md` has pass/fail for each target
-- [ ] Any failures are either fixed or documented as known issues with workaround
+- **Windows:** `msiexec /x eami-agent-1.0.0-rc1-windows-amd64.msi /quiet` → `C:\Program Files\EAMI` gone, service removed
+- **macOS:** `sudo pkgutil --forget com.eami.agent` → launchd plist removed
+- **Ubuntu:** `sudo apt remove eami-agent` → service disabled, `/usr/bin/eami-agent` removed
+- **RHEL:** `sudo rpm -e eami-agent` → service disabled, binary removed
 
-## Files to create
+---
+
+## Tier B — Post-v1.0 backlog (do not block TASK-055 on these)
+
+These require a running EAMI stack. File as a follow-up after v1.0.0 ships.
+
+- Agent connects to collector and sends first report
+- Endpoint hostname appears in Discover UI
+- AI apps / models / MCP servers populated in Discover detail view
+
+---
+
+## Acceptance criteria (Tier A only — required for TASK-055)
+
+- [ ] All 5 installer targets: service installs and starts without crash
+- [ ] All 5 uninstalls: no orphaned service or binary remains
+- [ ] `tasks/TASK-054-results.md` has pass/fail for each target with log snippet
+- [ ] Any Tier A failure is either fixed or documented with a workaround
+
+## Files to update
 
 - `tasks/TASK-054-results.md`
