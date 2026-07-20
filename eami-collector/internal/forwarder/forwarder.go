@@ -26,6 +26,9 @@ import (
 type Config struct {
 	SAASURL         string `yaml:"saas_url"`
 	APIKey          string `yaml:"api_key"`
+	// ServiceKey is the X-Service-Key sent to eami-api when forwarding batches.
+	// If empty, falls back to APIKey (for simple single-key deployments).
+	ServiceKey      string `yaml:"service_key"`
 	BatchSize       int    `yaml:"batch_size"`
 	IntervalSeconds int    `yaml:"interval_seconds"`
 	TimeoutSeconds  int    `yaml:"timeout_seconds"`
@@ -46,7 +49,7 @@ func (c *Config) defaults() {
 const (
 	maxAttempts   = 10
 	batchEndpoint = "/v1/ingest/batch"
-	apiKeyHeader  = "X-API-Key"
+	apiKeyHeader  = "X-Service-Key"
 )
 
 // Forwarder polls the SQLite buffer and forwards batches to the SaaS API.
@@ -250,7 +253,11 @@ func (f *Forwarder) sendBatch(ctx context.Context, rows []BufferRow) (int, error
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(apiKeyHeader, f.cfg.APIKey)
+	serviceKey := f.cfg.ServiceKey
+	if serviceKey == "" {
+		serviceKey = f.cfg.APIKey
+	}
+	req.Header.Set(apiKeyHeader, serviceKey)
 	resp, err := f.client.Do(req)
 	if err != nil {
 		return 0, err

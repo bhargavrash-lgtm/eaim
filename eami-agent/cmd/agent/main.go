@@ -136,6 +136,7 @@ func runLoop(ctx context.Context, cfg *config.Config, log *slog.Logger) {
 			log.Error("scan error", "err", err)
 		} else {
 			log.Info("scan complete",
+				"ai_apps", len(report.AIApps),
 				"local_models", len(report.LocalModels),
 				"cloud_clients", len(report.CloudClients),
 				"active_connections", len(report.NetworkActivity.ActiveConnections),

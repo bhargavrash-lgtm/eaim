@@ -4,6 +4,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -193,6 +194,323 @@ func scanEndpointRow(row pgx.Row) (DiscoveredEndpoint, error) {
 		&e.HitCount, &e.LastSeen, &e.CreatedAt,
 	)
 	if err != nil {
+		return e, err
+	}
+	e.ID = uuid.UUID(id.Bytes)
+	e.OrgID = uuid.UUID(orgID.Bytes)
+	return e, nil
+}
+
+// ── Agent endpoint ingestion (discovery pipeline) ────────────────────────────
+//
+// These functions write to the endpoints / endpoint_reports / endpoint_ai_apps /
+// endpoint_model_files / endpoint_mcp_servers tables — AI-agent machines
+// discovered by eami-agent. DISTINCT from the discovered_endpoints functions
+// above, which record HTTP traffic observations.
+
+// AgentEndpoint mirrors the endpoints table row plus denormalised counts.
+type AgentEndpoint struct {
+	ID           uuid.UUID
+	OrgID        uuid.UUID
+	AgentID      string
+	Hostname     string
+	AgentVersion string
+	OSInfo       []byte // JSONB — {os, arch, os_version}
+	LastSeen     pgtype.Timestamptz
+	FirstSeen    pgtype.Timestamptz
+	RiskScore    float64
+	AIAppCount   int64
+	ModelCount   int64
+	MCPCount     int64
+	GPUCount     int64 // from latest report JSONB
+}
+
+// AgentEndpointWithReport extends AgentEndpoint with the latest report blob.
+type AgentEndpointWithReport struct {
+	AgentEndpoint
+	LatestReport json.RawMessage // nil when no reports have been ingested yet
+}
+
+// GetDefaultOrgID returns the UUID of the oldest org. Used by service-key-
+// authenticated ingest paths that don't carry an explicit org_id.
+func (q *Queries) GetDefaultOrgID(ctx context.Context) (uuid.UUID, error) {
+	var id pgtype.UUID
+	if err := q.db.QueryRow(ctx,
+		`SELECT id FROM orgs ORDER BY created_at ASC LIMIT 1`,
+	).Scan(&id); err != nil {
+		return uuid.Nil, err
+	}
+	return uuid.UUID(id.Bytes), nil
+}
+
+// UpsertAgentEndpointParams holds parameters for UpsertAgentEndpoint.
+type UpsertAgentEndpointParams struct {
+	OrgID        uuid.UUID
+	AgentID      string
+	Hostname     string
+	AgentVersion string
+	OSInfo       []byte
+}
+
+// UpsertAgentEndpoint upserts a row in the endpoints table and returns its UUID.
+func (q *Queries) UpsertAgentEndpoint(ctx context.Context, p UpsertAgentEndpointParams) (uuid.UUID, error) {
+	const sql = `
+		INSERT INTO endpoints (org_id, agent_id, hostname, agent_version, os_info, last_seen)
+		VALUES ($1, $2, $3, $4, $5, NOW())
+		ON CONFLICT (org_id, agent_id) DO UPDATE SET
+			hostname      = EXCLUDED.hostname,
+			agent_version = EXCLUDED.agent_version,
+			os_info       = EXCLUDED.os_info,
+			last_seen     = NOW()
+		RETURNING id`
+	var id pgtype.UUID
+	if err := q.db.QueryRow(ctx, sql,
+		toPgtypeUUID(p.OrgID), p.AgentID, p.Hostname, p.AgentVersion, p.OSInfo,
+	).Scan(&id); err != nil {
+		return uuid.Nil, err
+	}
+	return uuid.UUID(id.Bytes), nil
+}
+
+// InsertEndpointReportParams holds parameters for InsertEndpointReport.
+type InsertEndpointReportParams struct {
+	EndpointID  uuid.UUID
+	OrgID       uuid.UUID
+	CollectedAt time.Time
+	Report      []byte
+}
+
+// InsertEndpointReport inserts a full agent report blob and returns the new UUID.
+func (q *Queries) InsertEndpointReport(ctx context.Context, p InsertEndpointReportParams) (uuid.UUID, error) {
+	const sql = `
+		INSERT INTO endpoint_reports (endpoint_id, org_id, collected_at, report, schema_version)
+		VALUES ($1, $2, $3, $4, '1.0')
+		RETURNING id`
+	var id pgtype.UUID
+	if err := q.db.QueryRow(ctx, sql,
+		toPgtypeUUID(p.EndpointID), toPgtypeUUID(p.OrgID), p.CollectedAt, p.Report,
+	).Scan(&id); err != nil {
+		return uuid.Nil, err
+	}
+	return uuid.UUID(id.Bytes), nil
+}
+
+// DeleteEndpointNormalizedData removes stale ai_apps / model_files / mcp_servers
+// for an endpoint so the latest report can be written fresh.
+func (q *Queries) DeleteEndpointNormalizedData(ctx context.Context, endpointID uuid.UUID) error {
+	eid := toPgtypeUUID(endpointID)
+	for _, tbl := range []string{"endpoint_ai_apps", "endpoint_model_files", "endpoint_mcp_servers"} {
+		if _, err := q.db.Exec(ctx, "DELETE FROM "+tbl+" WHERE endpoint_id = $1", eid); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// InsertEndpointAIAppParams holds parameters for InsertEndpointAIApp.
+type InsertEndpointAIAppParams struct {
+	EndpointID uuid.UUID
+	ReportID   uuid.UUID
+	Name       string
+	Version    string
+	Source     string
+	DetectedAt time.Time
+}
+
+// InsertEndpointAIApp inserts one row into endpoint_ai_apps.
+func (q *Queries) InsertEndpointAIApp(ctx context.Context, p InsertEndpointAIAppParams) error {
+	_, err := q.db.Exec(ctx,
+		`INSERT INTO endpoint_ai_apps (endpoint_id, report_id, name, version, source, detected_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		toPgtypeUUID(p.EndpointID), toPgtypeUUID(p.ReportID),
+		p.Name, p.Version, p.Source, p.DetectedAt,
+	)
+	return err
+}
+
+// InsertEndpointModelFileParams holds parameters for InsertEndpointModelFile.
+type InsertEndpointModelFileParams struct {
+	EndpointID uuid.UUID
+	ReportID   uuid.UUID
+	Name       string
+	Path       string
+	SizeMB     float64
+	Format     string
+	Source     string // ollama | lmstudio | huggingface | unknown
+	DetectedAt time.Time
+}
+
+// InsertEndpointModelFile inserts one row into endpoint_model_files.
+func (q *Queries) InsertEndpointModelFile(ctx context.Context, p InsertEndpointModelFileParams) error {
+	_, err := q.db.Exec(ctx,
+		`INSERT INTO endpoint_model_files (endpoint_id, report_id, name, path, size_mb, format, source, detected_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		toPgtypeUUID(p.EndpointID), toPgtypeUUID(p.ReportID),
+		p.Name, p.Path, p.SizeMB, p.Format, p.Source, p.DetectedAt,
+	)
+	return err
+}
+
+// InsertEndpointMCPServerParams holds parameters for InsertEndpointMCPServer.
+type InsertEndpointMCPServerParams struct {
+	EndpointID uuid.UUID
+	ReportID   uuid.UUID
+	Name       string
+	Transport  string  // stdio | sse | socket
+	Port       *int
+	Source     *string // claude_desktop | vscode | cursor | live_port | nil
+	DetectedAt time.Time
+}
+
+// InsertEndpointMCPServer inserts one row into endpoint_mcp_servers.
+func (q *Queries) InsertEndpointMCPServer(ctx context.Context, p InsertEndpointMCPServerParams) error {
+	_, err := q.db.Exec(ctx,
+		`INSERT INTO endpoint_mcp_servers (endpoint_id, report_id, name, transport, port, source, detected_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		toPgtypeUUID(p.EndpointID), toPgtypeUUID(p.ReportID),
+		p.Name, p.Transport, toPgtypeInt4(p.Port), toPgtypeText(p.Source), p.DetectedAt,
+	)
+	return err
+}
+
+// ── Agent endpoint read queries (Discover page) ───────────────────────────────
+
+// ListAgentEndpointsParams holds pagination params for ListAgentEndpoints.
+type ListAgentEndpointsParams struct {
+	OrgID  uuid.UUID
+	Limit  int32
+	Offset int32
+}
+
+const listAgentEndpointsSQL = `
+SELECT
+	e.id, e.org_id, e.agent_id, e.hostname, e.agent_version, e.os_info,
+	e.last_seen, e.first_seen, e.risk_score,
+	(SELECT COUNT(*) FROM endpoint_ai_apps    WHERE endpoint_id = e.id) AS ai_app_count,
+	(SELECT COUNT(*) FROM endpoint_model_files WHERE endpoint_id = e.id) AS model_count,
+	(SELECT COUNT(*) FROM endpoint_mcp_servers WHERE endpoint_id = e.id) AS mcp_count,
+	COALESCE(
+		(SELECT jsonb_array_length(er.report->'gpus')
+		 FROM endpoint_reports er
+		 WHERE er.endpoint_id = e.id
+		 ORDER BY er.collected_at DESC LIMIT 1),
+		0
+	) AS gpu_count
+FROM endpoints e
+WHERE e.org_id = $1
+ORDER BY e.last_seen DESC
+LIMIT $2 OFFSET $3`
+
+// ListAgentEndpoints returns a paginated list of agent machines for an org.
+func (q *Queries) ListAgentEndpoints(ctx context.Context, p ListAgentEndpointsParams) ([]AgentEndpoint, error) {
+	rows, err := q.db.Query(ctx, listAgentEndpointsSQL,
+		toPgtypeUUID(p.OrgID), p.Limit, p.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AgentEndpoint
+	for rows.Next() {
+		e, err := scanAgentEndpointRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// CountAgentEndpoints returns total agent machine rows for an org.
+func (q *Queries) CountAgentEndpoints(ctx context.Context, orgID uuid.UUID) (int64, error) {
+	var n int64
+	return n, q.db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM endpoints WHERE org_id = $1`, toPgtypeUUID(orgID),
+	).Scan(&n)
+}
+
+const getAgentEndpointSQL = `
+SELECT
+	e.id, e.org_id, e.agent_id, e.hostname, e.agent_version, e.os_info,
+	e.last_seen, e.first_seen, e.risk_score,
+	(SELECT COUNT(*) FROM endpoint_ai_apps    WHERE endpoint_id = e.id) AS ai_app_count,
+	(SELECT COUNT(*) FROM endpoint_model_files WHERE endpoint_id = e.id) AS model_count,
+	(SELECT COUNT(*) FROM endpoint_mcp_servers WHERE endpoint_id = e.id) AS mcp_count,
+	COALESCE(
+		(SELECT jsonb_array_length(er.report->'gpus')
+		 FROM endpoint_reports er
+		 WHERE er.endpoint_id = e.id
+		 ORDER BY er.collected_at DESC LIMIT 1),
+		0
+	) AS gpu_count
+FROM endpoints e
+WHERE e.id = $1 AND e.org_id = $2`
+
+// GetAgentEndpoint returns a single agent endpoint by ID.
+func (q *Queries) GetAgentEndpoint(ctx context.Context, id, orgID uuid.UUID) (*AgentEndpoint, error) {
+	var e AgentEndpoint
+	var aid, aorgID pgtype.UUID
+	if err := q.db.QueryRow(ctx, getAgentEndpointSQL,
+		toPgtypeUUID(id), toPgtypeUUID(orgID),
+	).Scan(
+		&aid, &aorgID, &e.AgentID, &e.Hostname, &e.AgentVersion, &e.OSInfo,
+		&e.LastSeen, &e.FirstSeen, &e.RiskScore,
+		&e.AIAppCount, &e.ModelCount, &e.MCPCount, &e.GPUCount,
+	); err != nil {
+		return nil, err
+	}
+	e.ID = uuid.UUID(aid.Bytes)
+	e.OrgID = uuid.UUID(aorgID.Bytes)
+	return &e, nil
+}
+
+const getAgentEndpointWithReportSQL = `
+SELECT
+	e.id, e.org_id, e.agent_id, e.hostname, e.agent_version, e.os_info,
+	e.last_seen, e.first_seen, e.risk_score,
+	(SELECT COUNT(*) FROM endpoint_ai_apps    WHERE endpoint_id = e.id) AS ai_app_count,
+	(SELECT COUNT(*) FROM endpoint_model_files WHERE endpoint_id = e.id) AS model_count,
+	(SELECT COUNT(*) FROM endpoint_mcp_servers WHERE endpoint_id = e.id) AS mcp_count,
+	COALESCE(
+		(SELECT jsonb_array_length(er.report->'gpus')
+		 FROM endpoint_reports er
+		 WHERE er.endpoint_id = e.id
+		 ORDER BY er.collected_at DESC LIMIT 1),
+		0
+	) AS gpu_count,
+	(SELECT er.report
+	 FROM endpoint_reports er
+	 WHERE er.endpoint_id = e.id
+	 ORDER BY er.collected_at DESC LIMIT 1) AS latest_report
+FROM endpoints e
+WHERE e.id = $1 AND e.org_id = $2`
+
+// GetAgentEndpointWithReport returns an endpoint including its latest report blob.
+func (q *Queries) GetAgentEndpointWithReport(ctx context.Context, id, orgID uuid.UUID) (*AgentEndpointWithReport, error) {
+	var e AgentEndpointWithReport
+	var aid, aorgID pgtype.UUID
+	if err := q.db.QueryRow(ctx, getAgentEndpointWithReportSQL,
+		toPgtypeUUID(id), toPgtypeUUID(orgID),
+	).Scan(
+		&aid, &aorgID, &e.AgentID, &e.Hostname, &e.AgentVersion, &e.OSInfo,
+		&e.LastSeen, &e.FirstSeen, &e.RiskScore,
+		&e.AIAppCount, &e.ModelCount, &e.MCPCount, &e.GPUCount,
+		&e.LatestReport,
+	); err != nil {
+		return nil, err
+	}
+	e.ID = uuid.UUID(aid.Bytes)
+	e.OrgID = uuid.UUID(aorgID.Bytes)
+	return &e, nil
+}
+
+func scanAgentEndpointRows(rows pgx.Rows) (AgentEndpoint, error) {
+	var e AgentEndpoint
+	var id, orgID pgtype.UUID
+	if err := rows.Scan(
+		&id, &orgID, &e.AgentID, &e.Hostname, &e.AgentVersion, &e.OSInfo,
+		&e.LastSeen, &e.FirstSeen, &e.RiskScore,
+		&e.AIAppCount, &e.ModelCount, &e.MCPCount, &e.GPUCount,
+	); err != nil {
 		return e, err
 	}
 	e.ID = uuid.UUID(id.Bytes)

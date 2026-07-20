@@ -17,6 +17,11 @@ func HealthHandler() http.HandlerFunc {
 }
 
 // StatsHandler handles GET /stats — returns buffer and dead-letter row counts.
+//
+// Optional query param:
+//
+//	since=<RFC3339>  — count only dead_letter rows with failed_at >= since.
+//	                   Omit for all-time totals.
 func StatsHandler(db *sql.DB, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -26,7 +31,21 @@ func StatsHandler(db *sql.DB, log *slog.Logger) http.HandlerFunc {
 
 		var bufferCount, deadLetterCount int
 		_ = db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM report_buffer").Scan(&bufferCount)
-		_ = db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM dead_letter").Scan(&deadLetterCount)
+
+		// Filter dead_letter by window if ?since= is provided.
+		if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
+			if t, err := time.Parse(time.RFC3339, sinceStr); err == nil {
+				_ = db.QueryRowContext(r.Context(),
+					"SELECT COUNT(*) FROM dead_letter WHERE failed_at >= ?",
+					t.UTC().Format(time.RFC3339),
+				).Scan(&deadLetterCount)
+			} else {
+				http.Error(w, "invalid since param: expected RFC3339", http.StatusBadRequest)
+				return
+			}
+		} else {
+			_ = db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM dead_letter").Scan(&deadLetterCount)
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]int{

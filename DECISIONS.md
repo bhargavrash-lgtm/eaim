@@ -345,6 +345,26 @@ Extend the existing build-tag pattern (`config_windows.go` / `config_other.go`) 
 
 ---
 
+## ADR-018 — nginx reverse-proxy for eami-ui API calls
+
+**Date:** 2026-07-03  
+**Status:** Accepted  
+**Owner:** PM-EAMI
+
+**Context:**
+The eami-ui React app uses `baseUrl: ''` (relative URLs) so that API calls go to `/v1/...` relative to the page origin. This is correct — it avoids hardcoding an API host. However, the original nginx.conf only served static files and had no proxy block, so any `/v1/` request returned 404. Additionally, Vite's `VITE_API_URL` env var was never passed as a Docker build argument in CI, so the fallback could not be relied upon.
+
+**Decision:**
+Add a `location /v1/` proxy block in `eami-ui/nginx.conf` that forwards all API calls to `http://eami-api:8081`. nginx sits in the same Docker network as eami-api, so this is a fast internal proxy with no extra network hop for end users.
+
+**Consequences:**
+- No VITE_API_URL build arg needed — the proxy handles routing at runtime
+- CORS issues avoided — browser and API share the same origin (port 80)
+- Any eami-ui Docker image rebuild must use the updated nginx.conf (already in repo)
+- Production deploys must keep eami-ui and eami-api on the same Docker network
+
+---
+
 ## Pending Decisions
 
 | ID | Question | Owner | Due |
@@ -353,3 +373,4 @@ Extend the existing build-tag pattern (`config_windows.go` / `config_other.go`) 
 | ADR-013 | Multi-tenancy model: org-per-schema vs. RLS | Architect-EAMI | Before eami-api DB design |
 | ADR-016 | ✅ Resolved: keep vram_bytes (int64, raw bytes). UI layer formats for display. No breaking change. | PM-EAMI | Closed |
 | ADR-017 | Add conda_env_name convenience field to PythonEnv? Currently derivable from last path component. Requires simultaneous Go struct + spec change. | PM-EAMI | Before python_envs UI work |
+| ADR-019 | Episode/memory data path: `eami-api/internal/api/memory.go` (stub, returns empty) has no owner in BOUNDARIES.md. Per ADR-010, SaaS (eami-api) must never receive full episode content — only episode_id metadata. Does the Memory UI page query eami-api (metadata only) with a separate on-prem gateway endpoint for full episode detail, or does eami-api get a scoped exception? Blocks real (non-stub) implementation of `/v1/memory/episodes*`. | Architect-EAMI | Before TASK-069/TASK-070 (episode recorder + Memory UI) ship real data |

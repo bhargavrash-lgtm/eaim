@@ -13,10 +13,14 @@ dist/
 
 # Go build output
 *.exe
+*-bin
 eami-agent-windows-amd64.exe
 eami-agent-linux-amd64
 eami-agent-darwin-amd64
 eami-agent-darwin-arm64
+
+# Local test/scratch configs — may contain real keys, never commit
+eami-agent-test.yaml
 
 # Installer build output
 *.msi

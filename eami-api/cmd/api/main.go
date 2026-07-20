@@ -52,7 +52,7 @@ func main() {
 
 	// -- Alerting engine ------------------------------------------------------
 	queries := store.New(pool)
-	engine := alerting.NewEngine(queries)
+	engine := alerting.NewEngine(queries, cfg.Collector.URL, cfg.Collector.APIKey)
 
 	// -- HTTP server ----------------------------------------------------------
 	srv := api.NewServer(queries, authSvc, engine, cfg)

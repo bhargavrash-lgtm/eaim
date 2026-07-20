@@ -22,3 +22,14 @@ api.use({
     return context.request
   },
 })
+
+// apiFetch — lightweight fetch helper for endpoints not yet in the OpenAPI schema.
+// Automatically injects the Bearer token from the auth store.
+export async function apiFetch<T = unknown>(path: string): Promise<T> {
+  const { accessToken } = useAuthStore.getState()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`
+  const res = await fetch(path, { headers })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json() as Promise<T>
+}

@@ -173,6 +173,47 @@ func (s *Server) ExportAudit(w http.ResponseWriter, r *http.Request) {
 	cw.Flush()
 }
 
+// VerifyAuditChain handles GET /v1/audit/verify.
+// Auth: JWT (viewer or above).
+//
+// Streams the audit log in chronological order (within an optional time range)
+// and recomputes the SHA-256 hash chain. Returns whether the chain is intact
+// and, if not, the UUID of the first broken row.
+//
+// Query params:
+//
+//	from=<RFC3339>  — start of verification window (inclusive)
+//	to=<RFC3339>    — end of verification window (inclusive)
+//
+// Omitting both params verifies the entire org log.
+func (s *Server) VerifyAuditChain(w http.ResponseWriter, r *http.Request) {
+	uc := claimsFromContext(r)
+	q := r.URL.Query()
+
+	parseTime := func(key string) *time.Time {
+		v := q.Get(key)
+		if v == "" {
+			return nil
+		}
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			return nil
+		}
+		return &t
+	}
+
+	result, err := s.queries.VerifyAuditChain(r.Context(), store.AuditVerifyParams{
+		OrgID: uc.OrgID,
+		From:  parseTime("from"),
+		To:    parseTime("to"),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 // ── converter ─────────────────────────────────────────────────────────────────
 
 func auditEntryToResp(e store.AuditEntry) AuditEntryResp {

@@ -66,6 +66,9 @@ func main() {
 	if v := os.Getenv("COLLECTOR_API_KEY"); v != "" {
 		cfg.Forwarder.APIKey = v
 	}
+	if v := os.Getenv("COLLECTOR_SERVICE_KEY"); v != "" {
+		cfg.Forwarder.ServiceKey = v
+	}
 
 	database, err := db.Open(cfg.Buffer.DBPath)
 	if err != nil {

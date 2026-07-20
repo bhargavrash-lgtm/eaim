@@ -1,18 +1,14 @@
-// Package scheduled_tasks detects Windows scheduled tasks referencing AI tools.
-// TODO: implement via Task Scheduler COM API or schtasks.exe parsing.
+// Package scheduled_tasks detects Windows scheduled tasks that reference AI tools.
+// The Scan implementation is platform-specific:
+//   - Windows: queries schtasks.exe /Query /FO CSV /V
+//   - Other platforms: returns empty (scheduled tasks are a Windows concept)
 package scheduled_tasks
 
-import (
-	"context"
-	"time"
-)
+import "time"
 
-// ScheduledTask describes a detected scheduled task referencing AI tooling.
+// ScheduledTask describes a detected scheduled task that references AI tooling.
 type ScheduledTask struct {
 	Name       string    `json:"name"`
 	Command    string    `json:"command"`
 	DetectedAt time.Time `json:"detected_at"`
 }
-
-// Scan detects AI-related scheduled tasks.
-func Scan(_ context.Context) ([]ScheduledTask, error) { return nil, nil }

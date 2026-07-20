@@ -7,8 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,14 +40,60 @@ type EvalResult struct {
 	Message     string
 }
 
+// collectorClient calls the collector's /stats endpoint to fetch delivery metrics.
+type collectorClient struct {
+	baseURL string
+	apiKey  string
+	http    *http.Client
+}
+
+// deadLetterCount calls GET {baseURL}/stats?since=<RFC3339> and returns dead_letter_rows.
+func (c *collectorClient) deadLetterCount(ctx context.Context, since time.Time) (int64, error) {
+	url := strings.TrimRight(c.baseURL, "/") + "/stats?since=" + since.UTC().Format(time.RFC3339)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("X-API-Key", c.apiKey)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("collector /stats: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return 0, fmt.Errorf("collector /stats: HTTP %d: %s", resp.StatusCode, errBody)
+	}
+
+	var payload struct {
+		DeadLetterRows int64 `json:"dead_letter_rows"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return 0, fmt.Errorf("collector /stats: decode: %w", err)
+	}
+	return payload.DeadLetterRows, nil
+}
+
 // Engine runs the alert evaluation loop.
 type Engine struct {
-	queries *store.Queries
+	queries   *store.Queries
+	collector *collectorClient // nil when collector URL is not configured
 }
 
 // NewEngine creates an Engine backed by the given query store.
-func NewEngine(queries *store.Queries) *Engine {
-	return &Engine{queries: queries}
+// collectorURL and collectorAPIKey are optional; if collectorURL is empty the
+// failed_delivery_count metric will log a warning and return 0.
+func NewEngine(queries *store.Queries, collectorURL, collectorAPIKey string) *Engine {
+	e := &Engine{queries: queries}
+	if collectorURL != "" {
+		e.collector = &collectorClient{
+			baseURL: collectorURL,
+			apiKey:  collectorAPIKey,
+			http:    &http.Client{Timeout: 5 * time.Second},
+		}
+	}
+	return e
 }
 
 // Run starts the evaluation loop, ticking every minute.
@@ -84,7 +133,7 @@ func (e *Engine) evaluateRule(ctx context.Context, rule store.AlertRule) error {
 		return fmt.Errorf("parse condition_config: %w", err)
 	}
 
-	value, err := QueryMetric(ctx, e.queries, rule.OrgID, cfg.Metric, cfg.WindowMinutes)
+	value, err := e.queryMetricWithCollector(ctx, rule.OrgID, cfg.Metric, cfg.WindowMinutes)
 	if err != nil {
 		return fmt.Errorf("query metric %s: %w", cfg.Metric, err)
 	}
@@ -135,7 +184,7 @@ func (e *Engine) EvaluateRuleDryRun(ctx context.Context, rule store.AlertRule) (
 	if err != nil {
 		return nil, fmt.Errorf("parse condition_config: %w", err)
 	}
-	value, err := QueryMetric(ctx, e.queries, rule.OrgID, cfg.Metric, cfg.WindowMinutes)
+	value, err := e.queryMetricWithCollector(ctx, rule.OrgID, cfg.Metric, cfg.WindowMinutes)
 	if err != nil {
 		return nil, fmt.Errorf("query metric: %w", err)
 	}
@@ -155,8 +204,25 @@ func (e *Engine) EvaluateRuleDryRun(ctx context.Context, rule store.AlertRule) (
 	}, nil
 }
 
+// queryMetricWithCollector dispatches metrics that require the collector HTTP
+// API separately from those backed by Postgres.
+func (e *Engine) queryMetricWithCollector(ctx context.Context, orgID uuid.UUID, metric string, windowMinutes int) (float64, error) {
+	if metric == "failed_delivery_count" {
+		if e.collector == nil {
+			slog.Warn("failed_delivery_count: collector URL not configured; returning 0",
+				"org_id", orgID)
+			return 0, nil
+		}
+		since := time.Now().UTC().Add(-time.Duration(windowMinutes) * time.Minute)
+		n, err := e.collector.deadLetterCount(ctx, since)
+		return float64(n), err
+	}
+	return QueryMetric(ctx, e.queries, orgID, metric, windowMinutes)
+}
+
 // QueryMetric runs the appropriate SQL query for a metric and window.
 // Exported so API test handlers can call it directly.
+// Note: failed_delivery_count is NOT handled here — use Engine.queryMetricWithCollector.
 func QueryMetric(ctx context.Context, q *store.Queries, orgID uuid.UUID, metric string, windowMinutes int) (float64, error) {
 	window := fmt.Sprintf("%d minutes", windowMinutes)
 	db := q.DB()
@@ -189,14 +255,9 @@ func QueryMetric(ctx context.Context, q *store.Queries, orgID uuid.UUID, metric 
 		var total float64
 		return total, row.Scan(&total)
 	case "failed_delivery_count":
-		// TODO: query the collector's dead-letter HTTP API (GET /dead-letter/count?since=<RFC3339>).
-		// The dead-letter table lives in the collector's SQLite buffer, not in PostgreSQL.
-		// Real implementation requires: cfg.CollectorURL + service key auth + HTTP call.
-		slog.Warn("failed_delivery_count not fully implemented: returning 0; requires collector HTTP API",
-			"org_id", orgID,
-			"window_minutes", windowMinutes,
-		)
-		return 0, nil
+		// This metric lives in the collector's SQLite dead_letter table, not Postgres.
+		// Callers must go through Engine.queryMetricWithCollector instead.
+		return 0, fmt.Errorf("failed_delivery_count requires collector HTTP context; use Engine methods")
 	default:
 		return 0, fmt.Errorf("unsupported metric: %s", metric)
 	}

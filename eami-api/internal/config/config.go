@@ -10,11 +10,22 @@ import (
 
 // Config is the top-level EAMI API configuration.
 type Config struct {
-	Server     ServerConfig   `yaml:"server"`
-	Database   DatabaseConfig `yaml:"database"`
-	Auth       AuthConfig     `yaml:"auth"`
-	Log        LogConfig      `yaml:"log"`
-	ServiceKey string         `yaml:"service_key"`
+	Server     ServerConfig     `yaml:"server"`
+	Database   DatabaseConfig   `yaml:"database"`
+	Auth       AuthConfig       `yaml:"auth"`
+	Log        LogConfig        `yaml:"log"`
+	ServiceKey string           `yaml:"service_key"`
+	Collector  CollectorConfig  `yaml:"collector"`
+}
+
+// CollectorConfig tells the API server how to reach the on-prem collector for
+// metrics that live in its SQLite buffer (e.g. failed_delivery_count).
+type CollectorConfig struct {
+	// URL is the base URL of the collector HTTP API, e.g. "http://collector:9091".
+	// Leave empty to disable collector-backed alert metrics.
+	URL string `yaml:"url"`
+	// APIKey is the X-API-Key used to authenticate against the collector's /stats endpoint.
+	APIKey string `yaml:"api_key"`
 }
 
 type ServerConfig struct {
@@ -89,6 +100,14 @@ func Load(path string) (*Config, error) {
 	// Service key override.
 	if v := os.Getenv("API_SERVICE_KEY"); v != "" {
 		cfg.ServiceKey = v
+	}
+
+	// Collector config overrides.
+	if v := os.Getenv("COLLECTOR_URL"); v != "" {
+		cfg.Collector.URL = v
+	}
+	if v := os.Getenv("COLLECTOR_API_KEY"); v != "" {
+		cfg.Collector.APIKey = v
 	}
 
 	return cfg, nil

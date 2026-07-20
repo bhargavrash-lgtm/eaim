@@ -13,7 +13,7 @@
 # Image registry: ghcr.io/bhargavrash-lgtm/<service>:v1.0.0
 # To upgrade: update the IMAGE_TAG variable or replace v1.0.0 below.
 
-version: '3.9'
+
 
 services:
   # ──────────────────────────────────────────────────────────────
@@ -26,6 +26,12 @@ services:
       POSTGRES_DB: eami
       POSTGRES_USER: eami_app
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    command:
+      - postgres
+      - -c
+      - "shared_preload_libraries=timescaledb,pg_cron"
+      - -c
+      - "cron.database_name=eami"
     volumes:
       - postgres_data:/home/postgres/pgdata/data
       - ./schema/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
@@ -98,6 +104,8 @@ services:
       API_DB_PASSWORD: ${POSTGRES_PASSWORD}
       API_JWT_SECRET: ${API_JWT_SECRET}
       API_SERVICE_KEY: ${API_SERVICE_KEY}
+      COLLECTOR_URL: http://eami-collector:8888
+      COLLECTOR_API_KEY: ${COLLECTOR_API_KEY}
     ports:
       - "8081:8081"
     depends_on:
@@ -109,7 +117,7 @@ services:
   # eami-ui — React web application (nginx, production build)
   # ──────────────────────────────────────────────────────────────
   eami-ui:
-    image: ghcr.io/bhargavrash-lgtm/eami-ui:v1.0.0
+    image: ghcr.io/bhargavrash-lgtm/eami-ui:v1.0.1
     ports:
       - "80:80"
     depends_on:

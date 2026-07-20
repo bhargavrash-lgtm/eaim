@@ -194,3 +194,34 @@ type Alert struct {
 	MetricValue    pgtype.Float8 // migration 003
 }
 
+// GatewayTool mirrors the gateway_tools table.
+type GatewayTool struct {
+	ID          uuid.UUID
+	OrgID       uuid.UUID
+	Name        string
+	Type        string // mcp | rest_api | database
+	AuthType    string // oauth2 | api_key | basic | db_connection_string
+	MCPCommand  pgtype.Text
+	BaseURL     pgtype.Text
+	Status      string // connected | degraded | disconnected
+	LastUsed    pgtype.Timestamptz
+	LastTested  pgtype.Timestamptz
+	CreatedAt   time.Time
+}
+
+// GatewayNode mirrors the gateway_nodes table (joined with latest metrics).
+type GatewayNode struct {
+	ID             uuid.UUID
+	OrgID          uuid.UUID
+	Name           string
+	Role           string // primary | edge | dr_standby
+	Status         string // healthy | degraded | standby | offline
+	Address        string
+	Hostname       pgtype.Text
+	Version        pgtype.Text
+	LastHeartbeat  pgtype.Timestamptz
+	// Latest metrics (LEFT JOIN gateway_node_metrics)
+	CPUPct          pgtype.Float8
+	RequestsPerMin  pgtype.Int4
+}
+

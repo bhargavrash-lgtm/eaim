@@ -102,8 +102,9 @@ CREATE TABLE endpoint_reports (
     schema_version TEXT NOT NULL DEFAULT '1.0'
 );
 CREATE INDEX idx_reports_endpoint ON endpoint_reports(endpoint_id, collected_at DESC);
--- TimescaleDB hypertable for automatic time-based partitioning
-SELECT create_hypertable('endpoint_reports', 'collected_at', if_not_exists => TRUE);
+CREATE INDEX idx_reports_collected ON endpoint_reports(collected_at DESC);
+-- Note: not a hypertable — UUID PRIMARY KEY is incompatible with TimescaleDB
+-- partitioning (child tables FK-reference id alone). Plain indexes suffice for v1.
 
 -- Normalised AI app signals (for fast querying)
 CREATE TABLE endpoint_ai_apps (
@@ -316,13 +317,49 @@ CREATE TABLE audit_log (
     hash           TEXT NOT NULL
 ) PARTITION BY RANGE (timestamp);
 
--- Monthly partitions (DevOps agent creates future partitions)
+-- Monthly partitions — pre-created through 2027; auto-extended by pg_cron (see 007_audit_partitions.sql)
+-- 2026
 CREATE TABLE audit_log_2026_05 PARTITION OF audit_log
     FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
 CREATE TABLE audit_log_2026_06 PARTITION OF audit_log
     FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
 CREATE TABLE audit_log_2026_07 PARTITION OF audit_log
     FOR VALUES FROM ('2026-07-01') TO ('2026-08-01');
+CREATE TABLE audit_log_2026_08 PARTITION OF audit_log
+    FOR VALUES FROM ('2026-08-01') TO ('2026-09-01');
+CREATE TABLE audit_log_2026_09 PARTITION OF audit_log
+    FOR VALUES FROM ('2026-09-01') TO ('2026-10-01');
+CREATE TABLE audit_log_2026_10 PARTITION OF audit_log
+    FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');
+CREATE TABLE audit_log_2026_11 PARTITION OF audit_log
+    FOR VALUES FROM ('2026-11-01') TO ('2026-12-01');
+CREATE TABLE audit_log_2026_12 PARTITION OF audit_log
+    FOR VALUES FROM ('2026-12-01') TO ('2027-01-01');
+-- 2027
+CREATE TABLE audit_log_2027_01 PARTITION OF audit_log
+    FOR VALUES FROM ('2027-01-01') TO ('2027-02-01');
+CREATE TABLE audit_log_2027_02 PARTITION OF audit_log
+    FOR VALUES FROM ('2027-02-01') TO ('2027-03-01');
+CREATE TABLE audit_log_2027_03 PARTITION OF audit_log
+    FOR VALUES FROM ('2027-03-01') TO ('2027-04-01');
+CREATE TABLE audit_log_2027_04 PARTITION OF audit_log
+    FOR VALUES FROM ('2027-04-01') TO ('2027-05-01');
+CREATE TABLE audit_log_2027_05 PARTITION OF audit_log
+    FOR VALUES FROM ('2027-05-01') TO ('2027-06-01');
+CREATE TABLE audit_log_2027_06 PARTITION OF audit_log
+    FOR VALUES FROM ('2027-06-01') TO ('2027-07-01');
+CREATE TABLE audit_log_2027_07 PARTITION OF audit_log
+    FOR VALUES FROM ('2027-07-01') TO ('2027-08-01');
+CREATE TABLE audit_log_2027_08 PARTITION OF audit_log
+    FOR VALUES FROM ('2027-08-01') TO ('2027-09-01');
+CREATE TABLE audit_log_2027_09 PARTITION OF audit_log
+    FOR VALUES FROM ('2027-09-01') TO ('2027-10-01');
+CREATE TABLE audit_log_2027_10 PARTITION OF audit_log
+    FOR VALUES FROM ('2027-10-01') TO ('2027-11-01');
+CREATE TABLE audit_log_2027_11 PARTITION OF audit_log
+    FOR VALUES FROM ('2027-11-01') TO ('2027-12-01');
+CREATE TABLE audit_log_2027_12 PARTITION OF audit_log
+    FOR VALUES FROM ('2027-12-01') TO ('2028-01-01');
 
 CREATE INDEX idx_audit_log_org_ts ON audit_log(org_id, timestamp DESC);
 CREATE INDEX idx_audit_log_agent ON audit_log(agent_name, timestamp DESC);
@@ -356,8 +393,9 @@ CREATE TABLE token_usage (
     recorded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 SELECT create_hypertable('token_usage', 'recorded_at', if_not_exists => TRUE);
-CREATE INDEX idx_token_usage_org ON token_usage(org_id, recorded_at DESC);
+CREATE INDEX idx_token_usage_org   ON token_usage(org_id, recorded_at DESC);
 CREATE INDEX idx_token_usage_agent ON token_usage(agent_id, recorded_at DESC);
+CREATE INDEX idx_token_usage_model ON token_usage(model, recorded_at DESC);
 
 -- Model pricing table (maintained by DevOps/admin)
 CREATE TABLE model_pricing (
@@ -367,12 +405,15 @@ CREATE TABLE model_pricing (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 INSERT INTO model_pricing (model, cost_per_1k_in, cost_per_1k_out) VALUES
-    ('claude-opus-4-6',    0.015, 0.075),
-    ('claude-sonnet-4-6',  0.003, 0.015),
-    ('claude-haiku-4-5',   0.00025, 0.00125),
-    ('gpt-4o',             0.005, 0.015),
-    ('gpt-4o-mini',        0.00015, 0.0006),
-    ('gpt-4-turbo',        0.010, 0.030);
+    ('claude-opus-4-6',            0.015000, 0.075000),
+    ('claude-sonnet-4-6',          0.003000, 0.015000),
+    ('claude-haiku-4-5-20251001',  0.000800, 0.004000),
+    ('claude-3-5-sonnet-20241022', 0.003000, 0.015000),
+    ('claude-3-opus-20240229',     0.015000, 0.075000),
+    ('claude-3-haiku-20240307',    0.000250, 0.001250),
+    ('gpt-4o',                     0.005000, 0.015000),
+    ('gpt-4o-mini',                0.000150, 0.000600),
+    ('gpt-4-turbo',                0.010000, 0.030000);
 
 -- ─────────────────────────────────────────────────────────
 -- EPISODE MEMORY

@@ -185,12 +185,12 @@ function EndpointDrawer({ endpointId, onClose }: { endpointId: string; onClose: 
             </Section>
 
             {/* Network Activity */}
-            <Section title="Network Activity" count={report.network_activity?.length ?? 0}>
-              {(report.network_activity ?? []).length === 0
+            <Section title="Network Activity" count={(report.network_activity as any)?.active_connections?.length ?? 0}>
+              {((report.network_activity as any)?.active_connections ?? []).length === 0
                 ? <p className="text-gray-400">None detected</p>
                 : (
                   <ul className="space-y-1">
-                    {(report.network_activity as NetworkConnection[]).map((n, i) => (
+                    {((report.network_activity as any)?.active_connections as NetworkConnection[] ?? []).map((n, i) => (
                       <li key={i} className="flex items-center justify-between text-xs">
                         <span className="font-medium">{n.remote_host}:{n.remote_port}</span>
                         <span className="text-gray-400">{n.process_name} (PID {n.pid}) · {n.state}</span>

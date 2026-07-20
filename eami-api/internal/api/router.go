@@ -59,6 +59,7 @@ func (s *Server) Handler() http.Handler {
 
 	// ── Collector write path (service key auth, no JWT) ───────────────────────
 	r.With(s.requireServiceKey).Post("/v1/reports", s.IngestReports)
+	r.With(s.requireServiceKey).Post("/v1/ingest/batch", s.IngestBatch)
 	r.With(s.requireServiceKey).Post("/v1/internal/token-usage", s.IngestTokenUsage)
 
 	r.Group(func(r chi.Router) {
@@ -93,6 +94,10 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/v1/gateway/policies/reorder", s.ReorderPolicies)
 			r.Patch("/v1/gateway/policies/{policyId}", s.UpdatePolicy)
 			r.Delete("/v1/gateway/policies/{policyId}", s.DeletePolicy)
+			r.Post("/v1/gateway/tools", s.CreateTool)
+			r.Delete("/v1/gateway/tools/{toolId}", s.DeleteTool)
+			r.Post("/v1/gateway/tools/{toolId}/test", s.TestTool)
+			r.Delete("/v1/gateway/nodes/{nodeId}", s.DeleteNode)
 			r.Post("/v1/approvals", s.CreateApproval)
 			// Alert rules (write)
 			r.Post("/v1/alerts/rules", s.CreateAlertRule)
@@ -118,8 +123,11 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/v1/gateway/agents/{agentId}/config", s.GetAgentConfig)
 			r.Get("/v1/gateway/policies", s.ListPolicies)
 			r.Get("/v1/gateway/policies/{policyId}", s.GetPolicy)
+			r.Get("/v1/gateway/tools", s.ListTools)
+			r.Get("/v1/gateway/nodes", s.ListNodes)
 			r.Get("/v1/audit", s.ListAudit)
 			r.Get("/v1/audit/export", s.ExportAudit)
+			r.Get("/v1/audit/verify", s.VerifyAuditChain)
 			// Alert rules + alerts (read)
 			r.Get("/v1/alerts/rules", s.ListAlertRules)
 			r.Get("/v1/alerts", s.ListAlerts)
@@ -130,6 +138,10 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/v1/memory/episodes", s.ListMemoryEpisodes)
 			r.Get("/v1/memory/episodes/search", s.SearchMemoryEpisodes)
 			// Discover (read)
+			// /v1/endpoints — agent machine inventory (eami-agent discovery data)
+			r.Get("/v1/endpoints", s.ListAgentEndpoints)
+			r.Get("/v1/endpoints/{endpointId}", s.GetAgentEndpoint)
+			// /v1/discover/endpoints — HTTP traffic observations (discovered_endpoints table)
 			r.Get("/v1/discover/endpoints", s.ListEndpoints)
 			r.Get("/v1/discover/endpoints/{endpointId}", s.GetEndpoint)
 		})

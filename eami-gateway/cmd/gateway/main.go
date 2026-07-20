@@ -27,8 +27,10 @@ import (
 	"github.com/eami/gateway/internal/approval"
 	"github.com/eami/gateway/internal/audit"
 	"github.com/eami/gateway/internal/config"
+	"github.com/eami/gateway/internal/episode"
 	"github.com/eami/gateway/internal/identity"
 	"github.com/eami/gateway/internal/mcp"
+	"github.com/eami/gateway/internal/policyloader"
 	"github.com/eami/gateway/internal/proxy"
 	"github.com/eami/gateway/internal/registry"
 	policy "github.com/eami/policy"
@@ -78,6 +80,9 @@ func run() error {
 	}
 	slog.Info("audit writer initialised")
 
+	episodeRecorder := episode.New(pool)
+	slog.Info("episode recorder ready")
+
 	agentRegistry := registry.New(pool)
 	slog.Info("agent registry ready")
 
@@ -88,13 +93,25 @@ func run() error {
 	}
 	slog.Info("identity manager ready", "keypair_path", cfg.Token.KeypairPath)
 
-	// PolicySet in eami-policy is []policy.Rule.
-	rules, err := loadPolicySet(cfg.Policy.RulesPath)
-	if err != nil {
-		return fmt.Errorf("policy load: %w", err)
+	// Load policies from the database. Hot-reloads on pg_notify "policy_reload"
+	// so that changes made in the UI take effect without a gateway restart.
+	// YAML file is a bootstrap fallback: used only when the DB returns 0 rules
+	// (e.g. a fresh install with no policies created yet).
+	pLoader := policyloader.New(pool)
+	if loadErr := pLoader.Load(ctx); loadErr != nil {
+		slog.Warn("policy DB load failed -- falling back to YAML", "err", loadErr)
+		if yamlRules, yamlErr := loadPolicySet(cfg.Policy.RulesPath); yamlErr == nil {
+			pLoader.Seed(yamlRules)
+			slog.Info("policy engine: seeded from YAML fallback", "rule_count", len(yamlRules))
+		}
+	} else if pLoader.RuleCount() == 0 {
+		if yamlRules, yamlErr := loadPolicySet(cfg.Policy.RulesPath); yamlErr == nil && len(yamlRules) > 0 {
+			pLoader.Seed(yamlRules)
+			slog.Info("policy engine: DB empty -- seeded from YAML", "rule_count", len(yamlRules))
+		}
 	}
-	evaluator := policy.NewEvaluator(rules)
-	slog.Info("policy engine ready", "rule_count", len(rules))
+	go pLoader.Listen(ctx)
+	slog.Info("policy engine ready (DB-backed, live reload enabled)", "rules", pLoader.RuleCount())
 
 	fwdProxy := proxy.New(proxy.Config{DownstreamURL: cfg.Proxy.DownstreamSSEAddr}, nil)
 	slog.Info("proxy configured", "downstream", cfg.Proxy.DownstreamSSEAddr)
@@ -132,7 +149,7 @@ func run() error {
 
 	dispatch := func(reqCtx context.Context, ac mcp.ActionContext) (json.RawMessage, error) {
 		start := time.Now()
-		decision, evalErr := evaluator.Evaluate(reqCtx, ac.ToPolicyContext())
+		decision, evalErr := pLoader.Evaluator().Evaluate(reqCtx, ac.ToPolicyContext())
 		if evalErr != nil {
 			// Semantic evaluation errors are non-fatal; log and default to allow.
 			slog.Warn("policy eval error — defaulting to allow", "err", evalErr)
@@ -164,6 +181,16 @@ func run() error {
 		case policy.ActionDeny:
 			auditEntry.Decision = "denied"
 			_ = auditWriter.Write(reqCtx, auditEntry)
+			go episodeRecorder.Record(context.Background(), ac.OrgID, ac.AgentUUID, ac.AgentName,
+				[]episode.Step{{
+					ToolName:  ac.Tool,
+					Action:    ac.Action,
+					Params:    ac.Parameters,
+					Decision:  "blocked",
+					Timestamp: ac.ReceivedAt,
+				}},
+				"blocked",
+			)
 			// Return a typed error so the MCP handler builds a structured -32600 response.
 			return nil, &mcp.PolicyDeniedError{
 				Reason:   decision.Reason,
@@ -193,7 +220,23 @@ func run() error {
 				"agent", ac.AgentName,
 				"hold_timeout", holdTimeout,
 			)
-			return approvalRouter.Hold(reqCtx, approvalID, approvalReq)
+			result, holdErr := approvalRouter.Hold(reqCtx, approvalID, approvalReq)
+			outcome := "success"
+			if holdErr != nil {
+				outcome = "failed"
+			}
+			go episodeRecorder.Record(context.Background(), ac.OrgID, ac.AgentUUID, ac.AgentName,
+				[]episode.Step{{
+					ToolName:  ac.Tool,
+					Action:    ac.Action,
+					Params:    ac.Parameters,
+					Result:    result,
+					Decision:  "escalated",
+					Timestamp: ac.ReceivedAt,
+				}},
+				outcome,
+			)
+			return result, holdErr
 
 		default: // policy.ActionAllow
 			tr, proxyErr := fwdProxy.Forward(reqCtx, proxy.ToolRequest{
@@ -205,6 +248,16 @@ func run() error {
 			if proxyErr != nil {
 				auditEntry.Decision = "denied"
 				_ = auditWriter.Write(reqCtx, auditEntry)
+				go episodeRecorder.Record(context.Background(), ac.OrgID, ac.AgentUUID, ac.AgentName,
+					[]episode.Step{{
+						ToolName:  ac.Tool,
+						Action:    ac.Action,
+						Params:    ac.Parameters,
+						Decision:  "allowed",
+						Timestamp: ac.ReceivedAt,
+					}},
+					"failed",
+				)
 				return nil, fmt.Errorf("proxy error: %w", proxyErr)
 			}
 			auditEntry.Decision = "allowed"
@@ -220,6 +273,18 @@ func run() error {
 					slog.Warn("token usage write failed", "agent", ac.AgentName, "err", err)
 				}
 			}()
+
+			go episodeRecorder.Record(context.Background(), ac.OrgID, ac.AgentUUID, ac.AgentName,
+				[]episode.Step{{
+					ToolName:  ac.Tool,
+					Action:    ac.Action,
+					Params:    ac.Parameters,
+					Result:    tr.Body,
+					Decision:  "allowed",
+					Timestamp: ac.ReceivedAt,
+				}},
+				"success",
+			)
 
 			return tr.Body, nil
 		}
