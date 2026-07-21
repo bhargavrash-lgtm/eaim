@@ -93,6 +93,11 @@ func run() error {
 	}
 	slog.Info("identity manager ready", "keypair_path", cfg.Token.KeypairPath)
 
+	episodeReader := episode.NewReader(pool)
+	// agentRegistry (*registry.Registry) satisfies episode.AgentResolver structurally.
+	episodeHTTP := episode.NewHTTPHandler(episodeReader, idManager, agentRegistry, cfg.API.EpisodeReadServiceKey)
+	slog.Info("episode read endpoint ready")
+
 	// Load policies from the database. Hot-reloads on pg_notify "policy_reload"
 	// so that changes made in the UI take effect without a gateway restart.
 	// YAML file is a bootstrap fallback: used only when the DB returns 0 rules
@@ -300,6 +305,12 @@ func run() error {
 	//   POST /v1/mcp/messages - submit tool_call JSON-RPC per session
 	mux.HandleFunc("/v1/mcp/sse", mcpHandler.ServeSSE)
 	mux.HandleFunc("/v1/mcp/messages", mcpHandler.ServeMessages)
+	// Episode read endpoint (ADR-019): serves full episode content to
+	// eami-api's memory proxy (server-to-server) or a directly-authenticated
+	// agent/desktop client. Never called by a browser — see internal/episode/http.go.
+	mux.HandleFunc("GET /v1/gateway/episodes", episodeHTTP.ListEpisodes)
+	mux.HandleFunc("GET /v1/gateway/episodes/search", episodeHTTP.SearchEpisodes)
+	mux.HandleFunc("GET /v1/gateway/episodes/{id}", episodeHTTP.GetEpisode)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

@@ -41,6 +41,13 @@ approval:
 api:
   base_url: "http://eami-api:8081"
   service_key: "changeme"
+  # Required. Dedicated secret validated on inbound calls to this gateway's
+  # episode read endpoint (GET /v1/gateway/episodes*) — checked against the
+  # X-Service-Key header sent by eami-api's memory proxy. Separate from
+  # service_key above (that one is sent outbound by this gateway; this one
+  # is validated inbound) so a leak of one doesn't also grant the other.
+  # Generate: openssl rand -hex 32. Override via GATEWAY_EPISODE_READ_SERVICE_KEY.
+  episode_read_service_key: ""
 
 # Logging
 log:
