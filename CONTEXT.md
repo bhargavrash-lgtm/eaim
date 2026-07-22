@@ -15,9 +15,10 @@ or prior context suggests otherwise, it is wrong; trust this line.
   formal entry, same number — the informal Pending-table row it replaces
   has been removed, not renumbered). **Now fully enforced in the running
   system, not just decided on paper — see B-002 Brief 3 below.**
-- **B-002: DONE, all 3 briefs complete** (Brief 3 built and tested on
-  branch `b-002-memory-cutover`, pending merge — merge before treating
-  this as fully live on `master`). History:
+- **B-002: DONE and fully closed on `master`** — all 3 briefs complete
+  and merged (`3eab113`, `adcd3e9`, `292d6a4`). Exactly one path to full
+  episode content exists in the running system, and it enforces org
+  isolation. History:
   - Brief 1 (gateway dual-auth endpoint): **DONE, merged to master**
     (merge commit `3eab113`, from branch `b-002-gateway-episode-endpoint`,
     plan at `C:\Users\bharg\.claude\plans\unified-wandering-karp.md`). New
@@ -50,8 +51,9 @@ or prior context suggests otherwise, it is wrong; trust this line.
     client's call count is zero). Fixed a nil-`cfg` panic in `NewServer`
     along the way (pre-existing latent bug, surfaced by wiring in the new
     config — `finops_test.go` already called `NewServer(nil, ...)`).
-  - Brief 3 (memory.go + MemoryPage.tsx cutover): **DONE**, branch
-    `b-002-memory-cutover`, plan at
+  - Brief 3 (memory.go + MemoryPage.tsx cutover): **DONE, merged to
+    master** (merge commit `292d6a4`, branch `b-002-memory-cutover`,
+    since deleted), plan at
     `C:\Users\bharg\.claude\plans\unified-wandering-karp.md`. Chose
     option (a): re-pointed the existing, `api/openapi.yaml`-documented
     `/v1/memory/episodes` and `/v1/memory/episodes/search` URLs at
@@ -77,19 +79,20 @@ or prior context suggests otherwise, it is wrong; trust this line.
     checked install locations directly, not just PATH) and `docker
     compose up`-based manual verification (no Docker in this
     environment) — `MemoryPage.tsx`'s correctness rests on manual
-    shape-verification only. **Not yet merged to master.**
+    shape-verification only.
 
 ## Standing facts Code and PM must both know
 - Desktop app: planned future feature, not yet built. Gateway auth should
   support it (Bearer JWT path) without a live consumer yet. Brief 1's dual
   auth already supports this path (Bearer AI-token JWT, org resolved
   server-side via the agent registry) with no live consumer.
-- Brief 2's org-isolation logic is now built and verified, but **do not
-  provision `GATEWAY_EPISODE_READ_SERVICE_KEY` anywhere a caller other
-  than eami-api's proxy could use it directly against eami-gateway** —
-  see BACKLOG B-015 (downgraded to Medium, not closed: Brief 1's gateway
-  endpoint itself still enforces nothing on its own, Brief 2 only
-  protects traffic that actually goes through it).
+- B-002's org-isolation logic is built, merged, and verified end-to-end
+  (Briefs 2+3), but **do not provision `GATEWAY_EPISODE_READ_SERVICE_KEY`
+  anywhere a caller other than eami-api's proxy could use it directly
+  against eami-gateway** — see BACKLOG B-015 (Medium, still open: this is
+  now a standalone network-hardening item, not a B-002 blocker — Brief
+  1's gateway endpoint itself still enforces nothing on its own if
+  reached directly, bypassing eami-api entirely).
 - Pre-existing, unrelated issue discovered 2026-07-22 while verifying
   Brief 2: `finops_test.go`'s `TestFinOpsTimeSeries_*` subtests panic
   internally (nil `s.queries`) but still report PASS because chi's
@@ -101,12 +104,14 @@ or prior context suggests otherwise, it is wrong; trust this line.
 - Solo founder, pre-first-customer, evening/weekend hours.
 
 ## Last updated
-2026-07-22 by Claude Code — B-002 Brief 3 (memory.go + MemoryPage.tsx
-cutover) built, tested, reviewed, on branch `b-002-memory-cutover` (not
-yet merged). `memory.go`/`store/episodes.go` deleted; `/v1/memory/
-episodes*` now served by Brief 2's org-isolated handlers with zero
-frontend changes needed. Security review confirms the leak is fully
-closed. B-002 is DONE pending this branch's merge. BACKLOG updated:
-Brief 3 DONE, B-002 marked resolved, B-012 closed incidentally, new
-B-017/B-018 logged for pre-existing doc/comment drift discovered along
-the way.
+2026-07-22 by Claude Code — merged `b-002-memory-cutover` into master
+(merge commit `292d6a4`; branch deleted, both locally and on origin).
+**B-002 is now fully closed on master**: `memory.go`/`store/episodes.go`
+deleted, `/v1/memory/episodes*` served by Brief 2's org-isolated
+handlers, zero frontend changes needed, security review confirms the
+leak is fully closed (not just superseded by a safer alternative
+running alongside it). All three B-002 briefs (`3eab113`, `adcd3e9`,
+`292d6a4`) are on master. BACKLOG updated to match: B-002 marked
+resolved, B-015 reframed as a standalone network-hardening item (no
+longer a B-002 blocker), B-012 closed incidentally, B-017/B-018 logged
+for pre-existing doc/comment drift discovered along the way.
