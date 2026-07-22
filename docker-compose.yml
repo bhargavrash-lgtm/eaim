@@ -144,8 +144,8 @@ services:
   # ──────────────────────────────────────────────────────────────
   eami-ui:
     build:
-      context: ./eami-ui
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: eami-ui/Dockerfile
       target: development
     environment:
       # Vite proxy runs inside Docker — must use service names, not host IPs

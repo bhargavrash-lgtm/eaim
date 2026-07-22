@@ -104,14 +104,25 @@ or prior context suggests otherwise, it is wrong; trust this line.
 - Solo founder, pre-first-customer, evening/weekend hours.
 
 ## Last updated
-2026-07-22 by Claude Code — merged `b-002-memory-cutover` into master
-(merge commit `292d6a4`; branch deleted, both locally and on origin).
-**B-002 is now fully closed on master**: `memory.go`/`store/episodes.go`
-deleted, `/v1/memory/episodes*` served by Brief 2's org-isolated
-handlers, zero frontend changes needed, security review confirms the
-leak is fully closed (not just superseded by a safer alternative
-running alongside it). All three B-002 briefs (`3eab113`, `adcd3e9`,
-`292d6a4`) are on master. BACKLOG updated to match: B-002 marked
-resolved, B-015 reframed as a standalone network-hardening item (no
-longer a B-002 blocker), B-012 closed incidentally, B-017/B-018 logged
-for pre-existing doc/comment drift discovered along the way.
+2026-07-22 by Claude Code — standalone infra fix (B-019, not tied to any
+brief): `docker-compose.yml`'s `eami-ui` service had `build.context:
+./eami-ui`, but `eami-ui/Dockerfile` copies repo-root `api/openapi.yaml`
+(needed for `generate-client`), so `docker compose up --build` failed
+with `COPY api/openapi.yaml /api/openapi.yaml: not found`. Fixed to
+`context: .` / `dockerfile: eami-ui/Dockerfile`; verified with `docker
+compose build eami-ui`. Also confirms Docker is available on this
+machine (previously assumed absent — see B-002 Brief 3 notes above,
+which were accurate when written but are now stale on that one point).
+Committed directly to master.
+
+Prior entry, still accurate: 2026-07-22, merged `b-002-memory-cutover`
+into master (merge commit `292d6a4`; branch deleted, both locally and
+on origin). **B-002 is now fully closed on master**: `memory.go`/
+`store/episodes.go` deleted, `/v1/memory/episodes*` served by Brief 2's
+org-isolated handlers, zero frontend changes needed, security review
+confirms the leak is fully closed (not just superseded by a safer
+alternative running alongside it). All three B-002 briefs (`3eab113`,
+`adcd3e9`, `292d6a4`) are on master. BACKLOG updated to match: B-002
+marked resolved, B-015 reframed as a standalone network-hardening item
+(no longer a B-002 blocker), B-012 closed incidentally, B-017/B-018
+logged for pre-existing doc/comment drift discovered along the way.

@@ -154,5 +154,6 @@ _(one line each; full detail in `BUILT.md` / `CHANGELOG.md`)_
 - **B-002 Brief 3 / B-002 fully closed** (2026-07-22, merge commit `292d6a4`) — `memory.go` and `store/episodes.go` (the last direct, unprotected episode-content query path) deleted entirely; `/v1/memory/episodes*` now served by Brief 2's org-isolated handlers. `MemoryPage.tsx` needed zero changes. Security review confirmed the leak fully closed, not just a safer alternative added. **B-002 is done — exactly one path to full episode content exists, and it enforces org isolation.**
 - **B-012** (2026-07-22, incidental to B-002 Brief 3) — the stale `router.go` "Memory episodes (stubs...)" comment is gone; that whole block was rewritten as part of the memory.go cutover.
 - **TASK-031 → TASK-068** (34 of ~40 tasks) — confirmed DONE via source cross-check; see full per-task table from the bootstrap survey if needed (not reproduced here to keep this file scannable — ask if you need the raw table).
+- **B-019** (2026-07-22) — standalone infra fix, not tied to any brief: `docker-compose.yml`'s `eami-ui` service had the wrong build context (`./eami-ui`) for a Dockerfile that copies repo-root `api/openapi.yaml`, breaking `docker compose up --build`. Fixed to `context: .` / `dockerfile: eami-ui/Dockerfile`. Verified with `docker compose build eami-ui`. Incidentally confirms Docker is available on this machine — see `BUILT.md` cross-cutting note (relevant to B-004, still QUEUED, not re-attempted here).
 
-## Next B-ID: B-019
+## Next B-ID: B-020
