@@ -25,35 +25,57 @@ or prior context suggests otherwise, it is wrong; trust this line.
     trust-boundary tradeoff flagged, tracked as BACKLOG B-015, not a bug).
     **Verified 2026-07-22 with a real toolchain: `go build ./...` and
     `go test ./... -v` both clean, 0 failures, 18/18 new tests passing.**
-  - Brief 2 (eami-api proxy layer): **READY TO START** — Brief 1's
-    dependency is satisfied and merged. Hard requirement inherited from
-    Brief 1's design, not optional: must independently verify the
-    requesting user actually has access to `org_id` before calling Brief
-    1's endpoint — Brief 1's service-key path trusts this completely and
-    enforces nothing itself (BACKLOG B-015 tracks the exposure window
-    this leaves open until Brief 2 ships).
-  - Brief 3 (memory.go + MemoryPage.tsx rewire): NOT STARTED — depends on Brief 2
+  - Brief 2 (eami-api proxy layer): **DONE, on branch `b-002-eami-api-
+    proxy-layer` (not yet merged)**, plan at
+    `C:\Users\bharg\.claude\plans\unified-wandering-karp.md`. New file
+    `eami-api/internal/api/gateway_episodes.go` proxies
+    `GET /v1/gateway/episodes*` to Brief 1's gateway endpoint. The hard
+    requirement Brief 1 deferred is now satisfied: `org_id` sent to the
+    gateway is always `claimsFromContext(r).OrgID` (the caller's own
+    session org), never client input — an optional `org_id` query param
+    is accepted only as a tamper-check that 403s on mismatch *before* the
+    gateway is ever called, so a forged org can't structurally reach the
+    gateway at all. Purely additive: `memory.go` has zero lines changed,
+    old `/v1/memory/episodes*` routes untouched. Reviewer + security
+    subagent passes both clean (2 low-severity test-coverage gaps found
+    and closed before commit). **Verified 2026-07-22 with a real
+    toolchain: `go build ./...`, `go vet ./...`, `go test ./...` all
+    clean, 0 failures, 11/11 new tests passing** (includes the centerpiece
+    `TestGatewayEpisodes_List_MismatchedOrgIDSupplied_Returns403_
+    GatewayNeverCalled`, asserting both the 403 and that the fake gateway
+    client's call count is zero). Fixed a nil-`cfg` panic in `NewServer`
+    along the way (pre-existing latent bug, surfaced by wiring in the new
+    config — `finops_test.go` already called `NewServer(nil, ...)`).
+    **Not yet merged to master** — do that before starting Brief 3.
+  - Brief 3 (memory.go + MemoryPage.tsx rewire): READY TO START once
+    Brief 2 is merged — depends on Brief 2's branch, not just its code
+    existing.
 
 ## Standing facts Code and PM must both know
 - Desktop app: planned future feature, not yet built. Gateway auth should
   support it (Bearer JWT path) without a live consumer yet. Brief 1's dual
   auth already supports this path (Bearer AI-token JWT, org resolved
   server-side via the agent registry) with no live consumer.
-- **Do not provision `GATEWAY_EPISODE_READ_SERVICE_KEY` in any
-  shared/multi-tenant environment before Brief 2 ships** — see BACKLOG
-  B-015. Until then, anyone holding that secret can read any org's full
-  episode content by supplying any `org_id`.
+- Brief 2's org-isolation logic is now built and verified, but **do not
+  provision `GATEWAY_EPISODE_READ_SERVICE_KEY` anywhere a caller other
+  than eami-api's proxy could use it directly against eami-gateway** —
+  see BACKLOG B-015 (downgraded to Medium, not closed: Brief 1's gateway
+  endpoint itself still enforces nothing on its own, Brief 2 only
+  protects traffic that actually goes through it).
+- Pre-existing, unrelated issue discovered 2026-07-22 while verifying
+  Brief 2: `finops_test.go`'s `TestFinOpsTimeSeries_*` subtests panic
+  internally (nil `s.queries`) but still report PASS because chi's
+  Recoverer catches it — see BACKLOG B-016. Not fixed, out of scope for
+  B-002.
 - No deploy infrastructure exists in this repo (no deploy.yml, no IaC).
   Nothing is live in production. api.eami.io in openapi.yaml is a spec
   placeholder, not a real deployment.
 - Solo founder, pre-first-customer, evening/weekend hours.
 
 ## Last updated
-2026-07-22 by Claude Code — merged `b-002-gateway-episode-endpoint` into
-master (B-002 Brief 1: eami-gateway episode read endpoint, verified via
-real `go build`/`go test`, both clean). DECISIONS.md ADR-019 formalized
-as a full Accepted entry (same number, replacing its own informal
-Pending row — briefly misnumbered ADR-020 in an intermediate commit,
-reverted). BACKLOG.md updated to match: Brief 1 marked DONE/merged,
-Brief 2 moved to READY TO START. BACKLOG B-015 still tracks the
-pre-Brief-2 deployment risk — unchanged, still open.
+2026-07-22 by Claude Code — B-002 Brief 2 (eami-api proxy layer) built,
+tested, reviewed, on branch `b-002-eami-api-proxy-layer` (not yet
+merged). Org-isolation hard requirement satisfied and verified. BACKLOG
+updated: Brief 2 DONE, Brief 3 ready-to-start-after-merge, B-015
+downgraded (Medium, still open), B-016 added for a pre-existing
+unrelated finops test issue discovered along the way.

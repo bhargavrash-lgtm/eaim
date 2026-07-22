@@ -126,6 +126,10 @@ services:
       COLLECTOR_URL: http://eami-collector:8888
       COLLECTOR_API_KEY: ${COLLECTOR_API_KEY}
       COLLECTOR_SERVICE_KEY: ${API_SERVICE_KEY}
+      # Gateway episode proxy (B-002 Brief 2) — reuses the same
+      # GATEWAY_EPISODE_READ_SERVICE_KEY value eami-gateway validates inbound.
+      API_GATEWAY_URL: http://eami-gateway:8080
+      GATEWAY_EPISODE_READ_SERVICE_KEY: ${GATEWAY_EPISODE_READ_SERVICE_KEY}
     ports:
       - "8081:8081"
     depends_on:

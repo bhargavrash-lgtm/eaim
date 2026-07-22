@@ -11,12 +11,12 @@ _(empty — founder/PM assigns from QUEUED)_
 **Objective:** `eami-api`'s memory endpoints stop violating (or are explicitly granted an exception to) the data-sovereignty rule in ADR-010.
 **Resolution (2026-07-21):** full episode content stays on-prem; `eami-api` never serves it directly. Implementation split into 3 briefs — see `CONTEXT.md`'s Active decision thread for current status.
 - [x] **Brief 1 — DONE, merged to master** (`b-002-gateway-episode-endpoint`, merge commit `3eab113`): `eami-gateway` gets a new dual-auth read endpoint (`GET /v1/gateway/episodes`, `/search`, `/{id}`) serving full episode content from its own on-prem Postgres. Dedicated secret (`GATEWAY_EPISODE_READ_SERVICE_KEY`), full unit test coverage including the security-critical forged-org_id and cross-org-404 cases. Reviewer + security subagent passes: clean. **Verified 2026-07-22 with a real toolchain: `go build ./...` and `go test ./... -v` both clean, 0 failures (18/18 new tests).**
-- [ ] **Brief 2 — READY TO START** (unblocked, Brief 1's dependency satisfied): `eami-api` proxy layer forwarding UI requests to Brief 1's endpoint. Hard requirement carried over from Brief 1's design: the proxy must independently verify the requesting user actually has access to the `org_id` it passes through — Brief 1's service-key path trusts this completely and enforces nothing itself (see B-015).
-- [ ] Brief 3 — NOT STARTED: `eami-api/internal/api/memory.go` stops querying `episodes` directly; `MemoryPage.tsx` rewired. Depends on Brief 2.
+- [x] **Brief 2 — DONE** (branch `b-002-eami-api-proxy-layer`, not yet merged): `eami-api` proxy layer (`internal/api/gateway_episodes.go`) forwarding UI requests to Brief 1's endpoint. The hard requirement is satisfied: `org_id` sent to the gateway is always the authenticated caller's own session org (`claimsFromContext(r).OrgID`), never client input — an optional `org_id` query param is accepted only as a tamper-check that 403s on mismatch before the gateway is ever called (structurally impossible for a forged org to reach the gateway, not just checked-and-rejected). Purely additive: `memory.go` has zero lines changed. 11 tests including the centerpiece `TestGatewayEpisodes_List_MismatchedOrgIDSupplied_Returns403_GatewayNeverCalled`. **Verified 2026-07-22: `go build ./...`, `go vet ./...`, `go test ./...` all clean, 0 failures.** Reviewer + security subagent passes: clean (2 low-severity test-coverage suggestions from the reviewer pass, both closed before commit).
+- [ ] Brief 3 — READY TO START (unblocked, Brief 2 merged... pending merge — see note): `eami-api/internal/api/memory.go` stops querying `episodes` directly, switches to Brief 2's proxy; `MemoryPage.tsx` rewired to use it. Depends on Brief 2's branch being merged to master first.
 - [x] `DECISIONS.md` ADR-019 updated to Accepted with the resolution (2026-07-22, formalized as a full entry replacing its own Pending row — same number, not renumbered).
-**Dependencies:** none for Brief 1 (done). Brief 2 has no remaining blockers.
-**Severity:** High — was: shipped code contradicts an accepted ADR. Now: fix in progress, 1 of 3 briefs complete and merged.
-**⚠️ Operational risk flagged by Brief 1's security review — see B-015. Still applies until Brief 2 ships.**
+**Dependencies:** none for Brief 1 (done, merged). Brief 2 done, on its own branch — merge before starting Brief 3.
+**Severity:** High — was: shipped code contradicts an accepted ADR. Now: 2 of 3 briefs complete; `memory.go` itself still violates the (now-Accepted) ADR-019 until Brief 3 lands.
+**⚠️ Operational risk flagged by Brief 1's security review — see B-015. Now mitigated in practice by Brief 2's org-isolation enforcement, but B-015 itself is about the *service-key path having no enforcement of its own* — still technically true of Brief 1's code in isolation, so leave B-015 open until it's explicitly re-reviewed.**
 
 ### B-003 — Approval flow integration/e2e test
 **Objective:** An automated test proves the full escalate → Slack → UI decide → resume/deny loop works, closing `tasks/TASK-044` which was never delivered.
@@ -110,14 +110,25 @@ _(empty — founder/PM assigns from QUEUED)_
 **Dependencies:** access to Mac hardware (none available in CI per `tasks/TASK-054-results.md`).
 
 ### B-015 — Do not deploy the gateway episode-read endpoint before Brief 2 ships
-**Objective:** Prevent a real tenant-isolation gap between Brief 1 (done) and Brief 2 (not started).
-**Context:** Brief 1's security review (2026-07-21) confirmed: `eami-gateway`'s new `GET /v1/gateway/episodes*` service-key auth path trusts a client-supplied `org_id` with no independent authorization check — by design, since that check is Brief 2's job (eami-api's proxy, not yet built). Until Brief 2 ships, anyone holding `GATEWAY_EPISODE_READ_SERVICE_KEY` can read **any** org's full episode content (tool calls, args, results) by supplying any `org_id`. This is not a bug in Brief 1 — it's an inherent, documented consequence of shipping a 3-brief fix incrementally — but it is a real exposure window if the route is reachable in a live multi-tenant environment before Brief 2 lands.
+**Objective:** Prevent a real tenant-isolation gap between Brief 1 (done) and Brief 2 (done, not yet merged).
+**Context:** Brief 1's security review (2026-07-21) confirmed: `eami-gateway`'s `GET /v1/gateway/episodes*` service-key auth path trusts a client-supplied `org_id` with no independent authorization check — by design, since that check is Brief 2's job. **Update 2026-07-22: Brief 2 is now done** (branch `b-002-eami-api-proxy-layer`) and its security review confirmed the org-isolation enforcement works as designed — but Brief 2's protection only applies to traffic going through *its* routes (`eami-api`'s `/v1/gateway/episodes*`). Brief 1's gateway endpoint itself is unchanged: anyone who holds `GATEWAY_EPISODE_READ_SERVICE_KEY` and can reach the gateway directly (bypassing eami-api entirely) still gets zero enforcement from the gateway side. This item stays open until Brief 2 is merged to master and confirmed to be the *only* path that's actually deployed/reachable with that secret provisioned.
 **Acceptance criteria:**
-- [ ] Confirm whether any environment reachable from outside the gateway's own trust boundary can currently hit this route before Brief 2 ships (e.g. is `GATEWAY_EPISODE_READ_SERVICE_KEY` provisioned anywhere yet?)
-- [ ] If yes: gate the route (feature flag, or don't provision the secret) until Brief 2's proxy exists to do real per-user org authorization
-- [ ] Close this item once Brief 2 ships (the proxy is the actual fix)
-**Dependencies:** Brief 2 (B-002).
-**Severity:** High while open, but bounded — same network-trust assumption as the gateway's existing unauthenticated `POST /v1/gateway/tokens` and `GET /healthz` routes (not a new class of exposure for this service, just new sensitive data behind it).
+- [ ] Merge `b-002-eami-api-proxy-layer` to master
+- [ ] Confirm whether any environment reachable from outside the gateway's own trust boundary can hit Brief 1's route directly (not via eami-api's proxy) — e.g. is `GATEWAY_EPISODE_READ_SERVICE_KEY` provisioned anywhere a non-eami-api caller could use it?
+- [ ] If yes: restrict network reachability so only eami-api can reach eami-gateway's episode endpoint (the proxy is the intended sole caller)
+- [ ] Close this item once Brief 2 is merged and that network assumption is confirmed
+**Dependencies:** Brief 2 merge (B-002).
+**Severity:** Medium (downgraded from High) — Brief 2's org-isolation logic is now built and verified; residual risk is purely about network reachability of Brief 1's endpoint outside the intended eami-api-only caller, same class of trust-boundary assumption as the gateway's existing unauthenticated `POST /v1/gateway/tokens` and `GET /healthz` routes.
+
+### B-016 — Fix pre-existing nil-`s.queries` panics in FinOps time-series tests
+**Objective:** `TestFinOpsTimeSeries_*` subtests in `eami-api/internal/api/finops_test.go` stop panicking internally.
+**Context:** Discovered while verifying B-002 Brief 2 (2026-07-22, first real `go test` run this repo has had) — several `TestFinOpsTimeSeries_ValidGranularities`/`_ValidAgentID_PassesValidation`/`_MissingGranularity_UsesDefault` subtests panic with a nil-pointer dereference in `finops.go:269` (`s.queries.DB()`, `s.queries` is nil in `newFinOpsTestEnv`'s `NewServer(nil, authSvc, nil, nil)`). chi's `Recoverer` middleware catches the panic and returns 500, and the tests don't assert against that specific case, so they still report `--- PASS` — meaning this has been silently masking broken behavior, possibly for a long time. Confirmed pre-existing and unrelated to B-002 Brief 2 (`git diff --stat master -- finops.go finops_test.go` is empty on that branch).
+**Acceptance criteria:**
+- [ ] Root-cause why these specific FinOps time-series requests reach `s.queries.DB()` instead of failing validation first (per `newFinOpsTestEnv`'s own comment, they're expected not to)
+- [ ] Fix so the panic no longer occurs (either the test fixture provides a working store, or the handler validates further before touching `s.queries`)
+- [ ] Test assertions strengthened so a future regression here fails the test instead of passing on 500
+**Dependencies:** none.
+**Severity:** Medium — doesn't block anything currently, but a passing-test-that-panics is exactly the kind of gap that lets real bugs ship unnoticed.
 
 ## BLOCKED
 - **B-007** — blocked on ADR-009 (local vs. API LLM endpoint decision), open since 2026-05-31.
@@ -130,6 +141,7 @@ _(one line each; full detail in `BUILT.md` / `CHANGELOG.md`)_
 - **Security hardening (TASK-051 findings, all HIGH closed)** — JWT revocation persisted + issuer-validated (TASK-062/063), audit-log DB-error propagation (TASK-064), audit chain verify endpoint (TASK-065), bcrypt cost 10→12 (TASK-066).
 - **Unreleased, on HEAD `d8b9483`** — endpoint agent detection scanners (browser extensions, scheduled tasks), alerting engine metrics (`scope_drift_count`, `failed_delivery_count`), `/v1/discover`, `/v1/reports`, `/v1/internal/token-usage` ingest APIs, episode recorder (TASK-069, placeholder embeddings), Memory/Episode library UI page (TASK-070) — **see B-002, this last item shipped ahead of its blocking ADR (now being fixed, Brief 1 of 3 done).**
 - **B-002 Brief 1** (2026-07-22, merge commit `3eab113`) — `eami-gateway` dual-auth episode read endpoint, verified with a real toolchain (`go build`/`go test` clean, 18/18 new tests). Closes the ADR-019 half of the data-sovereignty fix that's on the gateway side; `eami-api`/`eami-ui` sides remain in Briefs 2–3.
+- **B-002 Brief 2** (2026-07-22, branch `b-002-eami-api-proxy-layer`, not yet merged) — `eami-api` proxy layer for episode content, with the actual org-isolation enforcement Brief 1 deferred. Verified with a real toolchain (`go build`/`go vet`/`go test` clean, 11/11 new tests). `eami-ui` side remains in Brief 3.
 - **TASK-031 → TASK-068** (34 of ~40 tasks) — confirmed DONE via source cross-check; see full per-task table from the bootstrap survey if needed (not reproduced here to keep this file scannable — ask if you need the raw table).
 
-## Next B-ID: B-016
+## Next B-ID: B-017
