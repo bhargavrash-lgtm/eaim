@@ -55,6 +55,15 @@ type APIConfig struct {
 
 	// ServiceKey is the shared secret sent as X-Service-Key on internal API calls.
 	ServiceKey string `yaml:"service_key"`
+
+	// EpisodeReadServiceKey is the shared secret required (as X-Service-Key)
+	// on inbound calls to the gateway's episode read endpoint
+	// (GET /v1/gateway/episodes*, see internal/episode/http.go). Deliberately
+	// separate from ServiceKey above: that key is sent outbound by the
+	// gateway to eami-api; this one is validated inbound, from eami-api's
+	// memory proxy. Keeping them distinct means a leak of one does not also
+	// grant the other capability.
+	EpisodeReadServiceKey string `yaml:"episode_read_service_key"`
 }
 
 // LogConfig controls logging behaviour.
@@ -124,6 +133,9 @@ func Load(path string) (*Config, error) {
 	if v := os.Getenv("GATEWAY_API_SERVICE_KEY"); v != "" {
 		cfg.API.ServiceKey = v
 	}
+	if v := os.Getenv("GATEWAY_EPISODE_READ_SERVICE_KEY"); v != "" {
+		cfg.API.EpisodeReadServiceKey = v
+	}
 
 	// Policy rules file: default to empty (allows gateway to start without rules)
 	if cfg.Policy.RulesPath == "" {
@@ -168,6 +180,9 @@ func validate(cfg *Config) error {
 	}
 	if cfg.Policy.RulesPath == "" {
 		return fmt.Errorf("config: policy.rules_path is required")
+	}
+	if cfg.API.EpisodeReadServiceKey == "" {
+		return fmt.Errorf("config: api.episode_read_service_key is required (gates full episode content access — see GATEWAY_EPISODE_READ_SERVICE_KEY)")
 	}
 
 	// Bounds check

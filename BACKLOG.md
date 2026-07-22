@@ -9,12 +9,14 @@ _(empty — founder/PM assigns from QUEUED)_
 
 ### B-002 — Resolve ADR-019 vs. ADR-010 conflict: episode content in the SaaS API
 **Objective:** `eami-api`'s memory endpoints stop violating (or are explicitly granted an exception to) the data-sovereignty rule in ADR-010.
-**Acceptance criteria:**
-- [ ] Architect-EAMI/founder rules on ADR-019 (still "Pending" in `DECISIONS.md`) — either eami-api gets a scoped exception to serve full episode content, or the memory endpoints are re-scoped to metadata-only with full content served from an on-prem gateway endpoint instead
-- [ ] `eami-api/internal/api/memory.go` matches whichever decision is made
-- [ ] `DECISIONS.md` ADR-019 updated to Accepted with the resolution
-**Dependencies:** Architect-EAMI decision (blocking — see BLOCKED below).
-**Severity:** High — currently shipped code contradicts an accepted ADR and an explicit task-brief instruction (`tasks/TASK-069.md`, `tasks/TASK-070.md`).
+**Resolution (2026-07-21):** full episode content stays on-prem; `eami-api` never serves it directly. Implementation split into 3 briefs — see `CONTEXT.md`'s Active decision thread for current status.
+- [x] **Brief 1 — DONE** (branch `b-002-gateway-episode-endpoint`): `eami-gateway` gets a new dual-auth read endpoint (`GET /v1/gateway/episodes`, `/search`, `/{id}`) serving full episode content from its own on-prem Postgres. Dedicated secret (`GATEWAY_EPISODE_READ_SERVICE_KEY`), full unit test coverage including the security-critical forged-org_id and cross-org-404 cases. Reviewer + security subagent passes: clean, no compile-level defects.
+- [ ] Brief 2 — NOT STARTED: `eami-api` proxy layer forwarding UI requests to Brief 1's endpoint.
+- [ ] Brief 3 — NOT STARTED: `eami-api/internal/api/memory.go` stops querying `episodes` directly; `MemoryPage.tsx` rewired.
+- [ ] `DECISIONS.md` ADR-019 updated to Accepted with the resolution (PM-EAMI owns this file — not updated by Code).
+**Dependencies:** none for Brief 1 (done). Brief 2 depends on Brief 1 (done, ready to start).
+**Severity:** High — was: shipped code contradicts an accepted ADR. Now: fix in progress, 1 of 3 briefs complete.
+**⚠️ Operational risk flagged by Brief 1's security review — see B-015.**
 
 ### B-003 — Approval flow integration/e2e test
 **Objective:** An automated test proves the full escalate → Slack → UI decide → resume/deny loop works, closing `tasks/TASK-044` which was never delivered.
@@ -107,17 +109,26 @@ _(empty — founder/PM assigns from QUEUED)_
 - [ ] Uninstall removes plist + binary cleanly
 **Dependencies:** access to Mac hardware (none available in CI per `tasks/TASK-054-results.md`).
 
+### B-015 — Do not deploy the gateway episode-read endpoint before Brief 2 ships
+**Objective:** Prevent a real tenant-isolation gap between Brief 1 (done) and Brief 2 (not started).
+**Context:** Brief 1's security review (2026-07-21) confirmed: `eami-gateway`'s new `GET /v1/gateway/episodes*` service-key auth path trusts a client-supplied `org_id` with no independent authorization check — by design, since that check is Brief 2's job (eami-api's proxy, not yet built). Until Brief 2 ships, anyone holding `GATEWAY_EPISODE_READ_SERVICE_KEY` can read **any** org's full episode content (tool calls, args, results) by supplying any `org_id`. This is not a bug in Brief 1 — it's an inherent, documented consequence of shipping a 3-brief fix incrementally — but it is a real exposure window if the route is reachable in a live multi-tenant environment before Brief 2 lands.
+**Acceptance criteria:**
+- [ ] Confirm whether any environment reachable from outside the gateway's own trust boundary can currently hit this route before Brief 2 ships (e.g. is `GATEWAY_EPISODE_READ_SERVICE_KEY` provisioned anywhere yet?)
+- [ ] If yes: gate the route (feature flag, or don't provision the secret) until Brief 2's proxy exists to do real per-user org authorization
+- [ ] Close this item once Brief 2 ships (the proxy is the actual fix)
+**Dependencies:** Brief 2 (B-002).
+**Severity:** High while open, but bounded — same network-trust assumption as the gateway's existing unauthenticated `POST /v1/gateway/tokens` and `GET /healthz` routes (not a new class of exposure for this service, just new sensitive data behind it).
+
 ## BLOCKED
-- **B-002** — blocked on Architect-EAMI/founder resolving ADR-019 (episode data-sovereignty exception, or not).
 - **B-007** — blocked on ADR-009 (local vs. API LLM endpoint decision), open since 2026-05-31.
-- **B-008** — blocked on the same ADR-009 decision as B-007, and secondarily on B-002's outcome.
+- **B-008** — blocked on the same ADR-009 decision as B-007, and secondarily on B-002's Brief 2/3 outcome.
 
 ## DONE
 _(one line each; full detail in `BUILT.md` / `CHANGELOG.md`)_
 - **v1.0.0** (2026-07-01) — first customer release: gateway proxy/policy/audit/approvals, endpoint discovery agent (all major platforms), full web UI, installers for Windows/macOS/Linux, CI/CD, `setup.sh`.
 - **v1.0.1** (2026-07-05, `84028bb`) — nginx `/v1/` proxy fix, Policies/Tools/Nodes/Audit pages completed.
 - **Security hardening (TASK-051 findings, all HIGH closed)** — JWT revocation persisted + issuer-validated (TASK-062/063), audit-log DB-error propagation (TASK-064), audit chain verify endpoint (TASK-065), bcrypt cost 10→12 (TASK-066).
-- **Unreleased, on HEAD `d8b9483`** — endpoint agent detection scanners (browser extensions, scheduled tasks), alerting engine metrics (`scope_drift_count`, `failed_delivery_count`), `/v1/discover`, `/v1/reports`, `/v1/internal/token-usage` ingest APIs, episode recorder (TASK-069, placeholder embeddings), Memory/Episode library UI page (TASK-070) — **see B-002, this last item shipped ahead of its blocking ADR.**
+- **Unreleased, on HEAD `d8b9483`** — endpoint agent detection scanners (browser extensions, scheduled tasks), alerting engine metrics (`scope_drift_count`, `failed_delivery_count`), `/v1/discover`, `/v1/reports`, `/v1/internal/token-usage` ingest APIs, episode recorder (TASK-069, placeholder embeddings), Memory/Episode library UI page (TASK-070) — **see B-002, this last item shipped ahead of its blocking ADR (now being fixed, Brief 1 of 3 done).**
 - **TASK-031 → TASK-068** (34 of ~40 tasks) — confirmed DONE via source cross-check; see full per-task table from the bootstrap survey if needed (not reproduced here to keep this file scannable — ask if you need the raw table).
 
-## Next B-ID: B-015
+## Next B-ID: B-016
