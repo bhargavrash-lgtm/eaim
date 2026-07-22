@@ -15,20 +15,23 @@ or prior context suggests otherwise, it is wrong; trust this line.
   formal entry, same number — the informal Pending-table row it replaces
   has been removed, not renumbered).
 - B-002 resolution in progress, 3-brief split:
-  - Brief 1 (gateway dual-auth endpoint): **DONE** — branch
-    `b-002-gateway-episode-endpoint`, plan at
-    `C:\Users\bharg\.claude\plans\unified-wandering-karp.md`. New
+  - Brief 1 (gateway dual-auth endpoint): **DONE, merged to master**
+    (merge commit `3eab113`, from branch `b-002-gateway-episode-endpoint`,
+    plan at `C:\Users\bharg\.claude\plans\unified-wandering-karp.md`). New
     `eami-gateway` package `internal/episode/{store,reader,http}.go` +
     tests, wired into `cmd/gateway/main.go`, new required config
     `GATEWAY_EPISODE_READ_SERVICE_KEY`. Reviewer + security subagent passes
     both clean (no compile-level defects; one already-known/approved
     trust-boundary tradeoff flagged, tracked as BACKLOG B-015, not a bug).
-    Never `go build`/`go test`-verified — no Go toolchain on this dev
-    machine (BACKLOG B-013).
-  - Brief 2 (eami-api proxy layer): NOT STARTED — depends on Brief 1 (done,
-    ready to start). Must independently verify the requesting user has
-    access to `org_id` before calling Brief 1's endpoint — Brief 1's
-    service-key path trusts this completely and enforces nothing itself.
+    **Verified 2026-07-22 with a real toolchain: `go build ./...` and
+    `go test ./... -v` both clean, 0 failures, 18/18 new tests passing.**
+  - Brief 2 (eami-api proxy layer): **READY TO START** — Brief 1's
+    dependency is satisfied and merged. Hard requirement inherited from
+    Brief 1's design, not optional: must independently verify the
+    requesting user actually has access to `org_id` before calling Brief
+    1's endpoint — Brief 1's service-key path trusts this completely and
+    enforces nothing itself (BACKLOG B-015 tracks the exposure window
+    this leaves open until Brief 2 ships).
   - Brief 3 (memory.go + MemoryPage.tsx rewire): NOT STARTED — depends on Brief 2
 
 ## Standing facts Code and PM must both know
@@ -51,4 +54,6 @@ master (B-002 Brief 1: eami-gateway episode read endpoint, verified via
 real `go build`/`go test`, both clean). DECISIONS.md ADR-019 formalized
 as a full Accepted entry (same number, replacing its own informal
 Pending row — briefly misnumbered ADR-020 in an intermediate commit,
-reverted). BACKLOG B-015 tracks the pre-Brief-2 deployment risk.
+reverted). BACKLOG.md updated to match: Brief 1 marked DONE/merged,
+Brief 2 moved to READY TO START. BACKLOG B-015 still tracks the
+pre-Brief-2 deployment risk — unchanged, still open.

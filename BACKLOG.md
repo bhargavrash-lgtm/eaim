@@ -10,13 +10,13 @@ _(empty — founder/PM assigns from QUEUED)_
 ### B-002 — Resolve ADR-019 vs. ADR-010 conflict: episode content in the SaaS API
 **Objective:** `eami-api`'s memory endpoints stop violating (or are explicitly granted an exception to) the data-sovereignty rule in ADR-010.
 **Resolution (2026-07-21):** full episode content stays on-prem; `eami-api` never serves it directly. Implementation split into 3 briefs — see `CONTEXT.md`'s Active decision thread for current status.
-- [x] **Brief 1 — DONE** (branch `b-002-gateway-episode-endpoint`): `eami-gateway` gets a new dual-auth read endpoint (`GET /v1/gateway/episodes`, `/search`, `/{id}`) serving full episode content from its own on-prem Postgres. Dedicated secret (`GATEWAY_EPISODE_READ_SERVICE_KEY`), full unit test coverage including the security-critical forged-org_id and cross-org-404 cases. Reviewer + security subagent passes: clean, no compile-level defects.
-- [ ] Brief 2 — NOT STARTED: `eami-api` proxy layer forwarding UI requests to Brief 1's endpoint.
-- [ ] Brief 3 — NOT STARTED: `eami-api/internal/api/memory.go` stops querying `episodes` directly; `MemoryPage.tsx` rewired.
-- [ ] `DECISIONS.md` ADR-019 updated to Accepted with the resolution (PM-EAMI owns this file — not updated by Code).
-**Dependencies:** none for Brief 1 (done). Brief 2 depends on Brief 1 (done, ready to start).
-**Severity:** High — was: shipped code contradicts an accepted ADR. Now: fix in progress, 1 of 3 briefs complete.
-**⚠️ Operational risk flagged by Brief 1's security review — see B-015.**
+- [x] **Brief 1 — DONE, merged to master** (`b-002-gateway-episode-endpoint`, merge commit `3eab113`): `eami-gateway` gets a new dual-auth read endpoint (`GET /v1/gateway/episodes`, `/search`, `/{id}`) serving full episode content from its own on-prem Postgres. Dedicated secret (`GATEWAY_EPISODE_READ_SERVICE_KEY`), full unit test coverage including the security-critical forged-org_id and cross-org-404 cases. Reviewer + security subagent passes: clean. **Verified 2026-07-22 with a real toolchain: `go build ./...` and `go test ./... -v` both clean, 0 failures (18/18 new tests).**
+- [ ] **Brief 2 — READY TO START** (unblocked, Brief 1's dependency satisfied): `eami-api` proxy layer forwarding UI requests to Brief 1's endpoint. Hard requirement carried over from Brief 1's design: the proxy must independently verify the requesting user actually has access to the `org_id` it passes through — Brief 1's service-key path trusts this completely and enforces nothing itself (see B-015).
+- [ ] Brief 3 — NOT STARTED: `eami-api/internal/api/memory.go` stops querying `episodes` directly; `MemoryPage.tsx` rewired. Depends on Brief 2.
+- [x] `DECISIONS.md` ADR-019 updated to Accepted with the resolution (2026-07-22, formalized as a full entry replacing its own Pending row — same number, not renumbered).
+**Dependencies:** none for Brief 1 (done). Brief 2 has no remaining blockers.
+**Severity:** High — was: shipped code contradicts an accepted ADR. Now: fix in progress, 1 of 3 briefs complete and merged.
+**⚠️ Operational risk flagged by Brief 1's security review — see B-015. Still applies until Brief 2 ships.**
 
 ### B-003 — Approval flow integration/e2e test
 **Objective:** An automated test proves the full escalate → Slack → UI decide → resume/deny loop works, closing `tasks/TASK-044` which was never delivered.
@@ -129,6 +129,7 @@ _(one line each; full detail in `BUILT.md` / `CHANGELOG.md`)_
 - **v1.0.1** (2026-07-05, `84028bb`) — nginx `/v1/` proxy fix, Policies/Tools/Nodes/Audit pages completed.
 - **Security hardening (TASK-051 findings, all HIGH closed)** — JWT revocation persisted + issuer-validated (TASK-062/063), audit-log DB-error propagation (TASK-064), audit chain verify endpoint (TASK-065), bcrypt cost 10→12 (TASK-066).
 - **Unreleased, on HEAD `d8b9483`** — endpoint agent detection scanners (browser extensions, scheduled tasks), alerting engine metrics (`scope_drift_count`, `failed_delivery_count`), `/v1/discover`, `/v1/reports`, `/v1/internal/token-usage` ingest APIs, episode recorder (TASK-069, placeholder embeddings), Memory/Episode library UI page (TASK-070) — **see B-002, this last item shipped ahead of its blocking ADR (now being fixed, Brief 1 of 3 done).**
+- **B-002 Brief 1** (2026-07-22, merge commit `3eab113`) — `eami-gateway` dual-auth episode read endpoint, verified with a real toolchain (`go build`/`go test` clean, 18/18 new tests). Closes the ADR-019 half of the data-sovereignty fix that's on the gateway side; `eami-api`/`eami-ui` sides remain in Briefs 2–3.
 - **TASK-031 → TASK-068** (34 of ~40 tasks) — confirmed DONE via source cross-check; see full per-task table from the bootstrap survey if needed (not reproduced here to keep this file scannable — ask if you need the raw table).
 
 ## Next B-ID: B-016
