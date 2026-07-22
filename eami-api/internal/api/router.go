@@ -14,17 +14,27 @@ import (
 
 // Server holds shared dependencies for all HTTP handlers.
 type Server struct {
-	queries     *store.Queries
-	authSvc     *auth.Service
-	alertEngine *alerting.Engine
-	cfg         *config.Config
-	storeIface  Store // set when constructed via NewHandler (testing)
+	queries       *store.Queries
+	authSvc       *auth.Service
+	alertEngine   *alerting.Engine
+	cfg           *config.Config
+	storeIface    Store                // set when constructed via NewHandler (testing)
+	gatewayClient GatewayEpisodeClient // B-002 Brief 2: eami-gateway episode proxy
 }
 
-// NewServer creates a Server with the given dependencies.
+// NewServer creates a Server with the given dependencies. cfg may be nil
+// (some existing tests -- e.g. finops_test.go's newFinOpsTestEnv -- rely on
+// that); the gateway proxy client is then built with empty URL/key, which
+// gatewayNotConfigured (gateway_episodes.go) already treats as "not
+// configured" and fails cleanly per-request rather than panicking.
 func NewServer(queries *store.Queries, authSvc *auth.Service, engine *alerting.Engine, cfg *config.Config) *Server {
 	s := &Server{queries: queries, authSvc: authSvc, alertEngine: engine, cfg: cfg}
 	s.storeIface = &queriesAdapter{q: queries}
+	var gwURL, gwKey string
+	if cfg != nil {
+		gwURL, gwKey = cfg.Gateway.URL, cfg.Gateway.EpisodeReadServiceKey
+	}
+	s.gatewayClient = newHTTPGatewayEpisodeClient(gwURL, gwKey)
 	return s
 }
 
@@ -32,7 +42,28 @@ func NewServer(queries *store.Queries, authSvc *auth.Service, engine *alerting.E
 // Handlers that reach s.queries will panic and return 500 until the Store
 // interface is fully wired -- see TASK-035.
 func NewHandler(s Store, authSvc *auth.Service) *Server {
-	return &Server{storeIface: s, authSvc: authSvc}
+	return &Server{storeIface: s, authSvc: authSvc, cfg: &config.Config{}}
+}
+
+// WithGatewayClient overrides the gateway episode proxy client -- a
+// test-injection point mirroring how NewHandler substitutes Store, and how
+// eami-gateway's own NewReaderWithStore/NewHTTPHandler inject fakes (Brief
+// 1). Returns s for chaining. Also backfills s.cfg.Gateway to non-empty
+// placeholder values if unset, since the handlers treat an empty
+// cfg.Gateway.URL/EpisodeReadServiceKey as "proxy not configured" and would
+// otherwise 502 before ever reaching the injected client.
+func (s *Server) WithGatewayClient(c GatewayEpisodeClient) *Server {
+	s.gatewayClient = c
+	if s.cfg == nil {
+		s.cfg = &config.Config{}
+	}
+	if s.cfg.Gateway.URL == "" {
+		s.cfg.Gateway.URL = "http://test-gateway.invalid"
+	}
+	if s.cfg.Gateway.EpisodeReadServiceKey == "" {
+		s.cfg.Gateway.EpisodeReadServiceKey = "test-key"
+	}
+	return s
 }
 
 // Router is an alias for Handler, provided for test compatibility.
@@ -137,6 +168,12 @@ func (s *Server) Handler() http.Handler {
 			// Memory episodes (stubs - episode recorder not yet built)
 			r.Get("/v1/memory/episodes", s.ListMemoryEpisodes)
 			r.Get("/v1/memory/episodes/search", s.SearchMemoryEpisodes)
+			// Gateway episode proxy (B-002 Brief 2) -- full episode content,
+			// proxied to eami-gateway per ADR-019. Additive: does not replace
+			// the /v1/memory/episodes* routes above (Brief 3 does that).
+			r.Get("/v1/gateway/episodes", s.ListGatewayEpisodes)
+			r.Get("/v1/gateway/episodes/search", s.SearchGatewayEpisodes)
+			r.Get("/v1/gateway/episodes/{episodeId}", s.GetGatewayEpisode)
 			// Discover (read)
 			// /v1/endpoints — agent machine inventory (eami-agent discovery data)
 			r.Get("/v1/endpoints", s.ListAgentEndpoints)

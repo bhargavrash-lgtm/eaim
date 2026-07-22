@@ -10,12 +10,13 @@ import (
 
 // Config is the top-level EAMI API configuration.
 type Config struct {
-	Server     ServerConfig     `yaml:"server"`
-	Database   DatabaseConfig   `yaml:"database"`
-	Auth       AuthConfig       `yaml:"auth"`
-	Log        LogConfig        `yaml:"log"`
-	ServiceKey string           `yaml:"service_key"`
-	Collector  CollectorConfig  `yaml:"collector"`
+	Server     ServerConfig    `yaml:"server"`
+	Database   DatabaseConfig  `yaml:"database"`
+	Auth       AuthConfig      `yaml:"auth"`
+	Log        LogConfig       `yaml:"log"`
+	ServiceKey string          `yaml:"service_key"`
+	Collector  CollectorConfig `yaml:"collector"`
+	Gateway    GatewayConfig   `yaml:"gateway"`
 }
 
 // CollectorConfig tells the API server how to reach the on-prem collector for
@@ -26,6 +27,21 @@ type CollectorConfig struct {
 	URL string `yaml:"url"`
 	// APIKey is the X-API-Key used to authenticate against the collector's /stats endpoint.
 	APIKey string `yaml:"api_key"`
+}
+
+// GatewayConfig tells the API server how to reach eami-gateway's episode read
+// endpoint (B-002 Brief 2 -- proxies full episode content per ADR-019, never
+// stored/served directly by eami-api). Both fields are optional at startup:
+// if either is empty, the gateway proxy routes fail cleanly per-request
+// (502) rather than eami-api refusing to start.
+type GatewayConfig struct {
+	// URL is the base URL of eami-gateway, e.g. "http://eami-gateway:8080".
+	URL string `yaml:"url"`
+	// EpisodeReadServiceKey is sent as X-Service-Key on calls to eami-gateway's
+	// episode read endpoint. Must match eami-gateway's own
+	// GATEWAY_EPISODE_READ_SERVICE_KEY (eami-gateway/internal/config) -- same
+	// env var name is used on both sides so one .env value configures both.
+	EpisodeReadServiceKey string `yaml:"episode_read_service_key"`
 }
 
 type ServerConfig struct {
@@ -110,6 +126,14 @@ func Load(path string) (*Config, error) {
 		cfg.Collector.APIKey = v
 	}
 
+	// Gateway config overrides (B-002 Brief 2).
+	if v := os.Getenv("API_GATEWAY_URL"); v != "" {
+		cfg.Gateway.URL = v
+	}
+	if v := os.Getenv("GATEWAY_EPISODE_READ_SERVICE_KEY"); v != "" {
+		cfg.Gateway.EpisodeReadServiceKey = v
+	}
+
 	return cfg, nil
 }
 
@@ -135,5 +159,8 @@ func defaults() *Config {
 			Format: "text",
 		},
 		ServiceKey: "changeme",
+		Gateway: GatewayConfig{
+			URL: "http://eami-gateway:8080",
+		},
 	}
 }
