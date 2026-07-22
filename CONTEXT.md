@@ -13,8 +13,11 @@ or prior context suggests otherwise, it is wrong; trust this line.
 - ADR-019: RESOLVED, Accepted — 2026-07-22. Full episode content stays
   on-prem; eami-api never serves it. See DECISIONS.md ADR-019 (now a full
   formal entry, same number — the informal Pending-table row it replaces
-  has been removed, not renumbered).
-- B-002 resolution in progress, 3-brief split:
+  has been removed, not renumbered). **Now fully enforced in the running
+  system, not just decided on paper — see B-002 Brief 3 below.**
+- **B-002: DONE, all 3 briefs complete** (Brief 3 built and tested on
+  branch `b-002-memory-cutover`, pending merge — merge before treating
+  this as fully live on `master`). History:
   - Brief 1 (gateway dual-auth endpoint): **DONE, merged to master**
     (merge commit `3eab113`, from branch `b-002-gateway-episode-endpoint`,
     plan at `C:\Users\bharg\.claude\plans\unified-wandering-karp.md`). New
@@ -47,18 +50,34 @@ or prior context suggests otherwise, it is wrong; trust this line.
     client's call count is zero). Fixed a nil-`cfg` panic in `NewServer`
     along the way (pre-existing latent bug, surfaced by wiring in the new
     config — `finops_test.go` already called `NewServer(nil, ...)`).
-  - Brief 3 (memory.go + MemoryPage.tsx rewire): **READY TO START — no
-    remaining blockers.** This is the piece that actually closes B-002:
-    until it lands, `eami-api/internal/api/memory.go`'s original
-    `/v1/memory/episodes` and `/v1/memory/episodes/search` routes still
-    exist, completely unchanged, and still query the `episodes` table
-    directly — the exact ADR-010/ADR-019 violation this whole effort
-    exists to fix. That unprotected direct-query path runs today in
-    parallel with Brief 2's new, compliant `/v1/gateway/episodes*`
-    proxy routes. Two route families serving the same underlying data
-    by two different paths, one of them still non-compliant, is an
-    intermediate state, not a resolution — don't read Brief 1+2 landing
-    as "ADR-019 is now fully enforced in the running system."
+  - Brief 3 (memory.go + MemoryPage.tsx cutover): **DONE**, branch
+    `b-002-memory-cutover`, plan at
+    `C:\Users\bharg\.claude\plans\unified-wandering-karp.md`. Chose
+    option (a): re-pointed the existing, `api/openapi.yaml`-documented
+    `/v1/memory/episodes` and `/v1/memory/episodes/search` URLs at
+    Brief 2's already-secure handlers (`ListGatewayEpisodes`/
+    `SearchGatewayEpisodes`) instead of moving the frontend to new URLs
+    — verified the response shapes are byte-identical, so this needed
+    **zero `MemoryPage.tsx` changes**. Added `GET /v1/memory/episodes/
+    {episodeId}` → `GetGatewayEpisode`, filling an `openapi.yaml`-
+    documented route that was never implemented. **`eami-api/internal/
+    api/memory.go` and `eami-api/internal/store/episodes.go` (the last
+    direct, unprotected `episodes`-table query path) are deleted
+    entirely** — verified zero other callers first. Security review for
+    this brief specifically re-verified the org-isolation chain at the
+    new `/v1/memory/episodes*` mount points (not assumed to carry over
+    from Brief 2's review) and confirmed **the leak is fully closed**,
+    not just superseded by a safer alternative running alongside it. 8
+    new tests in `memory_test.go`, reusing Brief 2's fixtures with zero
+    duplication; `gateway_episodes_test.go` itself has zero diff.
+    **Verified 2026-07-22: `go build ./...`, `go vet ./...`,
+    `go test ./...` all clean, 0 failures.** Two things NOT done, flagged
+    before building rather than discovered after: frontend build/lint/
+    typecheck (Node/npm confirmed genuinely absent from this machine —
+    checked install locations directly, not just PATH) and `docker
+    compose up`-based manual verification (no Docker in this
+    environment) — `MemoryPage.tsx`'s correctness rests on manual
+    shape-verification only. **Not yet merged to master.**
 
 ## Standing facts Code and PM must both know
 - Desktop app: planned future feature, not yet built. Gateway auth should
@@ -82,11 +101,12 @@ or prior context suggests otherwise, it is wrong; trust this line.
 - Solo founder, pre-first-customer, evening/weekend hours.
 
 ## Last updated
-2026-07-22 by Claude Code — merged `b-002-eami-api-proxy-layer` into
-master (merge commit `adcd3e9`; branch deleted, both locally and on
-origin). B-002 Brief 2 (eami-api proxy layer) is now live on master
-alongside Brief 1. Org-isolation hard requirement satisfied and
-verified. BACKLOG updated: Brief 2 DONE/merged, Brief 3 READY TO START
-with an explicit note that `memory.go`'s original unprotected routes
-still run in parallel until Brief 3's cutover — B-002 is not fully
-closed yet.
+2026-07-22 by Claude Code — B-002 Brief 3 (memory.go + MemoryPage.tsx
+cutover) built, tested, reviewed, on branch `b-002-memory-cutover` (not
+yet merged). `memory.go`/`store/episodes.go` deleted; `/v1/memory/
+episodes*` now served by Brief 2's org-isolated handlers with zero
+frontend changes needed. Security review confirms the leak is fully
+closed. B-002 is DONE pending this branch's merge. BACKLOG updated:
+Brief 3 DONE, B-002 marked resolved, B-012 closed incidentally, new
+B-017/B-018 logged for pre-existing doc/comment drift discovered along
+the way.
