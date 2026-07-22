@@ -165,12 +165,18 @@ func (s *Server) Handler() http.Handler {
 			// FinOps (read)
 			r.Get("/v1/finops/summary", s.FinOpsSummary)
 			r.Get("/v1/finops/timeseries", s.FinOpsTimeSeries)
-			// Memory episodes (stubs - episode recorder not yet built)
-			r.Get("/v1/memory/episodes", s.ListMemoryEpisodes)
-			r.Get("/v1/memory/episodes/search", s.SearchMemoryEpisodes)
-			// Gateway episode proxy (B-002 Brief 2) -- full episode content,
-			// proxied to eami-gateway per ADR-019. Additive: does not replace
-			// the /v1/memory/episodes* routes above (Brief 3 does that).
+			// Memory episodes (B-002 Brief 3): the openapi.yaml-documented
+			// /v1/memory/episodes* routes now serve full episode content via
+			// the same org-isolated gateway proxy handlers Brief 2 built --
+			// memory.go's old direct, unprotected episodes-table query is
+			// retired (file deleted). {episodeId} fills a route openapi.yaml
+			// already documented but memory.go never implemented.
+			r.Get("/v1/memory/episodes", s.ListGatewayEpisodes)
+			r.Get("/v1/memory/episodes/search", s.SearchGatewayEpisodes)
+			r.Get("/v1/memory/episodes/{episodeId}", s.GetGatewayEpisode)
+			// Gateway episode proxy (B-002 Brief 2) -- same handlers, kept
+			// mounted here too (harmless, still secure; not used by the
+			// frontend, which calls /v1/memory/episodes* above).
 			r.Get("/v1/gateway/episodes", s.ListGatewayEpisodes)
 			r.Get("/v1/gateway/episodes/search", s.SearchGatewayEpisodes)
 			r.Get("/v1/gateway/episodes/{episodeId}", s.GetGatewayEpisode)

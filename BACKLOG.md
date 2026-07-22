@@ -7,16 +7,31 @@ _(empty — founder/PM assigns from QUEUED)_
 
 ## QUEUED
 
-### B-002 — Resolve ADR-019 vs. ADR-010 conflict: episode content in the SaaS API
+### B-002 — Resolve ADR-019 vs. ADR-010 conflict: episode content in the SaaS API — **RESOLVED, fully closed 2026-07-22**
 **Objective:** `eami-api`'s memory endpoints stop violating (or are explicitly granted an exception to) the data-sovereignty rule in ADR-010.
-**Resolution (2026-07-21):** full episode content stays on-prem; `eami-api` never serves it directly. Implementation split into 3 briefs — see `CONTEXT.md`'s Active decision thread for current status.
+**Resolution (2026-07-21):** full episode content stays on-prem; `eami-api` never serves it directly. Implementation split into 3 briefs — all done, all merged.
 - [x] **Brief 1 — DONE, merged to master** (`b-002-gateway-episode-endpoint`, merge commit `3eab113`): `eami-gateway` gets a new dual-auth read endpoint (`GET /v1/gateway/episodes`, `/search`, `/{id}`) serving full episode content from its own on-prem Postgres. Dedicated secret (`GATEWAY_EPISODE_READ_SERVICE_KEY`), full unit test coverage including the security-critical forged-org_id and cross-org-404 cases. Reviewer + security subagent passes: clean. **Verified 2026-07-22 with a real toolchain: `go build ./...` and `go test ./... -v` both clean, 0 failures (18/18 new tests).**
-- [x] **Brief 2 — DONE, merged to master** (`b-002-eami-api-proxy-layer`, merge commit `adcd3e9`): `eami-api` proxy layer (`internal/api/gateway_episodes.go`) forwarding UI requests to Brief 1's endpoint. The hard requirement is satisfied: `org_id` sent to the gateway is always the authenticated caller's own session org (`claimsFromContext(r).OrgID`), never client input — an optional `org_id` query param is accepted only as a tamper-check that 403s on mismatch before the gateway is ever called (structurally impossible for a forged org to reach the gateway, not just checked-and-rejected). Purely additive: `memory.go` has zero lines changed. 11 tests including the centerpiece `TestGatewayEpisodes_List_MismatchedOrgIDSupplied_Returns403_GatewayNeverCalled`. **Verified 2026-07-22: `go build ./...`, `go vet ./...`, `go test ./...` all clean, 0 failures.** Reviewer + security subagent passes: clean (2 low-severity test-coverage suggestions from the reviewer pass, both closed before commit).
-- [ ] **Brief 3 — READY TO START.** `eami-api/internal/api/memory.go` stops querying `episodes` directly, switches to Brief 2's proxy; `MemoryPage.tsx` rewired to call it. **Until Brief 3 lands, `memory.go`'s original `/v1/memory/episodes`/`/v1/memory/episodes/search` routes still exist and still query the `episodes` table directly — the exact ADR-010 violation this whole B-002 effort exists to fix — running unchanged, in parallel with the new, compliant `/v1/gateway/episodes*` routes from Brief 2. B-002 is NOT fully closed until this swap happens; the two route families coexisting today is an intermediate, not a final, state.**
+- [x] **Brief 2 — DONE, merged to master** (`b-002-eami-api-proxy-layer`, merge commit `adcd3e9`): `eami-api` proxy layer (`internal/api/gateway_episodes.go`) forwarding UI requests to Brief 1's endpoint. The hard requirement is satisfied: `org_id` sent to the gateway is always the authenticated caller's own session org (`claimsFromContext(r).OrgID`), never client input — an optional `org_id` query param is accepted only as a tamper-check that 403s on mismatch before the gateway is ever called (structurally impossible for a forged org to reach the gateway, not just checked-and-rejected). Purely additive: `memory.go` had zero lines changed at this point. 11 tests including the centerpiece `TestGatewayEpisodes_List_MismatchedOrgIDSupplied_Returns403_GatewayNeverCalled`. **Verified 2026-07-22: `go build ./...`, `go vet ./...`, `go test ./...` all clean, 0 failures.** Reviewer + security subagent passes: clean.
+- [x] **Brief 3 — DONE** (`b-002-memory-cutover`, not yet merged — see completion report): `eami-api/internal/api/memory.go` **deleted entirely**, along with `eami-api/internal/store/episodes.go` (the direct, unprotected `episodes` table query — confirmed zero other callers before removal). `/v1/memory/episodes` and `/v1/memory/episodes/search` (the actual frontend-facing, `api/openapi.yaml`-documented routes `MemoryPage.tsx` calls) now point at Brief 2's already-secure handlers directly — same functions, new mount, zero duplicated logic. Added `GET /v1/memory/episodes/{episodeId}`, documented in `openapi.yaml` but never implemented before now. `MemoryPage.tsx` needed **zero changes** — response shapes verified byte-identical to the old ones. Security review: **leak confirmed fully closed**, not just a safer alternative added alongside — re-verified the org-isolation chain from `jwtMiddleware` through `checkOrgID` at the new mount points specifically, not assumed to carry over from Brief 2's review. 8 new tests in `memory_test.go`, reusing Brief 2's test fixtures with zero duplication; `gateway_episodes_test.go` itself has zero diff. **Verified 2026-07-22: `go build ./...`, `go vet ./...`, `go test ./...` all clean, 0 failures.** Frontend build/lint/typecheck **not run** — Node/npm confirmed genuinely absent from this machine (not just off-PATH like Go was), so `MemoryPage.tsx`'s correctness rests on manual shape-verification, not a compiler/test run. AC #2's "manually verified via docker compose up" **not performed** — no Docker in this environment; flagged before building, not discovered after.
 - [x] `DECISIONS.md` ADR-019 updated to Accepted with the resolution (2026-07-22, formalized as a full entry replacing its own Pending row — same number, not renumbered).
-**Dependencies:** none — Brief 1 and Brief 2 are both done and merged to master. Brief 3 can start immediately.
-**Severity:** High — was: shipped code contradicts an accepted ADR. Now: 2 of 3 briefs complete and merged; `memory.go` itself still violates the (now-Accepted) ADR-019 until Brief 3 lands — see the note above, this is the one remaining piece that actually closes B-002.
-**⚠️ Operational risk flagged by Brief 1's security review — see B-015. Now mitigated in practice by Brief 2's org-isolation enforcement (merged), but B-015 itself is about the *service-key path having no enforcement of its own* — still technically true of Brief 1's code in isolation, so leave B-015 open until it's explicitly re-reviewed.**
+**Dependencies:** none — all three briefs done. Brief 3 needs a merge (see completion report) to actually take effect on `master`.
+**Severity:** was High (shipped code contradicting an accepted ADR); now resolved — **there is exactly one path to full episode content, and it enforces org isolation.**
+**⚠️ B-015 stays open** — Brief 1's gateway endpoint itself still enforces nothing on its own if reached directly, bypassing eami-api. Not related to this closure; separate item.
+
+### B-017 — `EpisodeStep` schema in `api/openapi.yaml` doesn't match real step JSON
+**Objective:** Either fix the documented schema or the runtime shape so they agree — currently neither has ever matched the other.
+**Context:** Discovered while verifying B-002 Brief 3 (2026-07-22). `openapi.yaml`'s `EpisodeStep` schema documents `step_number`, `tool`, `action`, `reasoning`, `decision`, `token_in`, `token_out`. The real runtime shape (`eami-gateway/internal/episode/recorder.go`'s `Step` struct, what actually gets written to and read from the `episodes.steps` JSONB column) uses `tool_name`, `action`, `params`, `result`, `decision`, `timestamp`. Only `action`/`decision` line up. Predates this branch entirely — same raw-JSONB passthrough existed in the now-deleted `memory.go`/`store/episodes.go` too — not introduced by any B-002 brief, just newly visible now that `GET /v1/memory/episodes/{episodeId}` is the first real, working route where this exact documented schema is checkable against actual output.
+**Acceptance criteria:**
+- [ ] Decide which is authoritative (real shape vs. documented shape) — likely the real shape, since it's what's actually recorded and consumed
+- [ ] Update `openapi.yaml`'s `EpisodeStep` schema to match (Architect-EAMI's file, not Code's to silently change)
+**Dependencies:** none. Owner: Architect-EAMI (per `BOUNDARIES.md`, `openapi.yaml` changes are theirs).
+
+### B-018 — Stale comment in `eami-gateway/internal/episode/store.go` references a deleted type
+**Objective:** Fix a doc-comment that now points at nothing.
+**Context:** `eami-gateway/internal/episode/store.go:17`'s comment says its `Episode` struct's fields "intentionally match `eami-api/internal/store.Episode` 1:1" — that type was deleted in B-002 Brief 3. `eami-gateway` is frozen for B-002 (out of scope for that effort), so not fixed there. Purely cosmetic — no functional impact, `eami-gateway`'s `Episode` struct is unaffected and still correct on its own.
+**Acceptance criteria:**
+- [ ] Update the comment to stop referencing the deleted type (e.g. point at `eami-api/internal/api.GatewayEpisode`, the shape it should now be compared against, if a comparison is still useful)
+**Dependencies:** none. Trivial/cosmetic.
 
 ### B-003 — Approval flow integration/e2e test
 **Objective:** An automated test proves the full escalate → Slack → UI decide → resume/deny loop works, closing `tasks/TASK-044` which was never delivered.
@@ -58,7 +73,7 @@ _(empty — founder/PM assigns from QUEUED)_
 **Dependencies:** ADR-009 (local vs. API LLM choice) — still open (blocking, see BLOCKED below).
 
 ### B-008 — Real episode embeddings + vector similarity search
-**Objective:** Replace the SHA-256 placeholder embedding with real embeddings; wire `SearchMemoryEpisodes` to pgvector similarity instead of `ILIKE` text match.
+**Objective:** Replace the SHA-256 placeholder embedding with real embeddings; wire episode search (`eami-api`'s `SearchGatewayEpisodes` → `eami-gateway`'s `SearchEpisodes`, post-B-002 the only search path — `memory.go`'s old `SearchMemoryEpisodes` no longer exists) to pgvector similarity instead of `ILIKE` text match.
 **Acceptance criteria:**
 - [ ] `internal/episode/recorder.go`'s `placeholderEmbedding()` replaced with a real embedding call
 - [ ] `SearchEpisodes` uses pgvector `<->`/HNSW query instead of `task ILIKE`
@@ -86,12 +101,6 @@ _(empty — founder/PM assigns from QUEUED)_
 - [ ] Confirmed dead (repo-wide grep) or a use is found and documented
 - [ ] If dead: migration to drop it, or explicit decision to leave as reserved-for-future with a comment
 **Dependencies:** none. Low priority.
-
-### B-012 — Fix stale comment in router.go
-**Objective:** `eami-api/internal/api/router.go:137` comment ("Memory episodes (stubs - episode recorder not yet built)") no longer matches reality post-TASK-069/070.
-**Acceptance criteria:**
-- [ ] Comment updated or removed
-**Dependencies:** none. Trivial/cosmetic.
 
 ### B-013 — Verify builds/tests actually pass
 **Objective:** Every module's `go test ./...` and `eami-ui`'s `type-check`/`build` are executed and confirmed green on a real machine — this bootstrap session could not run any of them (no Go/Node/npm installed here).
@@ -142,6 +151,8 @@ _(one line each; full detail in `BUILT.md` / `CHANGELOG.md`)_
 - **Unreleased, on HEAD `d8b9483`** — endpoint agent detection scanners (browser extensions, scheduled tasks), alerting engine metrics (`scope_drift_count`, `failed_delivery_count`), `/v1/discover`, `/v1/reports`, `/v1/internal/token-usage` ingest APIs, episode recorder (TASK-069, placeholder embeddings), Memory/Episode library UI page (TASK-070) — **see B-002, this last item shipped ahead of its blocking ADR (now being fixed, Brief 1 of 3 done).**
 - **B-002 Brief 1** (2026-07-22, merge commit `3eab113`) — `eami-gateway` dual-auth episode read endpoint, verified with a real toolchain (`go build`/`go test` clean, 18/18 new tests). Closes the ADR-019 half of the data-sovereignty fix that's on the gateway side; `eami-api`/`eami-ui` sides remain in Briefs 2–3.
 - **B-002 Brief 2** (2026-07-22, merge commit `adcd3e9`) — `eami-api` proxy layer for episode content, with the actual org-isolation enforcement Brief 1 deferred. Verified with a real toolchain (`go build`/`go vet`/`go test` clean, 11/11 new tests). `memory.go`/`MemoryPage.tsx` cutover remains in Brief 3 — see B-002's own entry for why that's the piece that actually closes this out.
+- **B-002 Brief 3 / B-002 fully closed** (2026-07-22, branch `b-002-memory-cutover`, pending merge — see completion report) — `memory.go` and `store/episodes.go` (the last direct, unprotected episode-content query path) deleted entirely; `/v1/memory/episodes*` now served by Brief 2's org-isolated handlers. `MemoryPage.tsx` needed zero changes. Security review confirmed the leak fully closed, not just a safer alternative added. **B-002 is done — exactly one path to full episode content exists, and it enforces org isolation.**
+- **B-012** (2026-07-22, incidental to B-002 Brief 3) — the stale `router.go` "Memory episodes (stubs...)" comment is gone; that whole block was rewritten as part of the memory.go cutover.
 - **TASK-031 → TASK-068** (34 of ~40 tasks) — confirmed DONE via source cross-check; see full per-task table from the bootstrap survey if needed (not reproduced here to keep this file scannable — ask if you need the raw table).
 
-## Next B-ID: B-017
+## Next B-ID: B-019
