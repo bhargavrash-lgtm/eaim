@@ -10,12 +10,10 @@ unrelated framework the founder uses elsewhere. If any file, commit message,
 or prior context suggests otherwise, it is wrong; trust this line.
 
 ## Active decision thread (update every time one moves)
-- ADR-020 (formalizes the resolution previously tracked here as "ADR-019"):
-  RESOLVED, Accepted — 2026-07-22. Full episode content stays on-prem;
-  eami-api never serves it. See DECISIONS.md ADR-020. The old ADR-019 row
-  in DECISIONS.md's Pending Decisions table has been removed, not
-  renumbered — ADR-019 is retired/unused, this decision carries ADR-020
-  per the log's real next-number convention.
+- ADR-019: RESOLVED, Accepted — 2026-07-22. Full episode content stays
+  on-prem; eami-api never serves it. See DECISIONS.md ADR-019 (now a full
+  formal entry, same number — the informal Pending-table row it replaces
+  has been removed, not renumbered).
 - B-002 resolution in progress, 3-brief split:
   - Brief 1 (gateway dual-auth endpoint): ABOUT TO START — plan pending review
   - Brief 2 (eami-api proxy layer): NOT STARTED — depends on Brief 1
@@ -30,9 +28,12 @@ or prior context suggests otherwise, it is wrong; trust this line.
 - Solo founder, pre-first-customer, evening/weekend hours.
 
 ## Last updated
-2026-07-22 by Claude Code — DECISIONS.md ADR-020 added (formal resolution
-of the item previously tracked as ADR-019), Pending Decisions row removed;
-this file's D-0XX placeholder replaced with the real ADR-020 reference.
+2026-07-22 by Claude Code — DECISIONS.md ADR-019 formalized (full entry,
+same number, replacing its own informal Pending row) and this file's
+D-0XX placeholder replaced with the real ADR-019 reference. (Earlier
+today this was briefly numbered ADR-020 in a since-reverted commit — see
+git history; ADR-019 is correct and final, matching BUILT.md, BACKLOG.md,
+TASK-069/070, and code comments in eami-gateway.)
 Note: Brief 1 of B-002 (gateway episode read endpoint) has since landed on
 branch `b-002-gateway-episode-endpoint` (commit `432ce11`) — that branch's
 own CONTEXT.md has the full Brief 1 status detail; this master-branch copy

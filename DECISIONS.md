@@ -365,14 +365,14 @@ Add a `location /v1/` proxy block in `eami-ui/nginx.conf` that forwards all API 
 
 ---
 
-## ADR-020 — Episode/memory full content stays on-prem; eami-api serves metadata only
+## ADR-019 — Episode/memory full content stays on-prem; eami-api serves metadata only
 
 **Date:** 2026-07-22  
 **Status:** Accepted  
 **Deciders:** PM-EAMI
 
 **Context:**  
-Resolves ADR-019 (previously Pending, below). `eami-api/internal/api/memory.go` was a stub with no clear owner in `BOUNDARIES.md`. Per ADR-010, the SaaS backend (`eami-api`) must never receive full episode content — only metadata. The open question was whether the Memory UI page queries `eami-api` (metadata only) with a separate on-prem gateway endpoint for full episode detail, or whether `eami-api` gets a scoped exception to serve full content directly.
+Formalizes the item previously listed as ADR-019 under Pending Decisions (below) into a full decision record. `eami-api/internal/api/memory.go` was a stub with no clear owner in `BOUNDARIES.md`. Per ADR-010, the SaaS backend (`eami-api`) must never receive full episode content — only metadata. The open question was whether the Memory UI page queries `eami-api` (metadata only) with a separate on-prem gateway endpoint for full episode detail, or whether `eami-api` gets a scoped exception to serve full content directly.
 
 **Decision:**  
 Episode/memory full content stays on-prem and is never served by `eami-api`. `eami-api` exposes metadata plus `episode_id` only. Full step content (tool calls, arguments, results) is served by a new on-prem `eami-gateway` endpoint, with dual auth: an `eami-api` service-key (server-to-server) or a future desktop-app Bearer JWT. The UI reaches full episode content via an `eami-api` proxy (server-to-server call from `eami-api` to `eami-gateway`), never by the browser calling `eami-gateway` directly.
@@ -384,7 +384,7 @@ Episode/memory full content stays on-prem and is never served by `eami-api`. `ea
 - `eami-gateway` — new episode read endpoint delivered (Brief 1, commit `432ce11`, branch `b-002-gateway-episode-endpoint`)
 - `eami-api/internal/api/memory.go` — must be rewired to proxy through the gateway endpoint instead of querying `episodes` directly (Brief 2/3, not yet started)
 - `eami-ui/src/pages/ops/MemoryPage.tsx` — still calls `eami-api` only once Brief 3 lands; no direct browser-to-gateway path is introduced
-- Supersedes the ADR-019 entry previously listed under Pending Decisions (removed below — this decision now carries the ADR-020 number per the log's real numbering; ADR-019 remains retired/unused rather than reassigned)
+- Removes the informal ADR-019 row previously listed under Pending Decisions (below), replaced by this full entry — same number, now formalized rather than reassigned
 
 ---
 
