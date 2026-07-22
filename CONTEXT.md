@@ -25,8 +25,9 @@ or prior context suggests otherwise, it is wrong; trust this line.
     trust-boundary tradeoff flagged, tracked as BACKLOG B-015, not a bug).
     **Verified 2026-07-22 with a real toolchain: `go build ./...` and
     `go test ./... -v` both clean, 0 failures, 18/18 new tests passing.**
-  - Brief 2 (eami-api proxy layer): **DONE, on branch `b-002-eami-api-
-    proxy-layer` (not yet merged)**, plan at
+  - Brief 2 (eami-api proxy layer): **DONE, merged to master** (merge
+    commit `adcd3e9`, branch `b-002-eami-api-proxy-layer`, since
+    deleted), plan at
     `C:\Users\bharg\.claude\plans\unified-wandering-karp.md`. New file
     `eami-api/internal/api/gateway_episodes.go` proxies
     `GET /v1/gateway/episodes*` to Brief 1's gateway endpoint. The hard
@@ -46,10 +47,18 @@ or prior context suggests otherwise, it is wrong; trust this line.
     client's call count is zero). Fixed a nil-`cfg` panic in `NewServer`
     along the way (pre-existing latent bug, surfaced by wiring in the new
     config — `finops_test.go` already called `NewServer(nil, ...)`).
-    **Not yet merged to master** — do that before starting Brief 3.
-  - Brief 3 (memory.go + MemoryPage.tsx rewire): READY TO START once
-    Brief 2 is merged — depends on Brief 2's branch, not just its code
-    existing.
+  - Brief 3 (memory.go + MemoryPage.tsx rewire): **READY TO START — no
+    remaining blockers.** This is the piece that actually closes B-002:
+    until it lands, `eami-api/internal/api/memory.go`'s original
+    `/v1/memory/episodes` and `/v1/memory/episodes/search` routes still
+    exist, completely unchanged, and still query the `episodes` table
+    directly — the exact ADR-010/ADR-019 violation this whole effort
+    exists to fix. That unprotected direct-query path runs today in
+    parallel with Brief 2's new, compliant `/v1/gateway/episodes*`
+    proxy routes. Two route families serving the same underlying data
+    by two different paths, one of them still non-compliant, is an
+    intermediate state, not a resolution — don't read Brief 1+2 landing
+    as "ADR-019 is now fully enforced in the running system."
 
 ## Standing facts Code and PM must both know
 - Desktop app: planned future feature, not yet built. Gateway auth should
@@ -73,9 +82,11 @@ or prior context suggests otherwise, it is wrong; trust this line.
 - Solo founder, pre-first-customer, evening/weekend hours.
 
 ## Last updated
-2026-07-22 by Claude Code — B-002 Brief 2 (eami-api proxy layer) built,
-tested, reviewed, on branch `b-002-eami-api-proxy-layer` (not yet
-merged). Org-isolation hard requirement satisfied and verified. BACKLOG
-updated: Brief 2 DONE, Brief 3 ready-to-start-after-merge, B-015
-downgraded (Medium, still open), B-016 added for a pre-existing
-unrelated finops test issue discovered along the way.
+2026-07-22 by Claude Code — merged `b-002-eami-api-proxy-layer` into
+master (merge commit `adcd3e9`; branch deleted, both locally and on
+origin). B-002 Brief 2 (eami-api proxy layer) is now live on master
+alongside Brief 1. Org-isolation hard requirement satisfied and
+verified. BACKLOG updated: Brief 2 DONE/merged, Brief 3 READY TO START
+with an explicit note that `memory.go`'s original unprotected routes
+still run in parallel until Brief 3's cutover — B-002 is not fully
+closed yet.
