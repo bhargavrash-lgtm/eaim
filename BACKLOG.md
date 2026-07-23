@@ -155,5 +155,17 @@ _(one line each; full detail in `BUILT.md` / `CHANGELOG.md`)_
 - **B-012** (2026-07-22, incidental to B-002 Brief 3) — the stale `router.go` "Memory episodes (stubs...)" comment is gone; that whole block was rewritten as part of the memory.go cutover.
 - **TASK-031 → TASK-068** (34 of ~40 tasks) — confirmed DONE via source cross-check; see full per-task table from the bootstrap survey if needed (not reproduced here to keep this file scannable — ask if you need the raw table).
 - **B-019** (2026-07-22) — standalone infra fix, not tied to any brief: `docker-compose.yml`'s `eami-ui` service had the wrong build context (`./eami-ui`) for a Dockerfile that copies repo-root `api/openapi.yaml`, breaking `docker compose up --build`. Fixed to `context: .` / `dockerfile: eami-ui/Dockerfile`. Verified with `docker compose build eami-ui`. Incidentally confirms Docker is available on this machine — see `BUILT.md` cross-cutting note (relevant to B-004, still QUEUED, not re-attempted here).
+- **B-020** (2026-07-22) — standalone infra fix: `eami-collector` was crash-looping (`exec /app/docker-entrypoint.sh: no such file or directory`) because `docker-entrypoint.sh` had CRLF line endings, breaking shebang resolution. Stripped to LF. Verified: `docker compose build eami-collector` clean, container starts and stays running (not just builds). No Dockerfile change needed.
 
-## Next B-ID: B-020
+## QUEUED (added this session)
+
+### B-021 — Every `.sh` file in the repo has CRLF line endings except the now-fixed collector entrypoint
+**Objective:** Prevent the same shebang-resolution crash (B-020) from recurring in any other script, and stop silent `\r`-in-heredoc corruption in scripts that build SQL/config strings.
+**Context:** Discovered 2026-07-22 while fixing B-020. `file` on every `.sh` in the repo (`scripts/setup.sh`, `scripts/seed-db.sh`, `scripts/create-audit-partition.sh`, `scripts/generate-api-client.sh`, `eami-collector/scripts/create_api_key.sh`, all of `eami-agent/installer/{linux,macos}/*.sh`) reports CRLF terminators. No `.gitattributes` exists to pin LF for shell scripts, so a Windows checkout (`core.autocrlf=true` or similar) rewrites them on clone. These haven't crash-looped yet only because they're invoked as `bash script.sh` rather than exec'd via shebang — same landmine as B-020 for anything that changes to direct exec, and CRLF inside heredocs (`setup.sh`'s inline `psql` blocks) is a latent correctness risk even without a crash.
+**Acceptance criteria:**
+- [ ] Add `.gitattributes` pinning `*.sh text eol=lf` (and likely `Dockerfile`, `docker-entrypoint.sh` by name)
+- [ ] Normalize existing scripts to LF
+- [ ] Confirm `scripts/setup.sh`'s inline heredoc SQL still runs clean after normalization (it already worked with CRLF since bash tolerates `\r` mid-heredoc-line in most cases, but worth confirming, not assuming)
+**Dependencies:** none. Not fixed as part of B-020 — that task was scoped to the collector only.
+
+## Next B-ID: B-022

@@ -28,6 +28,7 @@ Shipped tags: `v1.0.0-rc1` → `v1.0.0` (2026-07-01) → `v1.0.1` (2026-07-05, c
 **Data owned:** local SQLite WAL buffer (`report_buffer` table + dead-letter table per ADR-003), not in Postgres `schema.sql`.
 **Test coverage:** 1 `_test.go` file (`forwarder_test.go`) vs 8 source files. `ingest.go`, `db`, and `models` have **no tests**. Not executed this session.
 **Known limitations:** API-key validation and ingest handler (`internal/api/ingest.go`) are implemented and read as correct, but are unverified by tests — this is the collector's security boundary (agent → collector auth) and has zero test coverage.
+- **CRLF crash-loop fixed 2026-07-22 (B-020):** `docker-entrypoint.sh` had Windows CRLF line endings — `#!/bin/sh\r` made Docker's exec look for an interpreter literally named `/bin/sh\r`, crash-looping with `exec /app/docker-entrypoint.sh: no such file or directory`. Stripped to LF; not a missing `COPY`/`chmod +x` issue (Dockerfile was already correct). Verified: `docker compose build eami-collector` clean, container starts and stays up (`eami-collector listening addr=:8888`, forwarder started), no Dockerfile changes needed. **Every other `.sh` file in the repo has the same CRLF issue** (`scripts/*.sh`, `eami-agent/installer/**/*.sh`) — not fixed here (out of scope for this task), see `BACKLOG.md` B-021.
 
 ---
 

@@ -104,16 +104,28 @@ or prior context suggests otherwise, it is wrong; trust this line.
 - Solo founder, pre-first-customer, evening/weekend hours.
 
 ## Last updated
-2026-07-22 by Claude Code — standalone infra fix (B-019, not tied to any
-brief): `docker-compose.yml`'s `eami-ui` service had `build.context:
-./eami-ui`, but `eami-ui/Dockerfile` copies repo-root `api/openapi.yaml`
-(needed for `generate-client`), so `docker compose up --build` failed
-with `COPY api/openapi.yaml /api/openapi.yaml: not found`. Fixed to
-`context: .` / `dockerfile: eami-ui/Dockerfile`; verified with `docker
-compose build eami-ui`. Also confirms Docker is available on this
-machine (previously assumed absent — see B-002 Brief 3 notes above,
-which were accurate when written but are now stale on that one point).
-Committed directly to master.
+2026-07-22 by Claude Code — standalone infra fix (B-020, not tied to any
+brief): `eami-collector` was crash-looping (`exec
+/app/docker-entrypoint.sh: no such file or directory`) because
+`docker-entrypoint.sh` had Windows CRLF line endings, breaking shebang
+resolution (`#!/bin/sh\r` → kernel looks for an interpreter literally
+named `/bin/sh\r`). Not a missing `COPY`/`chmod +x` — Dockerfile was
+already correct. Stripped to LF; verified `docker compose build
+eami-collector` clean and the container starts and stays running.
+**Every other `.sh` file in the repo has the same CRLF issue** (no
+`.gitattributes` pinning LF) — logged as B-021, not fixed here (out of
+scope for this task).
+
+Prior entry, still accurate: 2026-07-22, standalone infra fix (B-019,
+not tied to any brief): `docker-compose.yml`'s `eami-ui` service had
+`build.context: ./eami-ui`, but `eami-ui/Dockerfile` copies repo-root
+`api/openapi.yaml` (needed for `generate-client`), so `docker compose
+up --build` failed with `COPY api/openapi.yaml /api/openapi.yaml: not
+found`. Fixed to `context: .` / `dockerfile: eami-ui/Dockerfile`;
+verified with `docker compose build eami-ui`. Also confirms Docker is
+available on this machine (previously assumed absent — see B-002
+Brief 3 notes above, which were accurate when written but are now
+stale on that one point). Committed directly to master.
 
 Prior entry, still accurate: 2026-07-22, merged `b-002-memory-cutover`
 into master (merge commit `292d6a4`; branch deleted, both locally and
