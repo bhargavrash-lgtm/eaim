@@ -1,8 +1,11 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -10,6 +13,71 @@ import (
 
 	"github.com/eami/api/internal/store"
 )
+
+// toolStore is the subset of *store.Queries CreateTool/ListTools/DeleteTool/
+// TestTool need. It exists so tests can inject a double that proves e.g.
+// "encryption failed => the store is never called" without a live Postgres,
+// without touching the broader Store interface (store_adapter.go/
+// store_mock.go) used by other handlers.
+type toolStore interface {
+	ListTools(ctx context.Context, orgID uuid.UUID) ([]store.GatewayTool, error)
+	CreateTool(ctx context.Context, p store.CreateToolParams) (store.GatewayTool, error)
+	DeleteTool(ctx context.Context, orgID, toolID uuid.UUID) (bool, error)
+	MarkToolTested(ctx context.Context, orgID, toolID uuid.UUID, status string, latencyMs int) error
+}
+
+// toolQueries returns the toolStore to use for this request: the test
+// override if set, otherwise the production *store.Queries. ok is false if
+// neither is configured (e.g. a Server built via NewHandler for another
+// handler's tests, which never sets s.queries) -- callers must check ok
+// rather than dereferencing a nil *store.Queries through the interface,
+// mirroring the "if s.queries != nil" guard every other handler in this
+// package (policies.go, agents.go, ...) uses for the same reason.
+func (s *Server) toolQueries() (ts toolStore, ok bool) {
+	if s.toolStoreOverride != nil {
+		return s.toolStoreOverride, true
+	}
+	if s.queries != nil {
+		return s.queries, true
+	}
+	return nil, false
+}
+
+// ToolCredentials documents openapi.yaml's ToolCreate.credentials shape --
+// sensitive, write-only, never echoed back in any response. Not used to
+// decode the request body (see credentialsProvided/CreateTool below): the
+// wire payload is stored and encrypted as raw JSON bytes rather than
+// re-marshaled through this struct, so a client sending a field name this
+// struct doesn't happen to declare (a typo, a future field, a differently-
+// cased key) still gets encrypted and stored instead of being silently
+// dropped by encoding/json's default "ignore unknown fields" behavior.
+type ToolCredentials struct {
+	APIKey            string `json:"api_key,omitempty"`
+	OAuthClientID     string `json:"oauth_client_id,omitempty"`
+	OAuthClientSecret string `json:"oauth_client_secret,omitempty"`
+	ConnectionString  string `json:"connection_string,omitempty"`
+}
+
+// credentialsProvided reports whether raw represents actual submitted
+// credential material, as opposed to an omitted field, an explicit JSON
+// null, or an empty {} object. It deliberately does not decode into
+// ToolCredentials first -- that would silently treat "object with only
+// unrecognized keys" the same as "no credentials", which is exactly the
+// silent-data-loss failure mode this handler exists to prevent. An error
+// is returned if raw is present but not a JSON object at all.
+func credentialsProvided(raw json.RawMessage) (bool, error) {
+	if len(raw) == 0 {
+		return false, nil // field omitted entirely
+	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		return false, nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return false, fmt.Errorf("credentials must be a JSON object: %w", err)
+	}
+	return len(obj) > 0, nil
+}
 
 // ── Response types ────────────────────────────────────────────────────────────
 
@@ -48,7 +116,12 @@ func toolToResp(t store.GatewayTool) ToolResp {
 // ListTools handles GET /v1/gateway/tools
 func (s *Server) ListTools(w http.ResponseWriter, r *http.Request) {
 	uc := claimsFromContext(r)
-	tools, err := s.queries.ListTools(r.Context(), uc.OrgID)
+	ts, ok := s.toolQueries()
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "internal_error", "tool store is not configured")
+		return
+	}
+	tools, err := ts.ListTools(r.Context(), uc.OrgID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -65,12 +138,13 @@ func (s *Server) CreateTool(w http.ResponseWriter, r *http.Request) {
 	uc := claimsFromContext(r)
 
 	var body struct {
-		Name       string   `json:"name"`
-		Type       string   `json:"type"`
-		AuthType   string   `json:"auth_type"`
-		MCPCommand *string  `json:"mcp_command"`
-		MCPArgs    []string `json:"mcp_args"`
-		BaseURL    *string  `json:"base_url"`
+		Name        string          `json:"name"`
+		Type        string          `json:"type"`
+		AuthType    string          `json:"auth_type"`
+		MCPCommand  *string         `json:"mcp_command"`
+		MCPArgs     []string        `json:"mcp_args"`
+		BaseURL     *string         `json:"base_url"`
+		Credentials json.RawMessage `json:"credentials"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
@@ -80,15 +154,46 @@ func (s *Server) CreateTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "name, type, and auth_type are required")
 		return
 	}
+	ts, ok := s.toolQueries()
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "internal_error", "tool store is not configured")
+		return
+	}
 
-	t, err := s.queries.CreateTool(r.Context(), store.CreateToolParams{
-		OrgID:      uc.OrgID,
-		Name:       body.Name,
-		Type:       body.Type,
-		AuthType:   body.AuthType,
-		MCPCommand: body.MCPCommand,
-		MCPArgs:    body.MCPArgs,
-		BaseURL:    body.BaseURL,
+	hasCredentials, err := credentialsProvided(body.Credentials)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+
+	var encrypted []byte
+	if hasCredentials {
+		if s.toolCreds == nil {
+			// Fail closed: this is the exact bug this handler was built to
+			// fix -- never report success while discarding the secret.
+			writeError(w, http.StatusInternalServerError, "internal_error",
+				"tool credential encryption is not configured; cannot store credentials")
+			return
+		}
+		// Encrypt the raw submitted bytes, not a re-marshaled ToolCredentials
+		// -- see credentialsProvided's comment: this guarantees nothing the
+		// client sent is silently dropped before it's encrypted.
+		encrypted, err = s.toolCreds.Encrypt(body.Credentials)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to encrypt credentials")
+			return
+		}
+	}
+
+	t, err := ts.CreateTool(r.Context(), store.CreateToolParams{
+		OrgID:                uc.OrgID,
+		Name:                 body.Name,
+		Type:                 body.Type,
+		AuthType:             body.AuthType,
+		MCPCommand:           body.MCPCommand,
+		MCPArgs:              body.MCPArgs,
+		BaseURL:              body.BaseURL,
+		CredentialsEncrypted: encrypted,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -105,7 +210,12 @@ func (s *Server) DeleteTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid tool ID")
 		return
 	}
-	found, err := s.queries.DeleteTool(r.Context(), uc.OrgID, toolID)
+	ts, ok := s.toolQueries()
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "internal_error", "tool store is not configured")
+		return
+	}
+	found, err := ts.DeleteTool(r.Context(), uc.OrgID, toolID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -127,8 +237,13 @@ func (s *Server) TestTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ts, ok := s.toolQueries()
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "internal_error", "tool store is not configured")
+		return
+	}
 	// Mark the tool as tested/connected (latency=0 for synthetic test).
-	if err := s.queries.MarkToolTested(r.Context(), uc.OrgID, toolID, "connected", 0); err != nil {
+	if err := ts.MarkToolTested(r.Context(), uc.OrgID, toolID, "connected", 0); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}

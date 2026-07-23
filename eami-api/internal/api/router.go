@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -10,6 +11,7 @@ import (
 	"github.com/eami/api/internal/auth"
 	"github.com/eami/api/internal/config"
 	"github.com/eami/api/internal/store"
+	"github.com/eami/api/internal/toolcreds"
 )
 
 // Server holds shared dependencies for all HTTP handlers.
@@ -20,6 +22,15 @@ type Server struct {
 	cfg           *config.Config
 	storeIface    Store                // set when constructed via NewHandler (testing)
 	gatewayClient GatewayEpisodeClient // B-002 Brief 2: eami-gateway episode proxy
+
+	// toolCreds encrypts gateway_tools credentials before they are stored
+	// (see internal/toolcreds). Nil if cfg.ToolCredentialsEncryptionKey is
+	// unset -- CreateTool then fails closed for any request carrying
+	// credentials rather than storing them unencrypted or discarding them.
+	toolCreds *toolcreds.Cipher
+	// toolStoreOverride is a test-injection point for tools.go's handlers,
+	// mirroring storeIface/gatewayClient above. Nil in production.
+	toolStoreOverride toolStore
 }
 
 // NewServer creates a Server with the given dependencies. cfg may be nil
@@ -35,6 +46,23 @@ func NewServer(queries *store.Queries, authSvc *auth.Service, engine *alerting.E
 		gwURL, gwKey = cfg.Gateway.URL, cfg.Gateway.EpisodeReadServiceKey
 	}
 	s.gatewayClient = newHTTPGatewayEpisodeClient(gwURL, gwKey)
+
+	// Tool credentials encryption: optional at startup, same convention as
+	// the gateway proxy above -- an unset key does not fail server boot,
+	// it just means CreateTool will fail closed per-request if a caller
+	// submits credentials (see tools.go's CreateTool). A configured-but-
+	// invalid key (wrong length/not hex) is a startup misconfiguration
+	// worth surfacing loudly via logs rather than silently proceeding with
+	// toolCreds == nil, so it's logged here rather than ignored.
+	if cfg != nil && cfg.ToolCredentialsEncryptionKey != "" {
+		tc, err := toolcreds.NewCipher(cfg.ToolCredentialsEncryptionKey)
+		if err != nil {
+			log.Printf("tool credentials encryption key is set but invalid, CreateTool will fail closed for any request with credentials: %v", err)
+		} else {
+			s.toolCreds = tc
+		}
+	}
+
 	return s
 }
 

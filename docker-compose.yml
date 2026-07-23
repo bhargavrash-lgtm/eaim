@@ -130,6 +130,10 @@ services:
       # GATEWAY_EPISODE_READ_SERVICE_KEY value eami-gateway validates inbound.
       API_GATEWAY_URL: http://eami-gateway:8080
       GATEWAY_EPISODE_READ_SERVICE_KEY: ${GATEWAY_EPISODE_READ_SERVICE_KEY}
+      # Encrypts gateway_tools credentials before they're stored. Unset =
+      # CreateTool fails closed (clear error) for any request that submits
+      # credentials; tool creation without credentials is unaffected.
+      TOOL_CREDENTIALS_ENCRYPTION_KEY: ${TOOL_CREDENTIALS_ENCRYPTION_KEY}
     ports:
       - "8081:8081"
     depends_on:

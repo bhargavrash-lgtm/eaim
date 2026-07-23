@@ -17,6 +17,13 @@ type Config struct {
 	ServiceKey string          `yaml:"service_key"`
 	Collector  CollectorConfig `yaml:"collector"`
 	Gateway    GatewayConfig   `yaml:"gateway"`
+
+	// ToolCredentialsEncryptionKey is a hex-encoded 32-byte (AES-256) key
+	// used to encrypt gateway_tools.credentials_encrypted before it is
+	// written -- see internal/toolcreds. Empty by default: CreateTool fails
+	// closed (returns an error, stores nothing) for any request that
+	// includes credentials until this is set. Generate: openssl rand -hex 32
+	ToolCredentialsEncryptionKey string `yaml:"tool_credentials_encryption_key"`
 }
 
 // CollectorConfig tells the API server how to reach the on-prem collector for
@@ -132,6 +139,11 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("GATEWAY_EPISODE_READ_SERVICE_KEY"); v != "" {
 		cfg.Gateway.EpisodeReadServiceKey = v
+	}
+
+	// Tool credentials encryption key override.
+	if v := os.Getenv("TOOL_CREDENTIALS_ENCRYPTION_KEY"); v != "" {
+		cfg.ToolCredentialsEncryptionKey = v
 	}
 
 	return cfg, nil

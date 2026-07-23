@@ -104,7 +104,32 @@ or prior context suggests otherwise, it is wrong; trust this line.
 - Solo founder, pre-first-customer, evening/weekend hours.
 
 ## Last updated
-2026-07-22 by Claude Code — standalone infra fix (B-020, not tied to any
+2026-07-23 by Claude Code — B-022: `POST /v1/gateway/tools` was silently
+discarding any `credentials` object submitted via the Add Tool UI
+(documented in `api/openapi.yaml`'s `ToolCreate.credentials`, but
+`CreateTool` never read the field, never wrote to `gateway_tools.
+credentials_encrypted`, and returned 201 anyway) — a gap surfaced by a
+prior full-application audit. Fixed: new `eami-api/internal/toolcreds`
+package (AES-256-GCM, key from `TOOL_CREDENTIALS_ENCRYPTION_KEY`,
+deliberately not pgcrypto — see BUILT.md for why), wired into
+`CreateTool`; fails closed (500, no store call) if credentials are
+submitted but no key is configured. Two subagent review passes: security
+review caught a real bypass in an early version (typed-struct decode
+meant an unrecognized credential field name silently reproduced the
+original bug) — fixed and re-verified clean. General code review caught
+a missing nil-store guard on `tools.go`'s other handlers and a
+non-standard error code — both fixed. 19 new tests; `tools.go` had zero
+coverage before this. **Verified 2026-07-23 with a real toolchain:
+`go build ./...`, `go vet ./...`, `go test ./...` all clean, 0
+failures.** `TOOL_CREDENTIALS_ENCRYPTION_KEY` added to `.env.example`/
+`docker-compose.yml`/`docker-compose.prod.yml` (generate via `openssl
+rand -hex 32`, same convention as the other secrets) so the local stack
+doesn't hit the fail-closed path unexpectedly. `TestTool`'s synthetic
+"always connected" stub is unchanged, explicitly out of scope — logged
+as B-023, the natural next building block (decrypting stored credentials
+for a real connectivity probe).
+
+Prior entry, still accurate: 2026-07-22, standalone infra fix (B-020, not tied to any
 brief): `eami-collector` was crash-looping (`exec
 /app/docker-entrypoint.sh: no such file or directory`) because
 `docker-entrypoint.sh` had Windows CRLF line endings, breaking shebang

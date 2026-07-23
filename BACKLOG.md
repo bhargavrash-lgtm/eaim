@@ -156,8 +156,19 @@ _(one line each; full detail in `BUILT.md` / `CHANGELOG.md`)_
 - **TASK-031 → TASK-068** (34 of ~40 tasks) — confirmed DONE via source cross-check; see full per-task table from the bootstrap survey if needed (not reproduced here to keep this file scannable — ask if you need the raw table).
 - **B-019** (2026-07-22) — standalone infra fix, not tied to any brief: `docker-compose.yml`'s `eami-ui` service had the wrong build context (`./eami-ui`) for a Dockerfile that copies repo-root `api/openapi.yaml`, breaking `docker compose up --build`. Fixed to `context: .` / `dockerfile: eami-ui/Dockerfile`. Verified with `docker compose build eami-ui`. Incidentally confirms Docker is available on this machine — see `BUILT.md` cross-cutting note (relevant to B-004, still QUEUED, not re-attempted here).
 - **B-020** (2026-07-22) — standalone infra fix: `eami-collector` was crash-looping (`exec /app/docker-entrypoint.sh: no such file or directory`) because `docker-entrypoint.sh` had CRLF line endings, breaking shebang resolution. Stripped to LF. Verified: `docker compose build eami-collector` clean, container starts and stays running (not just builds). No Dockerfile change needed.
+- **B-022** (2026-07-23) — `POST /v1/gateway/tools` now actually encrypts and persists the `credentials` object it always documented but silently discarded (decoded, never read, never written to `gateway_tools.credentials_encrypted`, 201 returned anyway — a gap found during a full-application audit, not previously tracked under its own B-ID). New `eami-api/internal/toolcreds` package (AES-256-GCM, key from `TOOL_CREDENTIALS_ENCRYPTION_KEY`); `CreateTool` fails closed (500, no store call) if credentials are submitted but no key is configured. A security review pass caught a real bypass in an early version of the fix (deciding "were credentials submitted?" via the typed `ToolCredentials` struct meant an unrecognized field name decoded to an all-empty struct and reproduced the original silent-discard bug) — fixed by deciding presence structurally from the raw JSON and encrypting the raw bytes, not a re-marshaled struct; re-verified clean by the same reviewer. A general code-review pass caught `tools.go`'s other three handlers calling `s.queries` with no nil guard (unlike every other handler file in this package) and a non-standard `"config_error"` code; both fixed. 19 new tests (`toolcreds_test.go` + `tools_test.go`, `tools.go` had zero coverage before this). **Verified 2026-07-23 with a real toolchain: `go build ./...`, `go vet ./...`, `go test ./...` all clean, 0 failures.** `TestTool`'s synthetic-connectivity stub is unchanged, explicitly out of scope — see B-023.
 
 ## QUEUED (added this session)
+
+### B-023 — `TestTool` always reports "connected" regardless of real reachability
+**Objective:** `POST /v1/gateway/tools/{toolId}/test` actually probes the tool (MCP command / REST base_url / DB connection string, using its now-real stored credentials per B-022) instead of unconditionally returning `{"status":"connected","latency_ms":0}`.
+**Context:** Pre-existing gap, found during the same full-application audit that surfaced B-022 (`tools.go`'s `TestTool` handler comment: "For now returns a synthetic 'connected' result after a brief probe" — there is no probe). Explicitly called out as more consequential now that B-022 means a tool can actually hold working credentials: the status badge/"Test connection" UI in `ToolsPage.tsx` implies real health checking and can never report "degraded"/"disconnected", regardless of whether the underlying MCP server/API/DB is actually reachable.
+**Acceptance criteria:**
+- [ ] For `type: mcp` — attempt to invoke `mcp_command` (or equivalent handshake) and measure real latency
+- [ ] For `type: rest_api` — make a real HTTP request to `base_url` using the stored (decrypted) credentials, measure latency, map response to connected/degraded/disconnected
+- [ ] For `type: database` — attempt a real connection using the stored `connection_string`, measure latency
+- [ ] `MarkToolTested` called with the real status/latency instead of always `"connected"`/`0`
+**Dependencies:** B-022 (done) — decrypting stored credentials for the probe needs `toolcreds.Cipher.Decrypt`, which exists but had no production caller before this. Explicitly out of scope for B-022 per that task's brief ("do not fix TestTool's synthetic stub in this brief... will be the next building block").
 
 ### B-021 — Every `.sh` file in the repo has CRLF line endings except the now-fixed collector entrypoint
 **Objective:** Prevent the same shebang-resolution crash (B-020) from recurring in any other script, and stop silent `\r`-in-heredoc corruption in scripts that build SQL/config strings.
@@ -168,4 +179,4 @@ _(one line each; full detail in `BUILT.md` / `CHANGELOG.md`)_
 - [ ] Confirm `scripts/setup.sh`'s inline heredoc SQL still runs clean after normalization (it already worked with CRLF since bash tolerates `\r` mid-heredoc-line in most cases, but worth confirming, not assuming)
 **Dependencies:** none. Not fixed as part of B-020 — that task was scoped to the collector only.
 
-## Next B-ID: B-022
+## Next B-ID: B-024

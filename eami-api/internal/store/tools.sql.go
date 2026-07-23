@@ -45,13 +45,18 @@ type CreateToolParams struct {
 	MCPCommand *string
 	MCPArgs    []string
 	BaseURL    *string
+	// CredentialsEncrypted is the AES-256-GCM-sealed credentials blob (see
+	// internal/toolcreds), or nil if the tool has no secrets to store. Never
+	// read back by any query in this file -- GatewayTool has no field for
+	// it, so it cannot leak through ListTools/CreateTool's own RETURNING.
+	CredentialsEncrypted []byte
 }
 
 // CreateTool inserts a new gateway tool and returns it.
 func (q *Queries) CreateTool(ctx context.Context, p CreateToolParams) (GatewayTool, error) {
 	const sql = `
-INSERT INTO gateway_tools (org_id, name, type, auth_type, mcp_command, mcp_args, base_url)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO gateway_tools (org_id, name, type, auth_type, mcp_command, mcp_args, base_url, credentials_encrypted)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING id, org_id, name, type, auth_type, mcp_command, base_url,
           status, last_used, last_tested, created_at`
 
@@ -59,6 +64,7 @@ RETURNING id, org_id, name, type, auth_type, mcp_command, base_url,
 	err := q.db.QueryRow(ctx, sql,
 		toPgtypeUUID(p.OrgID), p.Name, p.Type, p.AuthType,
 		toPgtypeText(p.MCPCommand), p.MCPArgs, toPgtypeText(p.BaseURL),
+		p.CredentialsEncrypted,
 	).Scan(
 		&t.ID, &t.OrgID, &t.Name, &t.Type, &t.AuthType,
 		&t.MCPCommand, &t.BaseURL, &t.Status,
