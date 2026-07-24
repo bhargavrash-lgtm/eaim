@@ -104,7 +104,29 @@ or prior context suggests otherwise, it is wrong; trust this line.
 - Solo founder, pre-first-customer, evening/weekend hours.
 
 ## Last updated
-2026-07-24 by Claude Code — B-023: `POST /v1/gateway/tools/{toolId}/test`
+2026-07-24 by Claude Code — B-024: `ToolsPage.tsx`'s "Test connection"
+button read only whether the HTTP call to `TestTool` threw, never the
+response body -- harmless before B-023 (which always returned a
+synthetic success), but after B-023 (which always resolves 200 with the
+real result in `{success, latency_ms, error}`), the button always showed
+green regardless of actual reachability. Fixed: `handleTest` now reads
+`result.success`, and on failure parses B-023's `"<reason>: <detail>"`
+error string into `auth-failed`/`unreachable`/`misconfigured`/a generic
+fallback, each with a distinct badge color (reusing the page's existing
+`StatusBadge` green/amber/red language) and the full message surfaced
+via a tooltip. **Notable process discovery, not just this task's fix**:
+Node/npm are still absent on this machine, but `docker build --target
+builder -f eami-ui/Dockerfile .` runs the real `npm ci && generate-client
+&& tsc && vite build` pipeline inside a container -- used here to get a
+genuine, passing compiler check (not just manual code review) for the
+first time this session on a frontend change. Logged in `BUILT.md` as a
+reusable verification path for future `eami-ui` work on this machine.
+Live `docker compose up`/browser click-through not performed (judged
+disproportionate for this narrow, already-type-checked change); manual
+verification steps provided instead. Scope confirmed strictly
+`ToolsPage.tsx` (`git diff --stat`: one file changed).
+
+Prior entry, still accurate: 2026-07-24 by Claude Code — B-023: `POST /v1/gateway/tools/{toolId}/test`
 was a synthetic stub (always "connected", no real probe). Fixed: new
 `eami-api/internal/api/tool_connectivity.go` runs a real check per tool
 `type` -- HTTP GET for `rest_api`, a real `pgx.ConnectConfig` handshake

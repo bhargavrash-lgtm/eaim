@@ -1,7 +1,7 @@
 // ToolsPage.tsx -- Gateway / Tools
 // Owned by FE-Gateway
 import { useState } from 'react'
-import { Plus, Trash2, Zap, CheckCircle, AlertCircle, WifiOff } from 'lucide-react'
+import { Plus, Trash2, Zap, CheckCircle, AlertCircle, WifiOff, HelpCircle } from 'lucide-react'
 import {
   PageHeader,
   ConfirmDialog,
@@ -34,6 +34,31 @@ function StatusBadge({ status }: { status: string }) {
       {status}
     </span>
   )
+}
+
+// Test-connection result state -- one entry per outcome the backend
+// (eami-api's TestTool, B-023) can actually report, so a rejected
+// credential looks nothing like a genuinely reachable tool. Reuses
+// STATUS_CONFIG's color language (green/amber/red) plus a neutral gray
+// for "we couldn't even attempt this" (misconfigured/mcp).
+type TestState = 'testing' | 'success' | 'auth-failed' | 'unreachable' | 'misconfigured' | 'failed'
+
+const TEST_STATE_CONFIG: Record<Exclude<TestState, 'testing'>, { label: string; icon: typeof CheckCircle; className: string }> = {
+  success:       { label: 'OK',            icon: CheckCircle, className: 'text-green-700 bg-green-50' },
+  'auth-failed': { label: 'Auth failed',   icon: AlertCircle, className: 'text-amber-700 bg-amber-50' },
+  unreachable:   { label: 'Unreachable',   icon: WifiOff,     className: 'text-red-700 bg-red-50' },
+  misconfigured: { label: 'Misconfigured', icon: HelpCircle,  className: 'text-gray-600 bg-gray-100' },
+  failed:        { label: 'Failed',        icon: AlertCircle, className: 'text-red-700 bg-red-50' },
+}
+
+// Parses B-023's "<reason>: <detail>" error string (tool_connectivity.go's
+// errorMessage()) into one of the known reasons, falling back to a generic
+// "failed" bucket for anything unrecognized rather than silently mislabeling
+// it as a specific reason it didn't actually report.
+function classifyTestError(message: string | null | undefined): Exclude<TestState, 'testing' | 'success'> {
+  const reason = message?.split(':')[0]?.trim()
+  if (reason === 'auth-failed' || reason === 'unreachable' || reason === 'misconfigured') return reason
+  return 'failed'
 }
 
 function TypeBadge({ type }: { type: string }) {
@@ -210,19 +235,30 @@ export function ToolsPage() {
 
   const [showAdd, setShowAdd]           = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Tool | null>(null)
-  const [testResult, setTestResult]     = useState<Record<string, 'ok' | 'fail' | 'testing'>>({})
+  const [testResult, setTestResult]     = useState<Record<string, { state: TestState; message?: string }>>({})
 
   const tools: Tool[] = (data as any)?.data ?? []
 
   async function handleTest(id: string) {
-    setTestResult(prev => ({ ...prev, [id]: 'testing' }))
+    setTestResult(prev => ({ ...prev, [id]: { state: 'testing' } }))
     try {
-      await testTool.mutateAsync(id)
-      setTestResult(prev => ({ ...prev, [id]: 'ok' }))
+      // TestTool (B-023) always resolves with a 200 -- the real result
+      // lives in the body's success/error fields, not in whether this
+      // promise rejects. Only a genuine transport/HTTP-level failure
+      // (network error, tool not found, etc.) throws.
+      const result = await testTool.mutateAsync(id)
+      if (result?.success) {
+        setTestResult(prev => ({ ...prev, [id]: { state: 'success' } }))
+      } else {
+        const message = result?.error ?? undefined
+        setTestResult(prev => ({ ...prev, [id]: { state: classifyTestError(message), message } }))
+      }
     } catch {
-      setTestResult(prev => ({ ...prev, [id]: 'fail' }))
+      setTestResult(prev => ({ ...prev, [id]: { state: 'failed', message: 'Request failed' } }))
     }
-    setTimeout(() => setTestResult(prev => { const n = { ...prev }; delete n[id]; return n }), 4000)
+    // Longer than before (4s -> 6s) since there's now a specific reason
+    // worth reading, not just a flash of green/red.
+    setTimeout(() => setTestResult(prev => { const n = { ...prev }; delete n[id]; return n }), 6000)
   }
 
   if (isLoading) return <div className="p-6"><LoadingSpinner /></div>
@@ -277,20 +313,25 @@ export function ToolsPage() {
                       <td className="px-4 py-3 text-xs text-gray-400">{formatLastUsed(tool.last_used)}</td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-3">
-                          <button
-                            onClick={() => handleTest(tool.id)}
-                            disabled={tr === 'testing'}
-                            title="Test connection"
-                            className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded ${
-                              tr === 'ok'      ? 'text-green-700 bg-green-50' :
-                              tr === 'fail'    ? 'text-red-700 bg-red-50' :
-                              tr === 'testing' ? 'text-gray-400' :
-                              'text-indigo-600 hover:text-indigo-800'
-                            }`}
-                          >
-                            <Zap className="h-3 w-3" />
-                            {tr === 'testing' ? 'Testing...' : tr === 'ok' ? 'OK' : tr === 'fail' ? 'Failed' : 'Test'}
-                          </button>
+                          {(() => {
+                            const cfg = tr && tr.state !== 'testing' ? TEST_STATE_CONFIG[tr.state] : undefined
+                            const Icon = cfg?.icon ?? Zap
+                            return (
+                              <button
+                                onClick={() => handleTest(tool.id)}
+                                disabled={tr?.state === 'testing'}
+                                title={tr?.message ?? 'Test connection'}
+                                className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded ${
+                                  cfg ? cfg.className :
+                                  tr?.state === 'testing' ? 'text-gray-400' :
+                                  'text-indigo-600 hover:text-indigo-800'
+                                }`}
+                              >
+                                <Icon className="h-3 w-3" />
+                                {tr?.state === 'testing' ? 'Testing...' : cfg ? cfg.label : 'Test'}
+                              </button>
+                            )
+                          })()}
                           <button onClick={() => setDeleteTarget(tool)}
                             className="text-gray-400 hover:text-red-600" title="Remove">
                             <Trash2 className="h-4 w-4" />
