@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -146,7 +147,72 @@ func Load(path string) (*Config, error) {
 		cfg.ToolCredentialsEncryptionKey = v
 	}
 
+	if err := validate(cfg); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// knownPlaceholderSecrets lists literal values that must never be accepted
+// as a real secret, even if a caller explicitly sets them -- these are the
+// values that historically shipped as working defaults in this repo
+// (eami-api.yaml, eami-gateway.yaml, docker-compose.yml), so treating them
+// as "configured" would silently reproduce the same bypass.
+var knownPlaceholderSecrets = map[string]bool{
+	"":            true,
+	"changeme":    true,
+	"devpassword": true,
+}
+
+func isPlaceholderSecret(v string) bool {
+	return knownPlaceholderSecrets[strings.ToLower(strings.TrimSpace(v))]
+}
+
+// dsnPassword extracts the password segment from a "scheme://user:password@
+// host/..." style DSN (the only shape this file ever builds or reads). ok is
+// false if dsn doesn't have that shape at all, which validate() treats as
+// unconfigured rather than trying to guess.
+func dsnPassword(dsn string) (pw string, ok bool) {
+	at := strings.LastIndex(dsn, "@")
+	if at < 0 {
+		return "", false
+	}
+	userinfo := dsn[:at]
+	colon := strings.LastIndex(userinfo, ":")
+	if colon < 0 || !strings.Contains(userinfo[:colon], "://") {
+		return "", false
+	}
+	return userinfo[colon+1:], true
+}
+
+// dsnHasPlaceholderPassword reports whether dsn's password segment is empty,
+// a known placeholder, or the DSN doesn't parse -- checked through
+// isPlaceholderSecret (not a raw substring match) so the same trimming/
+// case-folding applies here as to every other secret, e.g. a CRLF-corrupted
+// .env value (API_DB_PASSWORD="changeme\r") is still caught.
+func dsnHasPlaceholderPassword(dsn string) bool {
+	pw, ok := dsnPassword(dsn)
+	if !ok {
+		return true
+	}
+	return isPlaceholderSecret(pw)
+}
+
+// validate rejects config that would let the server start with a known-bad
+// or missing secret. A missing required secret must fail startup loudly and
+// actionably, never fall through to a guessable default.
+func validate(cfg *Config) error {
+	if isPlaceholderSecret(cfg.ServiceKey) {
+		return fmt.Errorf("config: service_key (API_SERVICE_KEY) must be set to a real secret, not empty or a known placeholder — see .env.example (generate: openssl rand -hex 32)")
+	}
+	if cfg.Database.DSN == "" {
+		return fmt.Errorf("config: database.dsn is required — set API_DB_HOST/API_DB_USER/API_DB_PASSWORD or database.dsn in config, see .env.example")
+	}
+	if dsnHasPlaceholderPassword(cfg.Database.DSN) {
+		return fmt.Errorf("config: database DSN password (POSTGRES_PASSWORD/API_DB_PASSWORD) must be set to a real secret, not empty or a known placeholder — see .env.example (generate: openssl rand -base64 24)")
+	}
+	return nil
 }
 
 func defaults() *Config {
@@ -158,7 +224,9 @@ func defaults() *Config {
 			IdleTimeoutSeconds:  120,
 		},
 		Database: DatabaseConfig{
-			DSN:          "postgres://eami_app:changeme@localhost:5432/eami?sslmode=disable",
+			// No default DSN: a real one must come from database.dsn in the
+			// YAML config or the API_DB_* env vars -- validate() rejects an
+			// empty or placeholder-password DSN rather than silently using one.
 			MaxOpenConns: 25,
 			MaxIdleConns: 5,
 		},
@@ -170,7 +238,8 @@ func defaults() *Config {
 			Level:  "info",
 			Format: "text",
 		},
-		ServiceKey: "changeme",
+		// No default ServiceKey: a real one must come from service_key in the
+		// YAML config or API_SERVICE_KEY -- validate() rejects empty/placeholder.
 		Gateway: GatewayConfig{
 			URL: "http://eami-gateway:8080",
 		},

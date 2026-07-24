@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -149,6 +150,51 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// knownPlaceholderSecrets lists literal values that must never be accepted
+// as a real secret, even if a caller explicitly sets them -- these are the
+// values that historically shipped as working defaults in this repo
+// (eami-api.yaml, eami-gateway.yaml, docker-compose.yml), so treating them
+// as "configured" would silently reproduce the same bypass.
+var knownPlaceholderSecrets = map[string]bool{
+	"":            true,
+	"changeme":    true,
+	"devpassword": true,
+}
+
+func isPlaceholderSecret(v string) bool {
+	return knownPlaceholderSecrets[strings.ToLower(strings.TrimSpace(v))]
+}
+
+// dsnPassword extracts the password segment from a "scheme://user:password@
+// host/..." style DSN (the only shape this file ever builds or reads). ok is
+// false if dsn doesn't have that shape at all, which validate() treats as
+// unconfigured rather than trying to guess.
+func dsnPassword(dsn string) (pw string, ok bool) {
+	at := strings.LastIndex(dsn, "@")
+	if at < 0 {
+		return "", false
+	}
+	userinfo := dsn[:at]
+	colon := strings.LastIndex(userinfo, ":")
+	if colon < 0 || !strings.Contains(userinfo[:colon], "://") {
+		return "", false
+	}
+	return userinfo[colon+1:], true
+}
+
+// dsnHasPlaceholderPassword reports whether dsn's password segment is empty,
+// a known placeholder, or the DSN doesn't parse -- checked through
+// isPlaceholderSecret (not a raw substring match) so the same trimming/
+// case-folding applies here as to every other secret, e.g. a CRLF-corrupted
+// .env value (GATEWAY_DB_PASSWORD="changeme\r") is still caught.
+func dsnHasPlaceholderPassword(dsn string) bool {
+	pw, ok := dsnPassword(dsn)
+	if !ok {
+		return true
+	}
+	return isPlaceholderSecret(pw)
+}
+
 // validate applies defaults and checks required fields.
 func validate(cfg *Config) error {
 	// Defaults
@@ -178,8 +224,14 @@ func validate(cfg *Config) error {
 	if cfg.PostgresDSN == "" {
 		return fmt.Errorf("config: postgres_dsn is required")
 	}
+	if dsnHasPlaceholderPassword(cfg.PostgresDSN) {
+		return fmt.Errorf("config: postgres_dsn password (POSTGRES_PASSWORD/GATEWAY_DB_PASSWORD) must be set to a real secret, not empty or a known placeholder — see .env.example (generate: openssl rand -base64 24)")
+	}
 	if cfg.Policy.RulesPath == "" {
 		return fmt.Errorf("config: policy.rules_path is required")
+	}
+	if isPlaceholderSecret(cfg.API.ServiceKey) {
+		return fmt.Errorf("config: api.service_key (GATEWAY_API_SERVICE_KEY) must be set to a real secret, not empty or a known placeholder — see .env.example (generate: openssl rand -hex 32)")
 	}
 	if cfg.API.EpisodeReadServiceKey == "" {
 		return fmt.Errorf("config: api.episode_read_service_key is required (gates full episode content access — see GATEWAY_EPISODE_READ_SERVICE_KEY)")

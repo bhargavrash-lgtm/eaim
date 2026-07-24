@@ -25,7 +25,7 @@ services:
     environment:
       POSTGRES_DB: eami
       POSTGRES_USER: eami_app
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set — see .env.example}
     command:
       - postgres
       - -c
@@ -73,7 +73,7 @@ services:
       GATEWAY_DB_HOST: postgres
       GATEWAY_DB_NAME: eami
       GATEWAY_DB_USER: eami_app
-      GATEWAY_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      GATEWAY_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set — see .env.example}
       GATEWAY_JWT_KEY_PATH: /certs/gateway.key
       GATEWAY_APPROVAL_SLACK_WEBHOOK: ${GATEWAY_APPROVAL_SLACK_WEBHOOK:-}
       GATEWAY_UI_BASE_URL: ${GATEWAY_UI_BASE_URL}
@@ -102,7 +102,7 @@ services:
       API_DB_HOST: postgres
       API_DB_NAME: eami
       API_DB_USER: eami_app
-      API_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      API_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set — see .env.example}
       API_JWT_SECRET: ${API_JWT_SECRET}
       API_SERVICE_KEY: ${API_SERVICE_KEY}
       COLLECTOR_URL: http://eami-collector:8888

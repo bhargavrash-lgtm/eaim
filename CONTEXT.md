@@ -104,7 +104,47 @@ or prior context suggests otherwise, it is wrong; trust this line.
 - Solo founder, pre-first-customer, evening/weekend hours.
 
 ## Last updated
-2026-07-24 by Claude Code — B-024: `ToolsPage.tsx`'s "Test connection"
+2026-07-24 by Claude Code — B-025: closed a real, live authentication
+bypass. `eami-api/internal/config/config.go` had **no `validate()` at
+all** and `defaults()` hardcoded `ServiceKey: "changeme"` plus a
+`changeme`-password DSN — an unset `API_SERVICE_KEY` env var meant
+`requireServiceKey` accepted a literal `X-Service-Key: changeme` header
+from any caller against the collector write paths. `eami-gateway/internal/
+config/config.go` had a `validate()` (from B-002 Brief 1) but never
+checked `API.ServiceKey` (`GATEWAY_API_SERVICE_KEY`) — same class of gap.
+Fixed: both now reject `API_SERVICE_KEY`/`GATEWAY_API_SERVICE_KEY`/
+`POSTGRES_PASSWORD` if empty or a known placeholder (`"changeme"`/
+`"devpassword"`), checked via new `isPlaceholderSecret`/
+`dsnHasPlaceholderPassword`/`dsnPassword` helpers (duplicated across the
+two modules — separate Go packages under `go.work`, no shared package
+introduced for ~30 lines). `docker-compose.yml`'s `${POSTGRES_PASSWORD:-
+devpassword}` (3 places) and `docker-compose.prod.yml`'s bare
+`${POSTGRES_PASSWORD}` (3 places) both now use compose's `${VAR:?msg}`
+required-var syntax, confirmed fail-closed before any container starts.
+`.env.example`'s literal `changeme` values for `POSTGRES_PASSWORD`/
+`DATABASE_URL` replaced with blank + instructions. **Security review
+caught a real gap, fixed before commit:** the first version of
+`dsnHasPlaceholderPassword` did a raw, untrimmed substring match, so a
+CRLF-corrupted `.env` value or leading whitespace on the DB password
+(e.g. `API_DB_PASSWORD="changeme\r"`) would bypass detection — fixed by
+extracting the DSN's password segment and validating it through the same
+trimmed/lowercased path as every other secret. General code review
+caught that the original tests only exercised `validate()` directly, not
+`Load()`'s real env-var wiring — added `Load()`-level integration tests.
+18 new tests total (8 `eami-api`, 10 `eami-gateway`). **Verified
+2026-07-24 with a real toolchain: `go build ./...`, `go vet ./...`,
+`go test ./...` all clean, 0 failures**, plus a live manual check against
+the running local `docker compose` stack: real secrets still start
+clean, and `API_SERVICE_KEY=changeme`/unset, `GATEWAY_API_SERVICE_KEY=
+changeme`, and `API_DB_PASSWORD=devpassword` were each individually
+confirmed via real containers to produce the exact clean startup-refusal
+error (not a generic panic). Two follow-ups logged, not fixed (out of
+this task's `MAY MODIFY` scope): B-026 (`eami-api.yaml`/`eami-gateway.
+yaml` still ship the now-rejected literal `"changeme"` as example
+config) and B-027 (`scripts/seed-db.sh`/`create-audit-partition.sh` have
+the same `devpassword`-fallback pattern this task closed elsewhere).
+
+Prior entry, still accurate: 2026-07-24 by Claude Code — B-024: `ToolsPage.tsx`'s "Test connection"
 button read only whether the HTTP call to `TestTool` threw, never the
 response body -- harmless before B-023 (which always returned a
 synthetic success), but after B-023 (which always resolves 200 with the

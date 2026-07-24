@@ -26,7 +26,7 @@ services:
     environment:
       POSTGRES_DB: eami
       POSTGRES_USER: eami_app
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set — see .env.example}
     # Enable pg_cron (shipped in the timescaledb-ha image).
     # pg_cron auto-creates the next month's audit_log partition on the 20th of
     # each month (see schema/migrations/007_audit_partitions.sql).
@@ -86,7 +86,7 @@ services:
       GATEWAY_DB_HOST: postgres
       GATEWAY_DB_NAME: eami
       GATEWAY_DB_USER: eami_app
-      GATEWAY_DB_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      GATEWAY_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set — see .env.example}
       GATEWAY_JWT_KEY_PATH: /certs/gateway.key
       GATEWAY_APPROVAL_SLACK_WEBHOOK: ${GATEWAY_APPROVAL_SLACK_WEBHOOK:-}
       GATEWAY_UI_BASE_URL: ${GATEWAY_UI_BASE_URL:-http://localhost:5173}
@@ -119,7 +119,7 @@ services:
       API_DB_HOST: postgres
       API_DB_NAME: eami
       API_DB_USER: eami_app
-      API_DB_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      API_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set — see .env.example}
       API_JWT_SECRET: ${API_JWT_SECRET:-dev-jwt-secret-change-in-prod}
       API_SERVICE_KEY: ${API_SERVICE_KEY}
       # Collector integration — enables the failed_delivery_count alert metric.
