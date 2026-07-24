@@ -139,10 +139,16 @@ clean, and `API_SERVICE_KEY=changeme`/unset, `GATEWAY_API_SERVICE_KEY=
 changeme`, and `API_DB_PASSWORD=devpassword` were each individually
 confirmed via real containers to produce the exact clean startup-refusal
 error (not a generic panic). Two follow-ups logged, not fixed (out of
-this task's `MAY MODIFY` scope): B-026 (`eami-api.yaml`/`eami-gateway.
+this task's `MAY MODIFY` scope): B-028 (`eami-api.yaml`/`eami-gateway.
 yaml` still ship the now-rejected literal `"changeme"` as example
-config) and B-027 (`scripts/seed-db.sh`/`create-audit-partition.sh` have
+config) and B-029 (`scripts/seed-db.sh`/`create-audit-partition.sh` have
 the same `devpassword`-fallback pattern this task closed elsewhere).
+**Renumbered 2026-07-24, same session:** these were originally logged as
+B-026/B-027, which collided with different already-planned work (JWT
+signing key persistence and background-goroutine panic recovery,
+respectively) not yet reflected in `BACKLOG.md` — renumbered to
+B-028/B-029 per founder correction, `BACKLOG.md`'s counter now reads
+`Next B-ID: B-030`.
 
 Prior entry, still accurate: 2026-07-24 by Claude Code — B-024: `ToolsPage.tsx`'s "Test connection"
 button read only whether the HTTP call to `TestTool` threw, never the
