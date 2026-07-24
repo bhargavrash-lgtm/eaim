@@ -42,6 +42,12 @@ type fakeToolStore struct {
 	createCalled bool
 	createErr    error
 	created      store.CreateToolParams
+
+	getForTestRow     toolTestRow
+	getForTestErr     error
+	markTestedStatus  string
+	markTestedLatency int
+	markTestedCalled  bool
 }
 
 func (f *fakeToolStore) ListTools(_ context.Context, _ uuid.UUID) ([]store.GatewayTool, error) {
@@ -69,8 +75,15 @@ func (f *fakeToolStore) DeleteTool(_ context.Context, _, _ uuid.UUID) (bool, err
 	return true, nil
 }
 
-func (f *fakeToolStore) MarkToolTested(_ context.Context, _, _ uuid.UUID, _ string, _ int) error {
+func (f *fakeToolStore) MarkToolTested(_ context.Context, _, _ uuid.UUID, status string, latencyMs int) error {
+	f.markTestedCalled = true
+	f.markTestedStatus = status
+	f.markTestedLatency = latencyMs
 	return nil
+}
+
+func (f *fakeToolStore) GetToolForTest(_ context.Context, _, _ uuid.UUID) (toolTestRow, error) {
+	return f.getForTestRow, f.getForTestErr
 }
 
 // ─── test server helper ─────────────────────────────────────────────────────
@@ -97,6 +110,12 @@ func newToolsTestEnv(t *testing.T, keyHex string) *toolsTestEnv {
 	srv := NewServer(nil, authSvc, nil, cfg)
 	fake := &fakeToolStore{}
 	srv.toolStoreOverride = fake
+	// Tests target httptest servers on 127.0.0.1, which safeDialContext
+	// (the production default) correctly rejects -- see
+	// TestSafeDialContext_* in tool_connectivity_test.go for direct
+	// coverage of that guard. Swap in an unrestricted dialer here so
+	// handler tests can exercise real round-trips instead.
+	srv.toolDialOverride = unrestrictedDial
 
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

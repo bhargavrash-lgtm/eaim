@@ -104,7 +104,37 @@ or prior context suggests otherwise, it is wrong; trust this line.
 - Solo founder, pre-first-customer, evening/weekend hours.
 
 ## Last updated
-2026-07-23 by Claude Code — B-022: `POST /v1/gateway/tools` was silently
+2026-07-24 by Claude Code — B-023: `POST /v1/gateway/tools/{toolId}/test`
+was a synthetic stub (always "connected", no real probe). Fixed: new
+`eami-api/internal/api/tool_connectivity.go` runs a real check per tool
+`type` -- HTTP GET for `rest_api`, a real `pgx.ConnectConfig` handshake
+for `database` (SQLSTATE `28xxx` distinguishes auth-failed from
+unreachable), and an honest `misconfigured` for `mcp` (a local-subprocess
+tool type that can't safely be tested from eami-api's cloud process --
+shelling out to an admin-supplied command string would itself be a
+command-injection surface). Response now matches `openapi.yaml`'s
+long-undocumented `{success, latency_ms, error}` shape. **Security review
+caught a real gap not in the original plan**: since eami-api is EAMI's
+own cloud SaaS process (unlike eami-gateway, which is on-prem), an
+unguarded version would let an org admin/operator use this endpoint as a
+reachability oracle against EAMI's own cloud network (e.g. cloud metadata
+endpoints). Added `safeDialContext` -- rejects loopback/link-local/
+private/RFC1918/ULA targets, resolves once then dials the validated IP
+directly (closes a DNS-rebinding gap) -- wired into both the REST and
+database dial paths; re-verified clean by the same reviewer end-to-end
+against the metadata-address and RFC1918 cases. General code review
+separately caught and fixed: single-address-only dialing (now falls back
+through all resolved addresses), a per-call `http.Transport` leaking an
+idle connection + goroutines on every test, and an unbounded database
+connection close. 30 new tests, including direct coverage of the SSRF
+guard. **Verified 2026-07-24 with a real toolchain: `go build ./...`,
+`go vet ./...`, `go test ./...` all clean, 0 failures** (149 total, up
+from 143 pre-B-023). Known follow-up, out of scope for this task and not
+fixed: `ToolsPage.tsx`'s "Test connection" button doesn't yet read the
+real `success` field from the response (harmless before this fix, since
+the old stub always reported success) -- logged as `BACKLOG.md` B-024.
+
+Prior entry, still accurate: 2026-07-23 by Claude Code — B-022: `POST /v1/gateway/tools` was silently
 discarding any `credentials` object submitted via the Add Tool UI
 (documented in `api/openapi.yaml`'s `ToolCreate.credentials`, but
 `CreateTool` never read the field, never wrote to `gateway_tools.

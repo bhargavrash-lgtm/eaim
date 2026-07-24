@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/eami/api/internal/store"
 )
@@ -24,23 +27,69 @@ type toolStore interface {
 	CreateTool(ctx context.Context, p store.CreateToolParams) (store.GatewayTool, error)
 	DeleteTool(ctx context.Context, orgID, toolID uuid.UUID) (bool, error)
 	MarkToolTested(ctx context.Context, orgID, toolID uuid.UUID, status string, latencyMs int) error
+	// GetToolForTest reads back credentials_encrypted -- deliberately NOT
+	// exposed by any other method here (ListTools/CreateTool's GatewayTool
+	// return type has no such field at all, by design, per B-022). Used
+	// only internally by TestTool to decrypt-and-probe; the result must
+	// never be serialized into any HTTP response.
+	GetToolForTest(ctx context.Context, orgID, toolID uuid.UUID) (toolTestRow, error)
+}
+
+// toolTestRow is what TestTool needs to run a connectivity check.
+type toolTestRow struct {
+	Type                 string
+	AuthType             string
+	BaseURL              *string
+	CredentialsEncrypted []byte
 }
 
 // toolQueries returns the toolStore to use for this request: the test
-// override if set, otherwise the production *store.Queries. ok is false if
-// neither is configured (e.g. a Server built via NewHandler for another
-// handler's tests, which never sets s.queries) -- callers must check ok
-// rather than dereferencing a nil *store.Queries through the interface,
-// mirroring the "if s.queries != nil" guard every other handler in this
-// package (policies.go, agents.go, ...) uses for the same reason.
+// override if set, otherwise the production *store.Queries (wrapped, see
+// toolStoreWithConnectivity). ok is false if neither is configured (e.g. a
+// Server built via NewHandler for another handler's tests, which never
+// sets s.queries) -- callers must check ok rather than dereferencing a nil
+// *store.Queries through the interface, mirroring the "if s.queries != nil"
+// guard every other handler in this package (policies.go, agents.go, ...)
+// uses for the same reason.
 func (s *Server) toolQueries() (ts toolStore, ok bool) {
 	if s.toolStoreOverride != nil {
 		return s.toolStoreOverride, true
 	}
 	if s.queries != nil {
-		return s.queries, true
+		return toolStoreWithConnectivity{s.queries}, true
 	}
 	return nil, false
+}
+
+// toolStoreWithConnectivity wraps *store.Queries, adding GetToolForTest via
+// a raw SQL query run through s.queries.DB() -- the same escape hatch
+// finops.go already uses for queries with no sqlc-style wrapper -- so this
+// credentials-reading path stays confined to this file instead of touching
+// eami-api/internal/store (which owns every other gateway_tools query, and
+// is intentionally left frozen by this task; see B-022's comments there).
+type toolStoreWithConnectivity struct {
+	*store.Queries
+}
+
+func (w toolStoreWithConnectivity) GetToolForTest(ctx context.Context, orgID, toolID uuid.UUID) (toolTestRow, error) {
+	const q = `
+SELECT type, auth_type, base_url, credentials_encrypted
+FROM gateway_tools
+WHERE id = $1 AND org_id = $2`
+
+	var row toolTestRow
+	var baseURL pgtype.Text
+	err := w.Queries.DB().QueryRow(ctx, q,
+		pgtype.UUID{Bytes: toolID, Valid: true},
+		pgtype.UUID{Bytes: orgID, Valid: true},
+	).Scan(&row.Type, &row.AuthType, &baseURL, &row.CredentialsEncrypted)
+	if err != nil {
+		return toolTestRow{}, err
+	}
+	if baseURL.Valid {
+		row.BaseURL = &baseURL.String
+	}
+	return row, nil
 }
 
 // ToolCredentials documents openapi.yaml's ToolCreate.credentials shape --
@@ -227,8 +276,12 @@ func (s *Server) DeleteTool(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// TestTool handles POST /v1/gateway/tools/{toolId}/test
-// For now returns a synthetic "connected" result after a brief probe.
+// TestTool handles POST /v1/gateway/tools/{toolId}/test -- attempts a real
+// connection to the tool using its stored (decrypted) credentials, per
+// tool_connectivity.go, and reports connected/auth-failed/unreachable/
+// misconfigured. Response shape matches openapi.yaml's documented
+// {success, latency_ms, error} exactly (the previous synthetic stub
+// returned {status, latency_ms}, which never matched the spec).
 func (s *Server) TestTool(w http.ResponseWriter, r *http.Request) {
 	uc := claimsFromContext(r)
 	toolID, err := uuid.Parse(chi.URLParam(r, "toolId"))
@@ -242,10 +295,31 @@ func (s *Server) TestTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "tool store is not configured")
 		return
 	}
-	// Mark the tool as tested/connected (latency=0 for synthetic test).
-	if err := ts.MarkToolTested(r.Context(), uc.OrgID, toolID, "connected", 0); err != nil {
+
+	row, err := ts.GetToolForTest(r.Context(), uc.OrgID, toolID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "not_found", "tool not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "connected", "latency_ms": 0})
+
+	dial := dialContextFunc(safeDialContext)
+	if s.toolDialOverride != nil {
+		dial = s.toolDialOverride
+	}
+	result := testToolConnectivityWithDialer(r.Context(), row.Type, row.AuthType, row.BaseURL, row.CredentialsEncrypted, s.toolCreds, dial)
+
+	if err := ts.MarkToolTested(r.Context(), uc.OrgID, toolID, result.dbStatus(), int(result.LatencyMs)); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":    result.Connected,
+		"latency_ms": result.LatencyMs,
+		"error":      result.errorMessage(),
+	})
 }

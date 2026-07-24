@@ -31,6 +31,13 @@ type Server struct {
 	// toolStoreOverride is a test-injection point for tools.go's handlers,
 	// mirroring storeIface/gatewayClient above. Nil in production.
 	toolStoreOverride toolStore
+	// toolDialOverride is a test-injection point for TestTool's outbound
+	// connectivity checks (tool_connectivity.go). Nil in production, which
+	// means safeDialContext -- tests set this to an unrestricted dialer so
+	// they can exercise real round-trips against local httptest servers,
+	// which safeDialContext's loopback/private-address block would
+	// otherwise reject exactly as it's designed to in production.
+	toolDialOverride dialContextFunc
 }
 
 // NewServer creates a Server with the given dependencies. cfg may be nil
