@@ -141,14 +141,21 @@ confirmed via real containers to produce the exact clean startup-refusal
 error (not a generic panic). Two follow-ups logged, not fixed (out of
 this task's `MAY MODIFY` scope): B-028 (`eami-api.yaml`/`eami-gateway.
 yaml` still ship the now-rejected literal `"changeme"` as example
-config) and B-029 (`scripts/seed-db.sh`/`create-audit-partition.sh` have
+config) and B-030 (`scripts/seed-db.sh`/`create-audit-partition.sh` have
 the same `devpassword`-fallback pattern this task closed elsewhere).
-**Renumbered 2026-07-24, same session:** these were originally logged as
-B-026/B-027, which collided with different already-planned work (JWT
-signing key persistence and background-goroutine panic recovery,
-respectively) not yet reflected in `BACKLOG.md` — renumbered to
-B-028/B-029 per founder correction, `BACKLOG.md`'s counter now reads
-`Next B-ID: B-030`.
+**Renumbered twice, same session:** originally logged as B-026/B-027,
+which collided with different already-planned work (JWT signing key
+persistence and background-goroutine panic recovery) not yet reflected
+in `BACKLOG.md` — renumbered to B-028/B-029 per founder correction. The
+second number then also collided (B-029 already reserved for Postgres
+backup/disaster-recovery, likewise not yet in `BACKLOG.md`) — renumbered
+again to B-028/B-030. `BACKLOG.md`'s counter now reads `Next B-ID:
+B-031`. **Process note for future sessions:** PM-side planning sometimes
+reserves B-IDs in conversation before they're written into `BACKLOG.md`
+as QUEUED items — when assigning a new B-ID, check with the founder for
+numbers already spoken for in roadmap discussion, not just what's
+written in the file, since the file and the conversation can drift out
+of sync.
 
 Prior entry, still accurate: 2026-07-24 by Claude Code — B-024: `ToolsPage.tsx`'s "Test connection"
 button read only whether the HTTP call to `TestTool` threw, never the
