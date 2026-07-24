@@ -48,6 +48,8 @@ func main() {
 	}
 	if cfg.Auth.RSAPrivateKeyPath == "" {
 		log.Println("eami-api: WARNING -- using ephemeral RSA key (dev mode). Set rsa_private_key_path in config for production.")
+	} else {
+		log.Printf("eami-api: using persistent RSA key at %s", cfg.Auth.RSAPrivateKeyPath)
 	}
 
 	// -- Alerting engine ------------------------------------------------------

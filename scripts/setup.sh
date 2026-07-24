@@ -278,6 +278,38 @@ generate_gateway_keypair() {
 }
 
 # =============================================================================
+# Generate RSA keypair for eami-api's user-session JWT signing (RS256, B-026)
+# Written into the api_certs Docker volume via a temporary alpine container.
+# Mirrors generate_gateway_keypair above -- same mechanism, separate volume.
+# =============================================================================
+
+generate_api_keypair() {
+    header "Generating eami-api RSA keypair (RS256)"
+
+    local project_name
+    project_name="${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/-*$//')}"
+    local volume_name="${project_name}_api_certs"
+
+    log "Creating Docker volume: ${volume_name}"
+    docker volume create "${volume_name}" &>/dev/null || true
+
+    log "Generating 2048-bit RSA keypair in volume..."
+    docker run --rm \
+        -v "${volume_name}:/certs" \
+        alpine sh -c "
+            apk add --no-cache openssl -q 2>/dev/null
+            openssl genrsa -out /certs/api.key 2048 2>/dev/null
+            openssl rsa -in /certs/api.key -pubout -out /certs/api.pub 2>/dev/null
+            chmod 600 /certs/api.key
+            echo 'Keypair generated.'
+        "
+
+    ok "RSA keypair written to Docker volume '${volume_name}'"
+    ok "  Private key : /certs/api.key  (inside container)"
+    ok "  Public key  : /certs/api.pub   (inside container)"
+}
+
+# =============================================================================
 # Collect three user inputs (or read from environment for unattended runs)
 # =============================================================================
 
@@ -430,6 +462,7 @@ GATEWAY_APPROVAL_SLACK_WEBHOOK=
 
 API_PORT=${API_PORT}
 API_JWT_SECRET=${api_jwt_secret}
+API_JWT_KEY_PATH=/certs/api.key
 
 # Shared service key — must match GATEWAY_API_SERVICE_KEY in eami-gateway
 API_SERVICE_KEY=${service_key}
@@ -669,8 +702,9 @@ main() {
     ADMIN_PW_HASH="$(gen_bcrypt_hash "$EAMI_ADMIN_PASSWORD")"
     ok "Admin password hashed."
 
-    # Step 6: RSA keypair for gateway JWT signing
+    # Step 6: RSA keypairs for JWT signing (gateway AI-tokens, api user-sessions)
     generate_gateway_keypair
+    generate_api_keypair
 
     # Step 7: Detect server IP for URL generation
     if [ "$PLATFORM" = "macos" ]; then

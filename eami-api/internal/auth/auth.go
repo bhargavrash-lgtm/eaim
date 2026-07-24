@@ -1,5 +1,11 @@
 // Package auth handles JWT RS256 signing/verification, password hashing,
 // and refresh token lifecycle for the EAMI API.
+//
+// The RSA signing key is generated once (on first boot, if the configured
+// path doesn't exist yet) and loaded thereafter, mirroring eami-gateway's
+// internal/identity loadOrGenerateKey -- so access tokens issued before a
+// restart remain valid after it, instead of every restart silently
+// invalidating every outstanding token.
 package auth
 
 import (
@@ -12,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -46,7 +53,7 @@ func NewService(keyPath string, accessTTL, refreshTTL time.Duration) (*Service, 
 			return nil, fmt.Errorf("auth: generate dev RSA key: %w", err)
 		}
 	} else {
-		key, err = loadPrivateKey(keyPath)
+		key, err = loadOrGenerateKey(keyPath)
 		if err != nil {
 			return nil, err
 		}
@@ -139,6 +146,39 @@ func APIKeyFromRaw() (key, prefix, hash string, err error) {
 	sum := sha256.Sum256([]byte(key))
 	hash = fmt.Sprintf("%x", sum)
 	return key, prefix, hash, nil
+}
+
+// loadOrGenerateKey loads a PEM-encoded RSA private key from path, or -- if
+// no file exists there yet -- generates a new 2048-bit key and persists it
+// before returning it, so the same key is loaded on every subsequent call.
+// A file that exists but fails to parse (corrupt, wrong format) is a real
+// error, not treated as "missing" -- silently regenerating over it could
+// mask disk corruption or tampering, and would itself invalidate every
+// outstanding token, the exact failure mode this function exists to avoid.
+func loadOrGenerateKey(path string) (*rsa.PrivateKey, error) {
+	key, err := loadPrivateKey(path)
+	if err == nil {
+		return key, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+
+	pk, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, fmt.Errorf("auth: generate RSA key: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return nil, fmt.Errorf("auth: create key dir: %w", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(pk),
+	})
+	if err := os.WriteFile(path, keyPEM, 0600); err != nil {
+		return nil, fmt.Errorf("auth: write key %s: %w", path, err)
+	}
+	return pk, nil
 }
 
 // loadPrivateKey reads a PEM-encoded RSA private key from disk.

@@ -126,6 +126,14 @@ func Load(path string) (*Config, error) {
 		cfg.ServiceKey = v
 	}
 
+	// JWT signing key path override (B-026) -- mirrors eami-gateway's
+	// GATEWAY_JWT_KEY_PATH. Left empty, auth.NewService generates an
+	// ephemeral in-memory key (dev mode); set here, the key persists
+	// across restarts via auth.loadOrGenerateKey.
+	if v := os.Getenv("API_JWT_KEY_PATH"); v != "" {
+		cfg.Auth.RSAPrivateKeyPath = v
+	}
+
 	// Collector config overrides.
 	if v := os.Getenv("COLLECTOR_URL"); v != "" {
 		cfg.Collector.URL = v
