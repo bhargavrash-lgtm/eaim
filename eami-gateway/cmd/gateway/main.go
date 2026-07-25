@@ -33,11 +33,17 @@ import (
 	"github.com/eami/gateway/internal/policyloader"
 	"github.com/eami/gateway/internal/proxy"
 	"github.com/eami/gateway/internal/registry"
+	"github.com/eami/gateway/internal/safego"
 	policy "github.com/eami/policy"
 )
 
 // tokenHTTPClient is shared across fire-and-forget token usage writes.
 var tokenHTTPClient = &http.Client{Timeout: 5 * time.Second}
+
+// tokenUsageWriteFunc is a test seam: production always uses writeTokenUsage;
+// tests substitute it to inject a panic without a real eami-api endpoint.
+// Never reassigned outside _test.go files.
+var tokenUsageWriteFunc = writeTokenUsage
 
 func main() {
 	if err := run(); err != nil {
@@ -273,11 +279,7 @@ func run() error {
 			// Fire-and-forget: write token usage to eami-api for FinOps.
 			// Must not block or affect the MCP response latency.
 			tu := extractTokenUsage(tr.Body, ac)
-			go func() {
-				if err := writeTokenUsage(context.Background(), apiBaseURL, apiServiceKey, tu); err != nil {
-					slog.Warn("token usage write failed", "agent", ac.AgentName, "err", err)
-				}
-			}()
+			go safeWriteTokenUsage(apiBaseURL, apiServiceKey, tu)
 
 			go episodeRecorder.Record(context.Background(), ac.OrgID, ac.AgentUUID, ac.AgentName,
 				[]episode.Step{{
@@ -387,6 +389,17 @@ func extractTokenUsage(result json.RawMessage, ac mcp.ActionContext) tokenUsageP
 	p.InputTokens = resp.Usage.InputTokens
 	p.OutputTokens = resp.Usage.OutputTokens
 	return p
+}
+
+// safeWriteTokenUsage runs tokenUsageWriteFunc with panic recovery. Call via
+// `go safeWriteTokenUsage(...)` from the dispatch path — a panic writing one
+// event's token usage must not crash the gateway process.
+func safeWriteTokenUsage(apiBaseURL, apiServiceKey string, tu tokenUsagePayload) {
+	safego.Guard("token-usage-writer", func() {
+		if err := tokenUsageWriteFunc(context.Background(), apiBaseURL, apiServiceKey, tu); err != nil {
+			slog.Warn("token usage write failed", "agent", tu.AgentName, "err", err)
+		}
+	})
 }
 
 // writeTokenUsage POSTs a token usage record to the eami-api internal endpoint.

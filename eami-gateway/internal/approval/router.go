@@ -31,6 +31,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/eami/gateway/internal/proxy"
+	"github.com/eami/gateway/internal/safego"
 )
 
 // Request is the normalised escalation payload passed from the dispatch pipeline.
@@ -170,7 +171,14 @@ func (r *Router) Hold(ctx context.Context, approvalID string, req Request) (json
 // Call as: go approvalRouter.Run(ctx)
 func (r *Router) Run(ctx context.Context) {
 	for {
-		if err := r.listenLoop(ctx); err != nil {
+		// GuardErr converts a panic anywhere in listenLoop (e.g. outside the
+		// per-notification loop below, which has its own finer-grained
+		// recovery) into an error, so it's handled by the same
+		// reconnect-with-backoff logic as any other listenLoop failure.
+		err := safego.GuardErr("approval-listen-loop", func() error {
+			return r.listenLoop(ctx)
+		})
+		if err != nil {
 			if ctx.Err() != nil {
 				slog.Info("approval: listener stopped cleanly")
 				return
@@ -203,26 +211,35 @@ func (r *Router) listenLoop(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("wait for notification: %w", err)
 		}
+		r.handleNotification(ctx, notification.Payload)
+	}
+}
 
+// handleNotification processes one LISTEN/NOTIFY payload for
+// "approval_decision", recovering any panic so a single unexpected failure
+// resolving one approval can't tear down the LISTEN connection — the loop
+// keeps waiting for the next notification.
+func (r *Router) handleNotification(ctx context.Context, rawPayload string) {
+	safego.Guard("approval-resolve", func() {
 		var payload struct {
 			ApprovalID string `json:"approval_id"`
 		}
-		if err := json.Unmarshal([]byte(notification.Payload), &payload); err != nil {
+		if err := json.Unmarshal([]byte(rawPayload), &payload); err != nil {
 			slog.Warn("approval: malformed notify payload",
-				"payload", notification.Payload,
+				"payload", rawPayload,
 				"err", err,
 			)
-			continue
+			return
 		}
 		if payload.ApprovalID == "" {
-			slog.Warn("approval: notify payload missing approval_id", "payload", notification.Payload)
-			continue
+			slog.Warn("approval: notify payload missing approval_id", "payload", rawPayload)
+			return
 		}
 
 		// resolve runs synchronously: it fetches the DB row and signals the waiter.
 		// This is safe because WaitForNotification is the only goroutine using conn.
 		r.resolve(ctx, payload.ApprovalID)
-	}
+	})
 }
 
 // resolve fetches the decision for approvalID and signals the pending Hold() waiter.

@@ -102,16 +102,27 @@ func (e *Engine) Run(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	log.Println("alerting: engine started")
-	e.tick(ctx)
+	e.safeTick(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("alerting: engine stopped")
 			return
 		case <-ticker.C:
-			e.tick(ctx)
+			e.safeTick(ctx)
 		}
 	}
+}
+
+// safeTick wraps tick with panic recovery so an unexpected panic anywhere in
+// a tick (e.g. listing rules) cannot crash the engine's goroutine — the
+// engine still ticks again on the next interval. Per-rule evaluation has its
+// own, finer-grained recovery in evaluateRules; this is defense-in-depth for
+// the rest of tick's body.
+func (e *Engine) safeTick(ctx context.Context) {
+	guard("alerting-tick", func() {
+		e.tick(ctx)
+	})
 }
 
 func (e *Engine) tick(ctx context.Context) {
@@ -120,10 +131,19 @@ func (e *Engine) tick(ctx context.Context) {
 		log.Printf("alerting: list rules: %v", err)
 		return
 	}
+	e.evaluateRules(ctx, rules)
+}
+
+// evaluateRules evaluates each rule with its own panic recovery, so a panic
+// evaluating one rule does not prevent the remaining rules in this tick from
+// being evaluated.
+func (e *Engine) evaluateRules(ctx context.Context, rules []store.AlertRule) {
 	for _, rule := range rules {
-		if err := e.evaluateRule(ctx, rule); err != nil {
-			log.Printf("alerting: rule %s (%s): %v", rule.ID, rule.Name, err)
-		}
+		guard(fmt.Sprintf("alerting-rule-%s", rule.ID), func() {
+			if err := e.evaluateRule(ctx, rule); err != nil {
+				log.Printf("alerting: rule %s (%s): %v", rule.ID, rule.Name, err)
+			}
+		})
 	}
 }
 

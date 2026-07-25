@@ -104,7 +104,58 @@ or prior context suggests otherwise, it is wrong; trust this line.
 - Solo founder, pre-first-customer, evening/weekend hours.
 
 ## Last updated
-2026-07-24 by Claude Code — B-026: eami-api's RS256 user-session JWT
+2026-07-25 by Claude Code — B-027: added panic recovery to the 4
+background/ticker goroutines identified as having none — eami-api's
+alerting `Engine.Run` and eami-gateway's approval router (`Router.Run`/
+`listenLoop`), fire-and-forget token-usage writer, and episode recorder
+(`episode.Recorder.Record`). None of these run inside an HTTP request path,
+so none had chi's Recoverer / stdlib per-connection recovery protecting
+them — an unrecovered panic in any one would have crashed the owning
+process outright. This B-ID was pre-reserved during the B-025 renumbering
+session (2026-07-24, see the B-025 entry below) and confirmed matching
+before use, per the process note logged there.
+New `eami-gateway/internal/safego` package (`Guard`/`GuardErr`) is shared
+across 3 of the 4 targets (approval router, token-usage writer, episode
+recorder — all in that module); `eami-api/internal/alerting` got its own
+small local `guard` helper since it's the only background goroutine in
+that module. Recovery is deliberately per-iteration, not just
+per-goroutine-start: the alerting engine recovers each rule's evaluation
+individually (`evaluateRules`) so one bad rule doesn't stop the rest of
+that tick, and the approval router recovers each LISTEN/NOTIFY event
+individually (`handleNotification`) so one bad notification doesn't tear
+down the LISTEN connection — both also get an outer, defense-in-depth
+wrap (`Engine.safeTick`, `Router.Run`'s `GuardErr` around `listenLoop`) for
+panics outside those inner loops. The token-usage writer and episode
+recorder turned out not to be persistent loops at all once traced — both
+are one-shot goroutines (`go func(){}`/`go episodeRecorder.Record(...)`)
+fired fresh per dispatched tool-call event from `cmd/gateway/main.go`'s
+dispatch closure — so each was wrapped at its call site/method body
+instead of an outer loop. No business logic (rule evaluation, approval
+resolution, token-usage POST construction, episode DB insert) or existing
+non-panic error handling changed anywhere — confirmed via diff, all 4
+files pure wrapper/extraction. Two new test seams, both following this
+codebase's pre-existing `toolDialOverride`/`toolStoreOverride` convention
+(never a new pattern): `cmd/gateway/main.go`'s `tokenUsageWriteFunc` var,
+and `episode.Recorder`'s new `episodeWriteDB` interface (mirrors
+`store.go`'s existing `episodeStore`/`pgxEpisodeStore` split). 25 new
+tests total across `safego`, `alerting`, `approval`, `cmd/gateway`, and
+`episode`, each proving the real production code path — not just the
+generic recovery helper in isolation — survives a deliberately-injected
+panic and its next iteration/call still runs normally. **Verified
+2026-07-25 with a real toolchain: `go build ./...`, `go vet ./...`,
+`go test ./...` all clean, 0 failures in both `eami-api` and
+`eami-gateway`** (full module runs, not just the touched packages).
+General code-review pass (one pass, both modules' diffs together): clean
+— one trivial redundant `rule := rule` loop-variable capture (harmless
+under Go 1.22+, this toolchain is confirmed `go1.26.5`) flagged and
+removed before commit; no goroutine leaks/races/deadlocks, no sensitive
+data newly reachable via panic-value/stack logging, `ctx.Done()`/shutdown
+paths in both `Run()` loops unaffected, all new test seams confirmed
+confined to `_test.go` files. Full writeup in `BUILT.md`'s `eami-api` and
+`eami-gateway` sections (split across both, since this task touched both
+modules in one session); `BACKLOG.md` B-027 entry cross-references both.
+
+Prior entry, still accurate: 2026-07-24 by Claude Code — B-026: eami-api's RS256 user-session JWT
 signing key regenerated in memory on every container restart,
 force-logging-out every user. Root cause wasn't a missing persistence
 mechanism in the code (`auth.go` already had a `loadPrivateKey` path for

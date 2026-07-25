@@ -17,10 +17,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/eami/gateway/internal/safego"
 )
 
 const embeddingDims = 1536
+
+// episodeWriteDB is the minimal interface Record needs from pool. Modeled on
+// store.go's episodeStore/pgxEpisodeStore split: production wraps
+// *pgxpool.Pool, tests inject a hand-rolled fake so a panic can be injected
+// without a real Postgres connection.
+type episodeWriteDB interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
 
 // Step is one tool call recorded within an episode.
 type Step struct {
@@ -34,17 +45,33 @@ type Step struct {
 
 // Recorder writes episodes to Postgres.
 type Recorder struct {
-	pool *pgxpool.Pool
+	db episodeWriteDB
 }
 
 // New returns a Recorder backed by pool.
 func New(pool *pgxpool.Pool) *Recorder {
-	return &Recorder{pool: pool}
+	return &Recorder{db: pool}
 }
 
 // Record writes one episode to the DB. Errors are logged, never returned —
 // call via goroutine so the MCP response path is never blocked.
+//
+// Record's body is wrapped in safego.Guard because Record itself is always
+// invoked via `go episodeRecorder.Record(...)` at its call sites — a panic
+// anywhere in this method currently has nothing else to recover it, and
+// would crash the gateway process.
 func (r *Recorder) Record(
+	ctx context.Context,
+	orgID, agentID, agentName string,
+	steps []Step,
+	outcome string,
+) {
+	safego.Guard("episode-recorder", func() {
+		r.record(ctx, orgID, agentID, agentName, steps, outcome)
+	})
+}
+
+func (r *Recorder) record(
 	ctx context.Context,
 	orgID, agentID, agentName string,
 	steps []Step,
@@ -77,7 +104,7 @@ func (r *Recorder) Record(
 		INSERT INTO episodes (org_id, agent_id, agent_name, task, steps, outcome, embedding)
 		VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::vector)
 	`
-	if _, execErr := r.pool.Exec(ctx, sqlInsert,
+	if _, execErr := r.db.Exec(ctx, sqlInsert,
 		orgUUID, agentUUIDPtr, agentName, task,
 		stepsJSON, outcome,
 		formatEmbedding(placeholderEmbedding(task)),
