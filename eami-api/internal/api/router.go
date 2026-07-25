@@ -127,6 +127,7 @@ func (s *Server) Handler() http.Handler {
 	r.With(s.requireServiceKey).Post("/v1/reports", s.IngestReports)
 	r.With(s.requireServiceKey).Post("/v1/ingest/batch", s.IngestBatch)
 	r.With(s.requireServiceKey).Post("/v1/internal/token-usage", s.IngestTokenUsage)
+	r.With(s.requireServiceKey).Post("/v1/reports/paste-events", s.IngestPasteEvents)
 
 	r.Group(func(r chi.Router) {
 		r.Use(s.jwtMiddleware)

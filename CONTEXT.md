@@ -102,9 +102,64 @@ or prior context suggests otherwise, it is wrong; trust this line.
   Nothing is live in production. api.eami.io in openapi.yaml is a spec
   placeholder, not a real deployment.
 - Solo founder, pre-first-customer, evening/weekend hours.
+- Paste-detection epic (browser-extension-based) is in scoping. B-032
+  (2026-07-25) built the backend groundwork only — `paste_events` table +
+  `POST /v1/reports/paste-events` — ahead of the extension itself. **No
+  browser extension exists yet; this endpoint has no live caller.** The
+  next brief in this epic is the extension. An investigation earlier the
+  same session found `POST /v1/reports` (the existing collector-write
+  path) has **zero real producers today** — `eami-collector`'s forwarder
+  only ever calls `/v1/ingest/batch`, a different table/pipeline — worth
+  knowing before assuming that endpoint is exercised in production.
 
 ## Last updated
-2026-07-25 by Claude Code — B-029: first real Postgres backup/disaster-
+2026-07-25 by Claude Code — B-032: paste-detection groundwork (`paste_events`
+table + `POST /v1/reports/paste-events` batch ingestion endpoint), built
+ahead of the browser extension itself per an explicit task brief. Followed
+an earlier investigation this same session (not itself a B-ID) that
+concluded reusing `discovered_endpoints`/`POST /v1/reports` for paste
+events was the wrong shape (dedup-by-tuple with one overwritten
+`last_seen`, can't hold per-event history) and that `/v1/reports` has zero
+live producers today regardless. New TimescaleDB hypertable (picked over
+`audit_log`'s pg_cron partitioning by matching query shape to precedent,
+not habit — `token_usage` is the closer analog), real FKs to `orgs`/
+`endpoints`, append-only (no dedup/collapsing). Batch insert is a single
+multi-row `INSERT ... unnest()` regardless of batch size — proved via a
+`pgx.QueryTracer`-instrumented test asserting exactly 1 query fires for a
+1-event and a 50-event batch — deliberately not `reports.go`'s existing
+N-round-trips-per-batch pattern (a real gap the investigation flagged,
+`reports.go` itself untouched, out of this task's scope). Content-scrub
+guarantee (no raw pasted text can reach storage) is structural, verified
+both by reflection over the request type and by a live test POSTing a
+crafted payload with smuggled `content`/`raw_text` fields against the real
+endpoint/DB and confirming nothing leaks into any stored column. New
+`ResolvePasteSourceEndpoint` deliberately does not reuse the existing
+`UpsertAgentEndpoint` (which would silently blank out `agent_version`/
+`os_info` already collected by the full `eami-agent` scanner every time a
+thinner paste-event payload arrived for the same machine) — confirmed
+against `UpsertAgentEndpoint`'s real behavior during code review, not just
+assumed, and now has a dedicated regression test. Reporting-query
+performance proven, not assumed: 200,000 synthetic rows seeded, a real
+`EXPLAIN ANALYZE` confirms the org+domain+30-day dashboard query hits
+`idx_paste_events_org_domain` with zero sequential scans (5.3ms).
+**Docker Desktop was paused at session start** (confirmed with the user
+before unpausing it, per this session's own operating norms around
+system-state changes) — used to run a real Postgres+TimescaleDB for every
+claim above, not simulated. Reviewer + security subagent passes both ran
+(mandatory for a new privacy-sensitive ingestion surface): security clean;
+code review caught and this session fixed a missing migration idempotency
+guard (now matches `005_token_usage.sql`'s `IF NOT EXISTS` convention —
+the first version would have errored on any re-run against an existing
+DB), the untested `ResolvePasteSourceEndpoint` clobber-scenario above, and
+a trivial `gofmt` issue. `discovered_endpoints`/`reports.go` confirmed
+completely unaffected (files untouched; also proved live via a regression
+test running both ingestion paths in the same process/DB). `api/
+openapi.yaml` not updated — out of this task's `MAY MODIFY` scope (owned
+by Architect-EAMI per `BOUNDARIES.md`) — logged as `BACKLOG.md` B-033.
+Full writeup in `BUILT.md`'s `eami-api` section and `BACKLOG.md`'s B-032/
+B-033 entries.
+
+Prior entry, still accurate: 2026-07-25 by Claude Code — B-029: first real Postgres backup/disaster-
 recovery mechanism. No backup existed before this — `docker compose down
 -v` or disk loss was unrecoverable, a real gap for a product whose core
 value is an immutable audit trail. New `eami-backup` sidecar service

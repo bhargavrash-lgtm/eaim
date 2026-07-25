@@ -598,3 +598,37 @@ $$;
 CREATE TRIGGER trg_agent_configs_default
 AFTER INSERT ON gateway_agents
 FOR EACH ROW EXECUTE FUNCTION create_default_agent_config();
+
+-- ─────────────────────────────────────────────────────────
+-- PASTE EVENTS (migration 008)
+-- ─────────────────────────────────────────────────────────
+-- Append-only event log for browser-extension paste-detection
+-- (known-destination detection only; no content-classification/DLP).
+-- NOT a reuse of discovered_endpoints: that table dedups by
+-- (org,source_host,method,host,path) with a single overwritten
+-- last_seen, designed for "have we ever seen this endpoint" discovery,
+-- not per-event history. Written via a future POST /v1/reports/paste-events.
+--
+-- TimescaleDB hypertable (like token_usage), not audit_log's pg_cron
+-- monthly-partition pattern: audit_log's manual partitioning exists for
+-- its RLS insert-only policy + hash-chain tamper-evidence requirements,
+-- which don't apply here. See schema/migrations/008_paste_events.sql for
+-- the full design rationale.
+CREATE TABLE paste_events (
+    id                  UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    org_id              UUID        NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+    source_endpoint_id  UUID        NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE,
+    destination_domain  TEXT        NOT NULL,
+    content_length      INTEGER,                      -- coarse indicator only, never the pasted text
+    content_hash        TEXT,                          -- coarse indicator only, never the pasted text
+    os_username         TEXT,                          -- optional, anonymised (mirrors browser scanner's UserPath)
+    occurred_at         TIMESTAMPTZ NOT NULL,           -- hypertable partition column
+    received_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+SELECT create_hypertable('paste_events', 'occurred_at', if_not_exists => TRUE);
+
+CREATE INDEX idx_paste_events_org         ON paste_events(org_id, occurred_at DESC);
+CREATE INDEX idx_paste_events_org_domain  ON paste_events(org_id, destination_domain, occurred_at DESC);
+CREATE INDEX idx_paste_events_endpoint    ON paste_events(source_endpoint_id, occurred_at DESC);
+
+SELECT add_retention_policy('paste_events', INTERVAL '90 days');
