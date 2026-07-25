@@ -1,0 +1,9 @@
+# Force LF line endings for the backup scripts (B-029), regardless of a
+# checkout's core.autocrlf setting. They're bind-mounted from the host
+# into a Linux (Alpine) container and run under POSIX sh — CRLF injected
+# by a Windows checkout (core.autocrlf=true, the default here) would
+# silently break them, the same class of bug as B-021 (tracked separately
+# as a repo-wide fix; this entry only covers the two new files this task
+# adds, not the rest of scripts/*.sh).
+scripts/backup-db.sh text eol=lf
+scripts/backup-entrypoint.sh text eol=lf

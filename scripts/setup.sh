@@ -640,6 +640,10 @@ print_summary() {
     echo -e "  ${BOLD}Stop stack:${RESET}"
     echo -e "    docker compose down"
     echo ""
+    echo -e "  ${BOLD}Backups:${RESET}"
+    echo -e "    Automatic daily pg_dump backups are running (eami-backup service)."
+    echo -e "    See RECOVERY.md for how to verify backups and how to restore."
+    echo ""
     echo -e "  ${DIM}All secrets saved to: ${ENV_FILE}${RESET}"
     sep
     echo ""

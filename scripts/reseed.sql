@@ -1,5 +1,12 @@
--- Re-seed org and admin user after docker compose down -v
+-- reseed.sql — Re-creates one demo org and admin user in an EMPTY database.
 -- Password: Admin1234!
+--
+-- This is a demo/dev convenience, NOT a backup or disaster-recovery tool:
+-- it only recreates these two rows, not any of the data that existed
+-- before data loss (agents, policies, audit log, episodes, etc.). If you
+-- ran `docker compose down -v` (or otherwise lost the postgres_data
+-- volume) and want your actual data back, you need a real backup — see
+-- RECOVERY.md (B-029) for the scheduled-backup + restore procedure.
 
 INSERT INTO orgs (name, slug, plan)
 VALUES ('Avula', 'avula', 'trial')

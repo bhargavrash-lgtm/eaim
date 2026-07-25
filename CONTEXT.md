@@ -104,7 +104,52 @@ or prior context suggests otherwise, it is wrong; trust this line.
 - Solo founder, pre-first-customer, evening/weekend hours.
 
 ## Last updated
-2026-07-25 by Claude Code — B-028/B-030/B-031: config-hygiene cleanup,
+2026-07-25 by Claude Code — B-029: first real Postgres backup/disaster-
+recovery mechanism. No backup existed before this — `docker compose down
+-v` or disk loss was unrecoverable, a real gap for a product whose core
+value is an immutable audit trail. New `eami-backup` sidecar service
+(`postgres:16-alpine`) in both compose files runs scheduled `pg_dump -Fc`
+via a real cron (Alpine's busybox `crond` — `pg_cron`, already running in
+`postgres` for audit-partition creation, was investigated first and
+rejected since it can't shell out to run an external client program like
+`pg_dump`) to a dedicated `postgres_backups` volume, kept separate from
+`postgres_data` so a lost data volume doesn't also lose the backups, with
+retention pruning and non-silent failure logging (new `scripts/
+backup-db.sh`, `scripts/backup-entrypoint.sh`, both POSIX `sh`). New
+`RECOVERY.md` documents the restore procedure. **Genuinely tested
+end-to-end this session, not just written and assumed** — Docker Desktop
+wasn't running at session start; started it and confirmed the daemon was
+live before beginning specifically so this could be a real test, not a
+theoretical one. Ran a full disaster-recovery drill in an isolated
+`docker compose -p` project (zero impact to the real local dev stack):
+inserted real test data, took a backup, destroyed the `postgres_data`
+volume entirely, brought up a fresh `postgres`, and restored — confirming
+the exact data was present and correct afterward. **The first restore
+attempt (`pg_restore --clean`) failed partway — a real bug the test
+caught, not assumed away:** TimescaleDB hypertables don't support the
+`ALTER TABLE ... ONLY` statements `--clean` generates against a database
+where `schema.sql` already ran via `docker-entrypoint-initdb.d` on the
+fresh container's own boot. Fixed by wiping via `DROP SCHEMA public
+CASCADE` before a plain `pg_restore` (no `--clean`) — retested clean,
+zero errors, all 73 tables/6 extensions/hypertable metadata/exact test
+row restored correctly. This tested procedure, not the naive one, is
+what `RECOVERY.md` documents. A reviewer pass caught 4 more real issues
+(dead `pg_dump` flags, an unescaped quote in the cron env file, no
+`BACKUP_SCHEDULE` validation, orphaned `.tmp` files on a killed run) —
+all fixed and re-verified live. A 5th flagged concern (a possible
+`service_healthy`/`schema.sql`-timing race) was checked empirically by
+tracing the real container startup log rather than debated — confirmed
+not to exist for `timescale/timescaledb-ha:pg16`, which follows the
+standard docker-library/postgres entrypoint contract. `scripts/
+reseed.sql`'s misleading "recovery" framing corrected to point at
+`RECOVERY.md`. Offsite/cloud storage explicitly flagged as the most
+important follow-up, not built this round (out of this task's v1 scope).
+All test containers/volumes torn down after; the real local stack's
+`.env` and `eaim_*` volumes confirmed untouched throughout. Full writeup
+in `BUILT.md`'s new "Postgres backup & disaster recovery" cross-cutting
+entry and `BACKLOG.md`'s B-029 entry.
+
+Prior entry, still accurate: 2026-07-25 by Claude Code — B-028/B-030/B-031: config-hygiene cleanup,
 three small doc/script fixes found during the B-025/026/027 security work
 — none of them live vulnerabilities, no application code touched. B-028:
 `eami-api.yaml`/`eami-gateway.yaml`'s 4 literal `"changeme"` values

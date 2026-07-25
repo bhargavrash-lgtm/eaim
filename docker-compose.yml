@@ -39,6 +39,10 @@ services:
     volumes:
       - postgres_data:/home/postgres/pgdata/data
       - ./schema/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      # Read-only: lets `docker compose exec postgres pg_restore ... /backups/<file>`
+      # run directly against a backup without copying files between containers
+      # first. eami-backup below is the only writer of this volume.
+      - postgres_backups:/backups:ro
     ports:
       - "5432:5432"
     healthcheck:
@@ -47,6 +51,28 @@ services:
       timeout: 3s
       retries: 10
       start_period: 30s
+
+  # ──────────────────────────────────────────────────────────────
+  # eami-backup — scheduled Postgres backups (B-029)
+  # Runs pg_dump on a cron schedule (default daily 03:00 UTC) via Alpine's
+  # busybox crond, writing timestamped custom-format dumps to the
+  # postgres_backups volume. See RECOVERY.md for the restore procedure.
+  # ──────────────────────────────────────────────────────────────
+  eami-backup:
+    image: postgres:16-alpine
+    environment:
+      DATABASE_URL: postgresql://eami_app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set — see .env.example}@postgres:5432/eami
+      BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-0 3 * * *}
+      BACKUP_RETENTION_COUNT: ${BACKUP_RETENTION_COUNT:-14}
+    entrypoint: ["sh", "/scripts/backup-entrypoint.sh"]
+    volumes:
+      - postgres_backups:/backups
+      - ./scripts/backup-db.sh:/scripts/backup-db.sh:ro
+      - ./scripts/backup-entrypoint.sh:/scripts/backup-entrypoint.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
   # ──────────────────────────────────────────────────────────────
   # eami-collector — on-prem data collector
@@ -170,6 +196,7 @@ services:
 
 volumes:
   postgres_data:
+  postgres_backups:
   collector_data:
   gateway_certs:
   api_certs:
