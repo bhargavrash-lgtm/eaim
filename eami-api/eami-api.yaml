@@ -5,7 +5,11 @@ server:
   idle_timeout_seconds: 120
 
 database:
-  dsn: "postgres://eami_app:changeme@localhost:5432/eami?sslmode=disable"
+  # No default DSN shipped here on purpose — override via API_DB_HOST/
+  # API_DB_NAME/API_DB_USER/API_DB_PASSWORD (see .env.example). eami-api
+  # refuses to start if this resolves to an empty or placeholder password
+  # (config.go's validate(), B-025).
+  dsn: ""
   max_open_conns: 25
   max_idle_conns: 5
 
@@ -23,5 +27,7 @@ log:
   format: "text"  # text | json
 
 # Shared secret for the collector agent write path (POST /v1/reports).
-# Override in production with API_SERVICE_KEY env var.
-service_key: "changeme"
+# No default shipped here on purpose — override via API_SERVICE_KEY (see
+# .env.example). eami-api refuses to start if this is unset or a known
+# placeholder (config.go's validate(), B-025).
+service_key: ""

@@ -4,11 +4,16 @@
 # Run monthly via cron (on the 25th so it's ready before month rollover):
 #   0 0 25 * * /opt/eami/scripts/create-audit-partition.sh
 #
-# Requires: psql, DATABASE_URL env var (or defaults to local dev).
+# Requires: psql, DATABASE_URL env var (must be set — no default fallback).
 
 set -euo pipefail
 
-DB_URL="${DATABASE_URL:-postgresql://eami_app:devpassword@localhost:5432/eami}"
+if [[ -z "${DATABASE_URL:-}" ]]; then
+    echo "ERROR: DATABASE_URL must be set — see .env.example. Refusing to fall" >&2
+    echo "       back to a guessable default connection string." >&2
+    exit 1
+fi
+DB_URL="$DATABASE_URL"
 
 NEXT_MONTH=$(date -d "+1 month" +%Y_%m)
 NEXT_START=$(date -d "+1 month" +%Y-%m-01)

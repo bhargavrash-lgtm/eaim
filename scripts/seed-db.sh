@@ -7,11 +7,16 @@
 # Requires the postgres container to be healthy first:
 #   docker-compose up -d postgres && docker-compose exec postgres pg_isready
 #
-# The DATABASE_URL env var can override the default connection string.
+# The DATABASE_URL env var is required (no default fallback — see .env.example).
 
 set -euo pipefail
 
-DB_URL="${DATABASE_URL:-postgresql://eami_app:devpassword@localhost:5432/eami}"
+if [[ -z "${DATABASE_URL:-}" ]]; then
+    echo "ERROR: DATABASE_URL must be set — see .env.example. Refusing to fall" >&2
+    echo "       back to a guessable default connection string." >&2
+    exit 1
+fi
+DB_URL="$DATABASE_URL"
 
 echo "Seeding EAMI database at ${DB_URL%%@*}@... (credentials hidden)"
 

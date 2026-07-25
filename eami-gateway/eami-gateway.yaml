@@ -6,7 +6,11 @@
 listen_addr: "0.0.0.0:8443"
 
 # PostgreSQL DSN for audit log, agent registry, etc.
-postgres_dsn: "postgres://eami_app:changeme@localhost:5432/eami?sslmode=disable"
+# No default shipped here on purpose — override via GATEWAY_DB_HOST/
+# GATEWAY_DB_NAME/GATEWAY_DB_USER/GATEWAY_DB_PASSWORD (see .env.example).
+# eami-gateway refuses to start if this resolves to an empty or
+# placeholder password (config.go's validate(), B-025).
+postgres_dsn: ""
 
 # AI token configuration (ADR-006)
 token:
@@ -40,7 +44,10 @@ approval:
 # org-level settings. Override via GATEWAY_API_BASE_URL / GATEWAY_API_SERVICE_KEY.
 api:
   base_url: "http://eami-api:8081"
-  service_key: "changeme"
+  # No default shipped here on purpose — override via GATEWAY_API_SERVICE_KEY
+  # (see .env.example). eami-gateway refuses to start if this is unset or a
+  # known placeholder (config.go's validate(), B-025).
+  service_key: ""
   # Required. Dedicated secret validated on inbound calls to this gateway's
   # episode read endpoint (GET /v1/gateway/episodes*) — checked against the
   # X-Service-Key header sent by eami-api's memory proxy. Separate from

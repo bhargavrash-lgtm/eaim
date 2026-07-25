@@ -206,11 +206,6 @@ generate_secret() {
     openssl rand -hex 32
 }
 
-# URL-safe base64 secret suitable for JWT signing (HS256 fallback)
-gen_jwt_secret() {
-    openssl rand -base64 48
-}
-
 # UUID v4 (lower-case)
 gen_uuid() {
     if command -v uuidgen &>/dev/null; then
@@ -410,11 +405,10 @@ write_env() {
     local org_name="$1"
     local admin_email="$2"
     local pg_password="$3"
-    local api_jwt_secret="$4"
-    local collector_api_key="$5"
-    local gateway_api_key="$6"
-    local server_ip="$7"
-    local service_key="$8"
+    local collector_api_key="$4"
+    local gateway_api_key="$5"
+    local server_ip="$6"
+    local service_key="$7"
 
     cat > "$ENV_FILE" <<EOF
 # EAMI — Environment Configuration
@@ -461,7 +455,6 @@ GATEWAY_APPROVAL_SLACK_WEBHOOK=
 # =============================================================================
 
 API_PORT=${API_PORT}
-API_JWT_SECRET=${api_jwt_secret}
 API_JWT_KEY_PATH=/certs/api.key
 
 # Shared service key — must match GATEWAY_API_SERVICE_KEY in eami-gateway
@@ -682,10 +675,6 @@ main() {
     POSTGRES_PASSWORD="$(gen_password)"
     ok "POSTGRES_PASSWORD generated."
 
-    log "Generating API JWT secret (48-byte base64)..."
-    API_JWT_SECRET="$(gen_jwt_secret)"
-    ok "API_JWT_SECRET generated."
-
     log "Generating service key for gateway-API authentication (hex-32)..."
     SERVICE_KEY="$(generate_secret)"
     ok "SERVICE_KEY generated."
@@ -731,7 +720,6 @@ main() {
         "$EAMI_ORG_NAME" \
         "$EAMI_ADMIN_EMAIL" \
         "$POSTGRES_PASSWORD" \
-        "$API_JWT_SECRET" \
         "$COLLECTOR_API_KEY" \
         "$GATEWAY_API_KEY" \
         "$SERVER_IP" \

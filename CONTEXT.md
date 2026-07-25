@@ -104,7 +104,34 @@ or prior context suggests otherwise, it is wrong; trust this line.
 - Solo founder, pre-first-customer, evening/weekend hours.
 
 ## Last updated
-2026-07-25 by Claude Code — B-027: added panic recovery to the 4
+2026-07-25 by Claude Code — B-028/B-030/B-031: config-hygiene cleanup,
+three small doc/script fixes found during the B-025/026/027 security work
+— none of them live vulnerabilities, no application code touched. B-028:
+`eami-api.yaml`/`eami-gateway.yaml`'s 4 literal `"changeme"` values
+(service_key/dsn in each) replaced with `""` plus a comment naming the
+real env-var override — confirmed via the compose files that neither
+service's default invocation actually depends on the YAML's literal
+values, since `config.go`'s `Load()` unconditionally overlays env vars
+onto whatever the YAML provides. B-030: `scripts/seed-db.sh`/
+`scripts/create-audit-partition.sh` no longer silently fall back to a
+`devpassword`-embedded connection string when `DATABASE_URL` is unset —
+both now hard-fail first, matching B-025's contract. B-031: `API_JWT_SECRET`
+(confirmed via grep to be read by zero Go code — service is 100% RS256)
+removed entirely from `scripts/setup.sh`, `.env.example`, and both
+compose files, per this task's stated preference for full removal;
+traced `setup.sh`'s own flow first to confirm nothing depended on the
+variable beyond writing it to `.env`. No Go files touched, so no
+build/test run applies; `docker compose config` (daemon-independent)
+run against both compose files with required env vars supplied —
+both resolve cleanly, `eami-api`'s resolved environment block confirmed
+`API_JWT_SECRET` gone with everything else unchanged. Docker daemon
+itself wasn't running in this session (`docker info` failed), so a live
+`docker compose up` re-check of AC #4 wasn't performed — `compose
+config`'s clean resolution is the evidence on record for now. Full
+writeup in `BUILT.md`'s new "Config hygiene cleanup" cross-cutting entry;
+`BACKLOG.md` B-028/B-030/B-031 all marked DONE.
+
+Prior entry, still accurate: 2026-07-25 by Claude Code — B-027: added panic recovery to the 4
 background/ticker goroutines identified as having none — eami-api's
 alerting `Engine.Run` and eami-gateway's approval router (`Router.Run`/
 `listenLoop`), fire-and-forget token-usage writer, and episode recorder
