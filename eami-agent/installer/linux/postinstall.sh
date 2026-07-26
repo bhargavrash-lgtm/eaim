@@ -47,6 +47,50 @@ EOF
 chmod 600 /etc/eami/agent.yaml
 echo "eami-agent: config written to /etc/eami/agent.yaml"
 
+# ── Register the native-messaging host (paste-detection groundwork) ─────────
+# No registry step on Linux (that's Windows-only, see
+# internal/nmregister) -- Chrome/Chromium discover native messaging hosts
+# by finding a manifest JSON file in a well-known, system-wide directory.
+# Both Chrome's and Chromium's directories are written since either might
+# be the browser actually installed on this machine; an unused manifest
+# for the absent one is harmless.
+#
+# The manifest's "path" points at a hard-linked launcher copy of the real
+# binary, NOT /usr/bin/eami-agent directly -- Chrome/Chromium's manifest
+# schema has no field to pass --native-messaging-host as an argument, so
+# the browser would otherwise launch the real binary in ordinary poll-loop
+# mode instead of host mode (a real bug caught by this task's code review
+# before any real extension existed to catch it in practice). eami-agent
+# detects invocation under this launcher's name and behaves as if
+# --native-messaging-host had been passed explicitly -- see
+# nmregister.LauncherBaseName's doc comment. The hard link means the
+# launcher is always byte-identical to /usr/bin/eami-agent (same inode),
+# so a package upgrade that replaces that file in place needs no separate
+# re-link step; ln -f handles the (normal, expected) case where a prior
+# install already created it.
+ln -f /usr/bin/eami-agent /usr/bin/eami-agent-nmhost
+
+# allowed_origins is a PLACEHOLDER -- there is no B1 (browser extension)
+# yet, so this host cannot be invoked by any real extension until the
+# real, published extension ID replaces PLACEHOLDER_EXTENSION_ID_REPLACE_AFTER_B1
+# below (see installer/native-messaging/README.md).
+NM_MANIFEST_JSON='{
+  "name": "com.eami.agent",
+  "description": "EAMI Agent native messaging host (real-time paste-event relay)",
+  "path": "/usr/bin/eami-agent-nmhost",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://PLACEHOLDER_EXTENSION_ID_REPLACE_AFTER_B1/"
+  ]
+}'
+
+for NM_DIR in /etc/opt/chrome/native-messaging-hosts /etc/chromium/native-messaging-hosts; do
+  mkdir -p "$NM_DIR"
+  echo "$NM_MANIFEST_JSON" > "$NM_DIR/com.eami.agent.json"
+  chmod 644 "$NM_DIR/com.eami.agent.json"
+done
+echo "eami-agent: native-messaging manifest registered for Chrome and Chromium"
+
 # ── Enable and start the systemd service ─────────────────────────────────────
 # Reload unit files so systemd picks up the newly installed .service file
 systemctl daemon-reload

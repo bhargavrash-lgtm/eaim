@@ -23,3 +23,15 @@ systemctl disable eami-agent 2>/dev/null || true
 systemctl daemon-reload 2>/dev/null || true
 
 echo "eami-agent: service stopped and disabled"
+
+# ── Remove native-messaging registration ─────────────────────────────────────
+# Unlike /etc/eami/agent.yaml (deliberately preserved across
+# reinstalls, see above), the launcher hard link and manifest files are
+# not tracked in nfpm.yaml's contents: list -- dpkg/rpm won't remove them
+# on their own. Removing them here mirrors the Windows installer's
+# nmregister.Uninstall, which does clean these up (closing an asymmetry
+# flagged by code review).
+rm -f /usr/bin/eami-agent-nmhost
+rm -f /etc/opt/chrome/native-messaging-hosts/com.eami.agent.json
+rm -f /etc/chromium/native-messaging-hosts/com.eami.agent.json
+echo "eami-agent: native-messaging registration removed"

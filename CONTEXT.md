@@ -105,15 +105,85 @@ or prior context suggests otherwise, it is wrong; trust this line.
 - Paste-detection epic (browser-extension-based) is in scoping. B-032
   (2026-07-25) built the backend groundwork only — `paste_events` table +
   `POST /v1/reports/paste-events` — ahead of the extension itself. **No
-  browser extension exists yet; this endpoint has no live caller.** The
-  next brief in this epic is the extension. An investigation earlier the
-  same session found `POST /v1/reports` (the existing collector-write
-  path) has **zero real producers today** — `eami-collector`'s forwarder
-  only ever calls `/v1/ingest/batch`, a different table/pipeline — worth
-  knowing before assuming that endpoint is exercised in production.
+  browser extension exists yet; this endpoint has no live caller.** An
+  investigation earlier that session found `POST /v1/reports` (the
+  existing collector-write path) has **zero real producers today** —
+  `eami-collector`'s forwarder only ever calls `/v1/ingest/batch`, a
+  different table/pipeline — worth knowing before assuming that endpoint
+  is exercised in production. B-034 (2026-07-26) added the `eami-agent`
+  side — a native-messaging host mode so a future extension can relay
+  paste events in real time — but **`eami-agent` has no `org_id`
+  anywhere** (only `agent_id`), confirmed by direct investigation, not
+  assumed. B-035 (QUEUED) is the still-missing link: paste events
+  currently land in the existing agent-report pipeline's raw JSON blob,
+  not literally in `paste_events` yet — `eami-collector`/`eami-api` were
+  both frozen for B-034, so that wiring is real, tracked, unfinished work,
+  not silently dropped. **No B1 (browser extension) exists yet either** —
+  both B-032's endpoint and B-034's native-messaging host currently have
+  zero live callers.
 
 ## Last updated
-2026-07-25 by Claude Code — B-032: paste-detection groundwork (`paste_events`
+2026-07-26 by Claude Code — B-034: native-messaging host for real-time
+paste-event relay (B0), the `eami-agent` side of the paste-detection
+epic following B-032. New `eami-agent --native-messaging-host` mode: the
+browser's standard length-prefixed-JSON stdin/stdout protocol, not a
+network port. Confirmed (not assumed) `eami-agent` has no `org_id`
+anywhere — only `agent_id` (config, defaults to hostname) — so, combined
+with `eami-collector`/`eami-api`/B-032's endpoint all frozen for this
+task, events are forwarded via the existing `collector.Sender.Send()`
+immediately (bypassing the 5-minute poll cycle), landing in the existing
+agent-report pipeline's raw JSON blob today rather than literally in
+`paste_events` yet -- completing that is B-035 (QUEUED), logged explicitly
+per the user's instruction not to let it get lost.
+
+**Two real bugs caught by this session's own testing, before any real
+extension existed to catch them in practice:**
+1. The native-messaging manifest originally pointed straight at the real
+   binary. Chrome/Edge's manifest schema has no field to pass
+   `--native-messaging-host` as an argument, so a real browser would have
+   launched it in ordinary poll-loop mode instead of host mode -- a
+   silent, total integration failure that every test in the original
+   changeset masked (all of them passed the flag on the command line
+   directly). Fixed with a hard-linked `eami-agent-nmhost` launcher next
+   to the real binary; `main.go` detects invocation under that name.
+   Live-verified end-to-end after the fix: real registry + manifest +
+   launcher, invoked with **no explicit flag**, real message parsed and
+   forwarded to a mock collector.
+2. Logging in native-messaging-host mode wrote to `os.Stdout` -- the same
+   stream the protocol uses for length-prefixed framing -- so any log
+   line (including one this session added) would have corrupted every
+   real session. Fixed by routing all logging to `os.Stderr` in this mode
+   specifically; new regression test locks it in.
+
+**Security review finding, fixed:** no caller authentication meant any
+local process could invoke this mode directly and forward fabricated
+paste-event data using the agent's own already-configured collector
+credentials (a confused-deputy problem) -- native messaging's own
+`allowed_origins` manifest restriction is enforced by the browser, not
+the host process, so it provides zero protection against direct
+invocation of the binary. Fixed with `internal/nmlauncher`'s
+parent-process verification: fails closed if the immediate parent isn't a
+recognized browser, fails open with a loud warning if it can't be
+determined at all (an inconclusive check must not break the feature
+entirely), `EAMI_NM_SKIP_PARENT_CHECK=1` is a documented operator
+override. Explicitly **not bulletproof** (a capable local attacker could
+rename their process or launch as a child of a real browser) -- real
+defense-in-depth, not a hard guarantee, and documented as such.
+
+**Verified 2026-07-26 with a real toolchain:** `go build`/`go vet` clean
+on native Windows and cross-compiled for `linux/amd64`/`darwin/arm64`;
+`go test ./...` clean, all packages, 21 new tests. Windows registration
+(install/uninstall, both the launcher hard link and the registry keys)
+live-verified against this machine's real registry and re-verified after
+every fix. Linux/macOS installer script changes exist and are
+syntax-checked but not exercised on a live host this session (this
+machine is Windows) -- flagged, not claimed as verified. WiX
+`CustomAction` wiring is correct source but not compiled/run via a live
+`msiexec` install (no .NET SDK in this environment) -- the Go logic it
+invokes was verified directly, outside the MSI. Full writeup in
+`BUILT.md`'s `eami-agent` section and `BACKLOG.md`'s B-034/B-035 entries.
+
+Prior entry, still accurate: 2026-07-25 by Claude Code — B-032: paste-detection groundwork (`paste_events`
 table + `POST /v1/reports/paste-events` batch ingestion endpoint), built
 ahead of the browser extension itself per an explicit task brief. Followed
 an earlier investigation this same session (not itself a B-ID) that

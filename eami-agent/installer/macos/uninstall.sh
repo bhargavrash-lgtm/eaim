@@ -33,6 +33,8 @@ fi
 
 PLIST="/Library/LaunchDaemons/io.eami.agent.plist"
 BINARY="/usr/local/bin/eami-agent"
+NMHOST_LAUNCHER="/usr/local/bin/eami-agent-nmhost"
+NM_MANIFEST="/Library/Google/Chrome/NativeMessagingHosts/com.eami.agent.json"
 CONFIG_DIR="/etc/eami"
 LOG_FILE="/var/log/eami-agent.log"
 
@@ -54,6 +56,19 @@ if [[ -f "$BINARY" ]]; then
     echo "  Removed: ${BINARY}"
 else
     echo "  Binary not found (already removed): ${BINARY}"
+fi
+
+# ── Remove native-messaging registration ─────────────────────────────────────
+# Neither the launcher hard link nor the manifest is tracked by the .pkg
+# payload itself (both are generated dynamically by postinstall, not laid
+# down by the installer) -- pkgutil's own removal won't touch them.
+if [[ -f "$NMHOST_LAUNCHER" ]]; then
+    rm -f "$NMHOST_LAUNCHER"
+    echo "  Removed: ${NMHOST_LAUNCHER}"
+fi
+if [[ -f "$NM_MANIFEST" ]]; then
+    rm -f "$NM_MANIFEST"
+    echo "  Removed: ${NM_MANIFEST}"
 fi
 
 # ── Remove config directory ───────────────────────────────────────────────────
