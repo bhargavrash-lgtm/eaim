@@ -121,9 +121,40 @@ or prior context suggests otherwise, it is wrong; trust this line.
   not silently dropped. **No B1 (browser extension) exists yet either** —
   both B-032's endpoint and B-034's native-messaging host currently have
   zero live callers.
+- **A real .NET SDK (8.0.423) + WiX Toolset v4 (4.0.6, matching CI's
+  pinned version) are now installed on this machine** (2026-07-26, via
+  `winget`/`dotnet tool install`, to debug a CI MSI-build failure) —
+  previously only the .NET *runtime* was present, not the SDK, so
+  `eami-agent/installer/Product.wxs` could only be reviewed by eye, never
+  actually compiled locally. That gap is closed now: `wix build` and the
+  project's own `installer/build.ps1` both run for real on this machine.
 
 ## Last updated
-2026-07-26 by Claude Code — B-034: native-messaging host for real-time
+2026-07-26 by Claude Code — B-034 CI-failure correction: the "MSI —
+eami-agent installer" GitHub Actions job failed on B-034's own commit,
+at the "Build MSI" step, in the exact `Product.wxs` comment block that
+task added. Two real WiX v4 bugs, not one: (1) `WIX0104` — the session's
+own "--" em-dash writing convention is literally invalid inside XML
+comments; (2) `WIX0400`, found only after fixing (1) — the
+`<InstallExecuteSequence>` block's two `<Custom>` conditions were written
+WiX-v3-style as inner text, but WiX v4 requires a `Condition="..."`
+attribute instead, confirmed by reading WiX's own compiler source
+(`ParseSequenceElement` in `wixtoolset/wix`'s `Compiler_Package.cs` calls
+`InnerTextDisallowed(node, "Condition")`), not guessed. **Installed a real
+.NET SDK + WiX 4.0.6 locally rather than fixing blind a second time** —
+this machine previously had only the .NET runtime. Reproduced both CI
+errors byte-for-byte before fixing either, then verified clean with a
+direct `wix build` and the project's actual `installer/build.ps1` script
+(CI's real invocation path) against a real cross-compiled Windows binary,
+producing a genuine, valid, installable MSI. This closes B-034's own
+"not compiled/run through a live wix build" caveat for the `Product.wxs`
+XML/schema correctness specifically (a full `msiexec` install/uninstall
+cycle — which needs elevation and installs a real Windows service —
+wasn't additionally performed, since it wasn't what was asked). Full
+writeup in `BACKLOG.md`'s B-034 CI-failure correction entry and
+`BUILT.md`'s `eami-agent` section.
+
+Prior entry, still accurate: 2026-07-26 by Claude Code — B-034: native-messaging host for real-time
 paste-event relay (B0), the `eami-agent` side of the paste-detection
 epic following B-032. New `eami-agent --native-messaging-host` mode: the
 browser's standard length-prefixed-JSON stdin/stdout protocol, not a

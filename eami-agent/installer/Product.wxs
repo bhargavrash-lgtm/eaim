@@ -58,7 +58,8 @@
 
   NATIVE MESSAGING HOST (paste-detection groundwork, B0)
   =======================================================
-  On install, runs `eami-agent.exe --register-native-messaging install`,
+  On install, runs eami-agent.exe's register-native-messaging install
+  command (exact syntax in the CustomAction ExeCommand attributes below),
   which (see internal/nmregister/nmregister_windows.go):
     1. Creates a hard-linked launcher copy, eami-agent-nmhost.exe, next to
        the real binary (same file, zero extra disk space, can't fall out
@@ -67,18 +68,18 @@
        launcher, NOT eami-agent.exe directly.
     3. Points both Chrome's and Edge's NativeMessagingHosts registry keys
        at the manifest.
-  On uninstall, runs `--register-native-messaging uninstall`, which
-  removes both registry keys, the manifest file, and the launcher hard
-  link (none of the three are declared as WiX File/Component entries
+  On uninstall, runs the register-native-messaging uninstall command,
+  which removes both registry keys, the manifest file, and the launcher
+  hard link (none of the three are declared as WiX File/Component entries
   below, since they're generated dynamically, not laid down by the MSI
-  itself -- nothing else would clean them up).
+  itself — nothing else would clean them up).
 
   Why the launcher indirection: Chrome/Edge's native-messaging manifest
-  schema has no "args" field -- the browser execs whatever "path" names
+  schema has no "args" field — the browser execs whatever "path" names
   with only its own fixed arguments, never anything the manifest supplies.
   A manifest pointing straight at eami-agent.exe would make the browser
-  launch it with no --native-messaging-host flag, silently falling through
-  to the ordinary poll loop instead of acting as a host. eami-agent
+  launch it with no native-messaging-host flag argument, silently falling
+  through to the ordinary poll loop instead of acting as a host. eami-agent
   detects invocation under the launcher's name and behaves as if the flag
   had been passed explicitly (cmd/agent/main.go's
   invokedAsNativeMessagingLauncher). Caught by code review before any real
@@ -90,17 +91,17 @@
   until that placeholder is replaced with a real, published extension ID.
   Even once it is, cmd/agent/main.go's parent-process check
   (internal/nmlauncher) refuses to serve any message unless the immediate
-  parent process is a recognized browser executable -- defense-in-depth
+  parent process is a recognized browser executable — defense-in-depth
   against a different local process invoking this mode directly.
 
-  NOTE: this custom-action wiring was written and validated as correct
-  WiX v4 source but NOT compiled/run through a live `wix build`/`msiexec`
-  install in this environment (no .NET SDK, only the runtime, installed
-  here — only `dotnet` the runtime was available, not the SDK needed for
-  `dotnet tool install -g wix`). The registration logic itself
-  (nmregister.Install/Uninstall) was verified directly against this
-  machine's real registry by invoking the built exe with
-  --register-native-messaging install/uninstall outside the MSI.
+  NOTE: this custom-action wiring is real WiX v4 source, verified with a
+  real local `wix build` after a build failure caught an XML-comment
+  syntax error in an earlier draft of this very comment block (a repeated
+  hyphen pair used as a dash, invalid inside XML comments — ironic, given
+  the topic). The registration logic itself (nmregister.Install/Uninstall)
+  was separately verified directly against this machine's real registry
+  by invoking the built exe with the register-native-messaging
+  install/uninstall commands outside the MSI.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
 
@@ -254,9 +255,10 @@
 
     <!--
       Custom actions: register/unregister the native-messaging manifest by
-      invoking the just-installed binary itself (AgentExe, above) with
-      --register-native-messaging install|uninstall (see
-      internal/nmregister/nmregister_windows.go). Deferred + Impersonate="no"
+      invoking the just-installed binary itself (AgentExe, above) with the
+      register-native-messaging install|uninstall commands (exact syntax
+      in ExeCommand below; see internal/nmregister/nmregister_windows.go).
+      Deferred + Impersonate="no"
       since writing HKLM registry keys needs elevated context, the same
       reason ServiceInstall/ServiceControl above run elevated.
 
@@ -283,8 +285,8 @@
       Return="ignore" />
 
     <InstallExecuteSequence>
-      <Custom Action="RegisterNativeMessaging" After="InstallFiles">NOT Installed</Custom>
-      <Custom Action="UnregisterNativeMessaging" Before="RemoveFiles">Installed AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="RegisterNativeMessaging" After="InstallFiles" Condition="NOT Installed" />
+      <Custom Action="UnregisterNativeMessaging" Before="RemoveFiles" Condition="Installed AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
 
   </Package>
