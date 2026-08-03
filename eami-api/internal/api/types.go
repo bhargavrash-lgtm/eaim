@@ -239,3 +239,33 @@ type SpendTimeSeries struct {
 	Granularity string       `json:"granularity"`
 	Series      []SpendPoint `json:"series"`
 }
+
+// ── Paste events (B-038 read UI) ───────────────────────────────────────────
+// Deliberately carries only the coarse fields paste_events itself has --
+// there is no raw-content column anywhere upstream of this struct, so it
+// cannot expose pasted text even by accident.
+
+type PasteEventResp struct {
+	ID                string    `json:"id"`
+	DestinationDomain string    `json:"destination_domain"`
+	OccurredAt        time.Time `json:"occurred_at"`
+	ContentLength     *int32    `json:"content_length,omitempty"`
+	ContentHash       *string   `json:"content_hash,omitempty"`
+	OSUsername        *string   `json:"os_username,omitempty"`
+}
+
+type PasteEventListResponse struct {
+	Data []PasteEventResp `json:"data"`
+	Meta PaginationMeta   `json:"meta"`
+}
+
+type PasteEventDomainPoint struct {
+	Bucket time.Time `json:"bucket"`
+	Domain string    `json:"domain"`
+	Count  int64     `json:"count"`
+}
+
+type PasteEventTimeSeries struct {
+	Granularity string                  `json:"granularity"`
+	Series      []PasteEventDomainPoint `json:"series"`
+}

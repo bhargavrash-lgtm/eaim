@@ -138,7 +138,16 @@ or prior context suggests otherwise, it is wrong; trust this line.
   B-035 (paste events landing in the raw agent-report JSON blob rather
   than literally in B-032's `paste_events` table) is still open — that
   gap is unaffected by B1, since it's purely a server-side
-  (`eami-collector`/`eami-api`) wiring task.
+  (`eami-collector`/`eami-api`) wiring task. **B2 (admin UI) now exists**
+  — B-038 (2026-08-03), `eami-ui`'s new `/paste-events` page + two new
+  `eami-api` GET routes, built directly against `paste_events` (not the
+  interim blob). **Confirmed live via direct query that this makes B-035
+  a hard practical blocker, not just a tidiness item**: the real `Dev
+  Org` has zero rows in `paste_events` today (only B-032's own disposable
+  synthetic test orgs have rows there), so B-038's UI is fully built,
+  tested, and ready, but shows an honest empty state for any real org
+  until B-035 wires real events into that table. B-035's priority raised
+  to High and it is now the explicit next task, per the user's direction.
 - **B-037 (open, High priority before any customer install):** the
   `nmlauncher` fail-open fix above is an explicitly user-accepted
   dev-testing convenience, not the final security posture — the
@@ -171,7 +180,54 @@ or prior context suggests otherwise, it is wrong; trust this line.
   project's own `installer/build.ps1` both run for real on this machine.
 
 ## Last updated
-2026-08-03 by Claude Code — B1 (B-036) is now fully manually verified, closing
+2026-08-03 by Claude Code — B-038: B2, the first admin UI over B-032's
+`paste_events` (new `eami-ui` page at `/paste-events`, under the
+`Operations` sidebar group, plus two new `eami-api` GET routes:
+`/v1/paste-events` and `/v1/paste-events/timeseries`). Placement decided
+against Discover and recorded with reasoning: paste events are an
+org-wide time-series event log (filter bar + paginated table +
+`time_bucket` aggregation), structurally identical to `AuditPage.tsx`/
+`FinOpsPage.tsx`, not to Discover's per-endpoint asset-inventory shape.
+
+**Data-source decision, checked before writing code, not assumed:**
+confirmed live via a direct `psql` query that the real `Dev Org` has
+**zero rows** in `paste_events` right now — the 800,000 rows present all
+belong to B-032's own disposable `paste-events-perf-*` synthetic test
+orgs from a prior session. The only real, live-captured paste events
+(from B1's manual test pass) sit only in `endpoint_reports`' raw JSON
+blob, the interim path B-035 exists to retire. Built this UI against
+`paste_events` anyway (the correct, indexed, purpose-built table — the
+alternative would be throwaway work), which means it shows an honest
+empty state for any real org until B-035 ships. **B-035's priority was
+raised to High and it is now the explicit next task**, per the user's
+explicit direction after reviewing this finding — it is the only thing
+separating this shipped, fully-tested feature from showing real data.
+
+Backend: `store.ListPasteEvents`/`CountPasteEvents` (mirrors
+`ListAudit`/`CountAudit`'s exact optional-filter/pagination shape, reuses
+`idx_paste_events_org`/`idx_paste_events_org_domain`) and
+`Server.PasteEventsTimeSeries` (raw `time_bucket()` SQL in the handler,
+mirroring `FinOpsTimeSeries`'s structure, but returning real
+per-domain-per-bucket counts rather than FinOps's proportionally-
+distributed display approximation). `api/openapi.yaml` deliberately not
+touched (Architect-EAMI-owned) — widened B-033 to cover the gap; frontend
+uses the `apiFetch` escape hatch, same as `MemoryPage.tsx` did pre-B-002.
+
+**Verified 2026-08-03 with a real toolchain:** `go build`/`go vet`/
+`go test ./...` clean across `eami-api`, including 2 real `EXPLAIN
+ANALYZE` tests (reusing B-032's own 100,000-row seeded-volume
+convention) proving the exact new queries use `idx_paste_events_org_domain`/
+`idx_paste_events_org`, zero sequential scans. Frontend verified via a
+real `tsc && vite build` (the `docker build --target builder` path B-024
+established, Node/npm still absent locally) — clean. **No live
+interactive browser click-through performed** (same standing
+no-safe-browser-automation limitation as B1) — manual verification steps
+provided in `BUILT.md`'s new `eami-ui` entry instead.
+
+Full writeup in `BUILT.md`'s `eami-api`/`eami-ui` sections and
+`BACKLOG.md`'s B-038 entry.
+
+Prior entry, still accurate: 2026-08-03 by Claude Code — B1 (B-036) is now fully manually verified, closing
 the loop from the entry just below. The user personally ran all 5 steps of
 `eami-browser-extension/MANUAL_TESTING.md` to completion on a real
 Chrome/Edge install: extension ID and scoped permissions confirmed, paste

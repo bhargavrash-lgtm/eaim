@@ -10,6 +10,7 @@ import { NodesPage } from '@/pages/gateway/NodesPage'
 import ApprovalsPage from '@/pages/ops/ApprovalsPage'
 import { FinOpsPage } from '@/pages/finops/FinOpsPage'
 import { MemoryPage } from '@/pages/ops/MemoryPage'
+import { PasteEventsPage } from '@/pages/ops/PasteEventsPage'
 import { AuditPage } from '@/pages/ops/AuditPage'
 import AlertsPage from '@/pages/ops/AlertsPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
@@ -31,6 +32,7 @@ export const router = createBrowserRouter([
       { path: '/approvals', element: <ApprovalsPage /> },
       { path: '/finops', element: <FinOpsPage /> },
       { path: '/memory', element: <MemoryPage /> },
+      { path: '/paste-events', element: <PasteEventsPage /> },
       { path: '/audit', element: <AuditPage /> },
       { path: '/alerts', element: <AlertsPage /> },
       { path: '/settings', element: <SettingsPage /> },

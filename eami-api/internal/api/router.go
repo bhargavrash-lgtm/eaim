@@ -223,6 +223,9 @@ func (s *Server) Handler() http.Handler {
 			// /v1/discover/endpoints — HTTP traffic observations (discovered_endpoints table)
 			r.Get("/v1/discover/endpoints", s.ListEndpoints)
 			r.Get("/v1/discover/endpoints/{endpointId}", s.GetEndpoint)
+			// Paste events (B-038, read-only admin UI over B-032's paste_events)
+			r.Get("/v1/paste-events", s.ListPasteEvents)
+			r.Get("/v1/paste-events/timeseries", s.PasteEventsTimeSeries)
 		})
 
 		// ── All authenticated roles: approval + alert read ────────────────────

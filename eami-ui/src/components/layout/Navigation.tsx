@@ -11,6 +11,7 @@ import {
   ScrollText,
   Bell,
   Settings,
+  Copy,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -32,6 +33,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Approvals', path: '/approvals', icon: ClipboardCheck, group: 'ops', badgeKey: 'pendingApprovals' },
   { label: 'FinOps', path: '/finops', icon: DollarSign, group: 'ops' },
   { label: 'Memory', path: '/memory', icon: Brain, group: 'ops' },
+  { label: 'Paste Detection', path: '/paste-events', icon: Copy, group: 'ops' },
   { label: 'Audit', path: '/audit', icon: ScrollText, group: 'ops' },
   { label: 'Alerts', path: '/alerts', icon: Bell, group: 'ops' },
   { label: 'Settings', path: '/settings', icon: Settings, group: 'admin' },

@@ -102,3 +102,119 @@ func (q *Queries) ResolvePasteSourceEndpoint(ctx context.Context, p ResolvePaste
 	}
 	return uuid.UUID(id.Bytes), nil
 }
+
+// ── Read path (B-038): admin UI over captured paste events ────────────────
+//
+// paste_events has no update/delete path anywhere in this codebase
+// (append-only, per its own schema comment) -- these are the first reads
+// of this table outside a test/seed script.
+
+// PasteEvent is one row read back from paste_events.
+type PasteEvent struct {
+	ID                uuid.UUID
+	OrgID             uuid.UUID
+	SourceEndpointID  uuid.UUID
+	DestinationDomain string
+	ContentLength     pgtype.Int4
+	ContentHash       pgtype.Text
+	OSUsername        pgtype.Text
+	OccurredAt        time.Time
+	ReceivedAt        time.Time
+}
+
+// ListPasteEventsParams filters + paginates ListPasteEvents/CountPasteEvents.
+// Domain/From/To are all optional, same "nil means unfiltered" convention
+// as ListAuditParams.
+type ListPasteEventsParams struct {
+	OrgID  uuid.UUID
+	Domain *string
+	From   *time.Time
+	To     *time.Time
+	Limit  int32
+	Offset int32
+}
+
+// listPasteEventsWhereSQL is shared between ListPasteEvents and
+// CountPasteEvents so the two can never drift out of sync with each
+// other (a paginated list and its count must agree on which rows match).
+//
+// $1=org_id $2=domain $3=from $4=to. Deliberately matches
+// idx_paste_events_org (org_id, occurred_at DESC) when domain is omitted,
+// and idx_paste_events_org_domain (org_id, destination_domain,
+// occurred_at DESC) when it's supplied -- see paste_events_test.go's
+// EXPLAIN ANALYZE tests for both cases.
+const listPasteEventsWhereSQL = `
+WHERE org_id = $1
+  AND ($2::text IS NULL OR destination_domain = $2)
+  AND ($3::timestamptz IS NULL OR occurred_at >= $3)
+  AND ($4::timestamptz IS NULL OR occurred_at <= $4)`
+
+const listPasteEventsSQL = `
+SELECT id, org_id, source_endpoint_id, destination_domain, content_length, content_hash, os_username, occurred_at, received_at
+FROM paste_events` + listPasteEventsWhereSQL + `
+ORDER BY occurred_at DESC
+LIMIT $5 OFFSET $6`
+
+// ListPasteEvents returns one page of paste_events rows, newest first.
+func (q *Queries) ListPasteEvents(ctx context.Context, p ListPasteEventsParams) ([]PasteEvent, error) {
+	toTsArg := func(t *time.Time) pgtype.Timestamptz {
+		if t == nil {
+			return pgtype.Timestamptz{}
+		}
+		return pgtype.Timestamptz{Time: *t, Valid: true}
+	}
+
+	rows, err := q.db.Query(ctx, listPasteEventsSQL,
+		toPgtypeUUID(p.OrgID),
+		toPgtypeText(p.Domain),
+		toTsArg(p.From),
+		toTsArg(p.To),
+		p.Limit,
+		p.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []PasteEvent
+	for rows.Next() {
+		var e PasteEvent
+		var id, orgID, endpointID pgtype.UUID
+		if err := rows.Scan(
+			&id, &orgID, &endpointID, &e.DestinationDomain,
+			&e.ContentLength, &e.ContentHash, &e.OSUsername,
+			&e.OccurredAt, &e.ReceivedAt,
+		); err != nil {
+			return nil, err
+		}
+		e.ID = uuidFromPgtype(id)
+		e.OrgID = uuidFromPgtype(orgID)
+		e.SourceEndpointID = uuidFromPgtype(endpointID)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+const countPasteEventsSQL = `
+SELECT COUNT(*) FROM paste_events` + listPasteEventsWhereSQL
+
+// CountPasteEvents returns the total row count matching the same filters
+// as ListPasteEvents, for pagination metadata.
+func (q *Queries) CountPasteEvents(ctx context.Context, p ListPasteEventsParams) (int64, error) {
+	toTsArg := func(t *time.Time) pgtype.Timestamptz {
+		if t == nil {
+			return pgtype.Timestamptz{}
+		}
+		return pgtype.Timestamptz{Time: *t, Valid: true}
+	}
+
+	row := q.db.QueryRow(ctx, countPasteEventsSQL,
+		toPgtypeUUID(p.OrgID),
+		toPgtypeText(p.Domain),
+		toTsArg(p.From),
+		toTsArg(p.To),
+	)
+	var count int64
+	return count, row.Scan(&count)
+}
