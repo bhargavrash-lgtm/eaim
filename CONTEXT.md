@@ -154,7 +154,53 @@ or prior context suggests otherwise, it is wrong; trust this line.
   project's own `installer/build.ps1` both run for real on this machine.
 
 ## Last updated
-2026-08-03 by Claude Code — B-036: B1, the browser extension
+2026-08-03 by Claude Code — B1 manual-testing follow-up: fixed a real bug
+found only by the user's own hands-on click-through (not by review or
+automation), in `internal/nmlauncher` (B0's parent-process
+defense-in-depth check). Manual test step 5 (`flush()`) failed twice in a
+row: first silently (B0 wasn't currently registered on this machine --
+re-registered, unrelated to the bug below), then with Chrome's generic
+`"Error when communicating with the native messaging host."` after
+re-registering. Root-caused by reproducing the exact failure signature
+myself (host process exits immediately, code 1, zero bytes ever written
+to stdout -- precisely what Chrome surfaces as that generic error) via a
+direct invocation of the real registered launcher binary with a
+non-browser parent process. That pointed at `nmlauncher.
+VerifyLaunchedByBrowser()`'s fail-CLOSED branch: it only recognized a
+short hardcoded list of Chrome/Edge process names, and refuses (exit 1,
+no response ever sent) for anything else -- including, it turns out, the
+user's own real, legitimate browser invocation on this machine (exact
+browser/process-tree shape not confirmed, and not safely determinable
+without repeating the earlier chromedp/elevated-shell/taskkill mistake --
+see the standing fact above -- so not chased further). **Fix: changed the
+"parent determined but not on the list" branch from fail-closed to
+fail-open-with-a-loud-WARN-log**, matching the policy already used right
+next to it for "parent couldn't be determined at all." Rationale in the
+package doc comment: this check was always documented as best-effort,
+not bulletproof, and a closed-world hardcoded browser-name list cannot
+stay complete against every Chromium-family browser/OS/version in the
+field -- now demonstrated by a real false positive breaking the primary
+feature it was added to protect. `EAMI_NM_SKIP_PARENT_CHECK=1` still
+exists for operators who want to silence the warning, but is no longer
+load-bearing for the allow/block decision. Re-verified end-to-end myself
+after the fix, from scratch: rebuilt `eami-agent.exe`, recreated the
+hard-linked launcher in `.local-test-agent/` (**do not delete this
+directory -- it backs the user's live test registration**, learned the
+hard way earlier this same thread), then ran a real length-prefixed
+native-messaging protocol round trip against the rebuilt launcher from a
+deliberately non-browser parent (mirroring the exact failure condition)
+-- got back `{"status":"ok"}`, a WARN log instead of a refusal, and
+confirmed the event landed in `endpoint_reports` in the real Docker
+Postgres stack. `go build ./...`, `go vet ./...`, `go test ./...` all
+clean across `eami-agent`; `nmlauncher_test.go`'s
+`TestVerifyLaunchedByBrowser_UnrecognizedParent_Blocked` renamed/updated
+to assert the new fail-open-with-warning behavior instead of the old
+block. Committed as part of this thread's ongoing B1 follow-up (not yet
+pushed at the time of this note -- see BUILT.md/BACKLOG.md for exact
+commit). User has not yet retested step 5 against this fix in their own
+real browser.
+
+Prior entry, still accurate: 2026-08-03 by Claude Code — B-036: B1, the browser extension
 (`eami-browser-extension/`) completing the paste-detection epic's
 browser side. Detects paste events on 6 AI-tool domains, computes length
 + SHA-256 hash client-side (raw text never leaves `content-script.js`),

@@ -285,7 +285,11 @@ func runNativeMessagingHost(cfg *config.Config, log *slog.Logger) {
 		log.Error("native messaging host refusing to start", "reason", r.Reason)
 		os.Exit(1)
 	} else if r.Reason != "" {
-		log.Info("native messaging host parent-process check", "result", r.Reason)
+		if r.Warn {
+			log.Warn("native messaging host parent-process check", "result", r.Reason)
+		} else {
+			log.Info("native messaging host parent-process check", "result", r.Reason)
+		}
 	}
 
 	sender := collector.New(collector.Config{

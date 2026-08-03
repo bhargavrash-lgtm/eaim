@@ -44,11 +44,14 @@ func TestVerifyLaunchedByBrowser_RecognizedParent_Allowed(t *testing.T) {
 	}
 }
 
-func TestVerifyLaunchedByBrowser_UnrecognizedParent_Blocked(t *testing.T) {
+func TestVerifyLaunchedByBrowser_UnrecognizedParent_FailsOpenWithWarning(t *testing.T) {
 	withParentProcessNameFunc(t, func() (string, error) { return "evil.exe", nil })
 	r := VerifyLaunchedByBrowser()
-	if r.Allowed {
-		t.Fatalf("want Allowed=false for an unrecognized parent process, got %+v", r)
+	if !r.Allowed {
+		t.Fatalf("want Allowed=true for an unrecognized parent process (fails open, see package doc for why), got %+v", r)
+	}
+	if !r.Warn {
+		t.Fatalf("want Warn=true for an unrecognized parent process, got %+v", r)
 	}
 }
 

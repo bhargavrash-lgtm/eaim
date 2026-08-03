@@ -20,15 +20,34 @@
 // NOT bulletproof -- a sufficiently capable local attacker could rename
 // their process or launch it as a child of a real browser process -- but
 // it meaningfully raises the bar above "no check at all", which is the
-// point of defense-in-depth. If the parent process name genuinely cannot
-// be determined (platform limitation, permissions, sandboxing), this
-// fails OPEN with a loud warning rather than breaking the feature
-// entirely over an inconclusive check; if the parent CAN be determined
-// and is clearly not a browser, it fails CLOSED. Operators can force
-// skipping this check via EAMI_NM_SKIP_PARENT_CHECK=1 if it proves too
-// strict in some environment (matches this codebase's established
-// fail-closed-with-documented-override convention, e.g. B-023's SSRF
-// guard, B-025's fail-closed secret validation).
+// point of defense-in-depth.
+//
+// This fails OPEN, with a loud warning, in BOTH of two cases: the parent
+// process name genuinely cannot be determined at all (platform
+// limitation, permissions, sandboxing), or it CAN be determined but isn't
+// in knownBrowserExecutables. That second case was originally fail
+// CLOSED, but real-world B1 manual testing (2026-08) hit a live false
+// positive: a real user's real, legitimately-installed browser produced
+// an immediate refusal here, breaking the primary paste-flush path
+// entirely -- confirmed by reproducing the identical failure signature
+// (host exits before writing any native-messaging response) and matching
+// it to Chrome's generic "Error when communicating with the native
+// messaging host" surfaced to the user. knownBrowserExecutables is a
+// closed-world list (Chrome/Edge process names on three OSes); it cannot
+// be complete against every Chromium-family browser or every OS's
+// process-naming quirk, so hard-blocking on "not in the list" is
+// unreliable enough, in practice, to outweigh the marginal security
+// benefit over the already-fail-open "undetermined" case right next to
+// it. The audit trail is unchanged either way -- every outcome is still
+// logged with the actual detected name -- so this remains observable and
+// reversible once knownBrowserExecutables (or a better signal) is proven
+// out against real environments. Operators can still force skipping the
+// check entirely via EAMI_NM_SKIP_PARENT_CHECK=1 (matches this
+// codebase's established fail-closed-with-documented-override
+// convention, e.g. B-023's SSRF guard, B-025's fail-closed secret
+// validation) -- kept for cases where an operator wants to silence the
+// warning, not because it's still load-bearing for the block/allow
+// decision.
 package nmlauncher
 
 import (
@@ -69,6 +88,11 @@ type Result struct {
 	Allowed bool
 	// Reason is a short, log-friendly explanation.
 	Reason string
+	// Warn marks a Reason worth logging at WARN rather than INFO: the
+	// check didn't produce a confident "yes, this is a browser" result
+	// (parent undetermined, or determined but unrecognized), so the
+	// caller proceeded with reduced assurance rather than a clean pass.
+	Warn bool
 }
 
 // VerifyLaunchedByBrowser checks the immediate parent process and decides
@@ -86,6 +110,7 @@ func VerifyLaunchedByBrowser() Result {
 		// platforms/environments where process introspection doesn't work.
 		return Result{
 			Allowed: true,
+			Warn:    true,
 			Reason:  "could not determine parent process (" + err.Error() + ") -- proceeding without this check",
 		}
 	}
@@ -94,9 +119,12 @@ func VerifyLaunchedByBrowser() Result {
 		return Result{Allowed: true, Reason: "parent process recognized as a browser: " + name}
 	}
 
+	// Determined, but not on the list -- fail OPEN rather than closed (see
+	// the doc comment above for why this changed from a hard block).
 	return Result{
-		Allowed: false,
-		Reason:  fmt.Sprintf("parent process %q is not a recognized browser -- refusing to run as a native messaging host (set %s=1 to override)", name, skipCheckEnvVar),
+		Allowed: true,
+		Warn:    true,
+		Reason:  fmt.Sprintf("parent process %q is not a recognized browser -- proceeding anyway (list may be incomplete; set %s=1 to silence this warning)", name, skipCheckEnvVar),
 	}
 }
 
