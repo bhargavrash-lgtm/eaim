@@ -16,13 +16,14 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
-// AllowedExtensionID is a placeholder -- there is no B1 (browser
-// extension) yet. This MUST be replaced with the real, published
-// extension ID once B1 exists. Until then, the manifest's
-// allowed_origins can never match any real extension's origin, so this
-// host cannot actually be invoked by anything -- the correct, safe
-// default for a not-yet-existing caller, not an oversight.
-const AllowedExtensionID = "PLACEHOLDER_EXTENSION_ID_REPLACE_AFTER_B1"
+// AllowedExtensionID is B1's real, stable extension ID -- eami-browser-extension's
+// manifest.json pins this via its "key" field (an embedded RSA public
+// key), which makes Chrome/Edge derive this exact ID deterministically
+// (SHA-256 of the DER-encoded public key, first 16 bytes, hex nibbles
+// mapped to a-p) regardless of install path or Web Store publication
+// status. See eami-browser-extension/README.md for the full derivation
+// and how to regenerate it with a different key if ever needed.
+const AllowedExtensionID = "ngmdfnecljeoleiancdedbmhjdihaoaa"
 
 // manifestFileName is written next to the agent binary.
 const manifestFileName = "com.eami.agent-native-messaging.json"

@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "EAMI Paste Detection",
+  "version": "1.0.0",
+  "description": "Detects paste events into known AI-tool web UIs (ChatGPT, Claude, Copilot, Gemini, Perplexity, Poe) and relays destination domain, timestamp, content length, and a content hash -- never the pasted text itself -- to the EAMI endpoint agent for enterprise AI-usage visibility.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAx93N7jV7B/NVEJuJtoIHC1XYaGJ68omcB+kmIUt86H1bImtXPxUNXffheDDs5K8iXB5gGSlCLoekKfoZpl9Dhdqyt1XUcovjsGJBCJR7I928ggg0k4fh76WzYbCbh/z7p+pCsxqxFCq1XcUZuwEk1jfwCPINm25w8JKL/UuQhqidWueay6f06kjFcaDqd0dtF69Y1xysQuNNj5TsmCzE9IkI06cLCP2uTEklB6DQr3KQKB+1bK/1l2YIjt+y1w5BC4ZDNDD+jBWAPhiwr0H1cAQeg82AGKPd/JATR9F/oeA4LFoZPRO7/rmxXJRiBipojK+lZJYwJNcBeV1bogKa4wIDAQAB",
+  "permissions": ["storage", "alarms", "nativeMessaging"],
+  "host_permissions": [
+    "https://*.chat.openai.com/*",
+    "https://*.claude.ai/*",
+    "https://*.copilot.microsoft.com/*",
+    "https://*.gemini.google.com/*",
+    "https://*.perplexity.ai/*",
+    "https://*.poe.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.chat.openai.com/*",
+        "https://*.claude.ai/*",
+        "https://*.copilot.microsoft.com/*",
+        "https://*.gemini.google.com/*",
+        "https://*.perplexity.ai/*",
+        "https://*.poe.com/*"
+      ],
+      "js": ["domains.js", "content-script.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+# Private key: not load-bearing for anything checked in (the public key's
+# base64 form lives in manifest.json's "key" field, which is what actually
+# determines the extension ID), but there's no reason to commit it either.
+keys-local/private-key.pem

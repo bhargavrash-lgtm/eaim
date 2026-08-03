@@ -58,10 +58,9 @@ echo "eami-agent: config written to /etc/eami/agent.yaml"
 # nmregister.LauncherBaseName's doc comment.
 ln -f /usr/local/bin/eami-agent /usr/local/bin/eami-agent-nmhost
 
-# allowed_origins is a PLACEHOLDER -- there is no B1 (browser extension)
-# yet, so this host cannot be invoked by any real extension until the
-# real, published extension ID replaces PLACEHOLDER_EXTENSION_ID_REPLACE_AFTER_B1
-# below (see installer/native-messaging/README.md).
+# allowed_origins is B1's real, stable extension ID -- eami-browser-extension's
+# manifest.json pins this via its "key" field; see
+# eami-browser-extension/README.md for the derivation.
 NM_DIR="/Library/Google/Chrome/NativeMessagingHosts"
 mkdir -p "$NM_DIR"
 cat > "$NM_DIR/com.eami.agent.json" <<'EOF'
@@ -71,7 +70,7 @@ cat > "$NM_DIR/com.eami.agent.json" <<'EOF'
   "path": "/usr/local/bin/eami-agent-nmhost",
   "type": "stdio",
   "allowed_origins": [
-    "chrome-extension://PLACEHOLDER_EXTENSION_ID_REPLACE_AFTER_B1/"
+    "chrome-extension://ngmdfnecljeoleiancdedbmhjdihaoaa/"
   ]
 }
 EOF

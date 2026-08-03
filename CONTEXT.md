@@ -118,9 +118,33 @@ or prior context suggests otherwise, it is wrong; trust this line.
   currently land in the existing agent-report pipeline's raw JSON blob,
   not literally in `paste_events` yet — `eami-collector`/`eami-api` were
   both frozen for B-034, so that wiring is real, tracked, unfinished work,
-  not silently dropped. **No B1 (browser extension) exists yet either** —
-  both B-032's endpoint and B-034's native-messaging host currently have
-  zero live callers.
+  not silently dropped. **B1 (browser extension) now exists** — B-036
+  (2026-08-03), `eami-browser-extension/`. Its extension ID
+  (`ngmdfnecljeoleiancdedbmhjdihaoaa`) is wired into B0's
+  `allowed_origins`, and the native-messaging→backend leg is fully
+  live-verified (real message → real B0 host → real Docker
+  collector/API/Postgres → confirmed in `endpoint_reports`). Still no
+  live production install of the extension itself (local unpacked-load
+  only; enterprise force-install policy documented, not configured), and
+  B-035 (paste events landing in the raw agent-report JSON blob rather
+  than literally in B-032's `paste_events` table) is still open — that
+  gap is unaffected by B1, since it's purely a server-side
+  (`eami-collector`/`eami-api`) wiring task.
+- **This machine's shell runs elevated (Administrator)** — discovered
+  2026-08-03 while attempting real Chrome/Edge automation for B1's
+  verification: elevation causes Edge (and likely Chrome) to
+  silently de-elevate-relaunch themselves, breaking reliable
+  `--load-extension`/`--remote-debugging-port`/`--user-data-dir`
+  passthrough for any future browser-automation attempt in this
+  environment. **A `taskkill /F /IM msedge.exe` run while diagnosing this
+  very likely killed the user's own real, unrelated Edge session** (all
+  running `chrome.exe` processes were separately confirmed to be the
+  user's real session, not test artifacts — Edge was not re-checked in
+  time to tell). Disclosed directly to the user. Any future session
+  attempting real browser automation here should assume the same
+  elevation problem exists and avoid blanket `taskkill` by image name —
+  filter by command line/working directory first to confirm a process is
+  actually one you spawned.
 - **A real .NET SDK (8.0.423) + WiX Toolset v4 (4.0.6, matching CI's
   pinned version) are now installed on this machine** (2026-07-26, via
   `winget`/`dotnet tool install`, to debug a CI MSI-build failure) —
@@ -130,7 +154,71 @@ or prior context suggests otherwise, it is wrong; trust this line.
   project's own `installer/build.ps1` both run for real on this machine.
 
 ## Last updated
-2026-07-26 by Claude Code — B-034 CI-failure correction: the "MSI —
+2026-08-03 by Claude Code — B-036: B1, the browser extension
+(`eami-browser-extension/`) completing the paste-detection epic's
+browser side. Detects paste events on 6 AI-tool domains, computes length
++ SHA-256 hash client-side (raw text never leaves `content-script.js`),
+relays to B0 via native messaging only. Extension ID
+(`ngmdfnecljeoleiancdedbmhjdihaoaa`) is deterministic -- an RSA public
+key embedded in `manifest.json`'s `key` field, Chrome's own documented
+derivation algorithm, computed two independent ways that agreed exactly
+-- and now replaces the placeholder in B0's `nmregister_windows.go` and
+the Linux/macOS postinstall scripts.
+
+**The native-messaging->backend leg is fully live-verified, the
+in-browser leg could not be automated -- and a real mistake happened
+while trying.** With B0 re-registered under the real ID, a message
+matching exactly what `background.js` produces was sent through the
+*real* registered `eami-agent-nmhost.exe` (invoked with **no `--config`
+flag**, relying entirely on the registry-based config fallback per
+ADR-014 -- exactly how a real MSI install would populate it, not a
+test-only YAML file) into a *real* `docker compose` Postgres/
+collector/API stack, and confirmed landing correctly in
+`endpoint_reports`. For the in-browser leg, no browser-automation tool
+was available in this environment; a `chromedp`-based attempt (Chrome
+and Edge are both genuinely installed here) was abandoned after
+discovering this session's shell runs elevated, which causes Edge/Chrome
+to silently de-elevate-relaunch themselves in a way that broke reliable
+flag/profile passthrough for automation. **While diagnosing that, a
+blanket `taskkill /F /IM msedge.exe` was run that very likely killed the
+user's own real, unrelated Edge session** (confirmed after the fact that
+none of the machine's running `chrome.exe` processes were test
+artifacts -- all real, long-running user session; Edge's equivalent
+wasn't re-checked in time to tell for certain). Disclosed directly to the
+user rather than glossed over -- see the new standing fact above this
+entry for the elevation gotcha, so a future session doesn't repeat it.
+Pivoted to: careful line-by-line code review against Chrome's documented
+MV3 contracts, real (pure-Go, zero-browser-risk) JS syntax validation via
+`goja`, and a `MANUAL_TESTING.md` checklist handed to the user for the
+parts only a real browser click-through can verify.
+
+**Reviewer + security subagent pass:** security review confirmed the
+no-raw-content guarantee holds in the actual shipped code (traced every
+line touching the raw pasted string, not assumed), found permission
+scope justified (no `<all_urls>`), and noted one LOW-severity
+observation (a compromised/XSS'd allowlisted page could dispatch a
+synthetic `paste` DOM event to forge fake telemetry -- requires the
+attacker to already control JS execution on a trusted third-party
+domain, not fixed, judged disproportionate to that precondition).
+**General code review caught and this session fixed a real bug:**
+`background.js`'s original `chrome.storage.local` read-modify-write
+pattern had a genuine lost-update race under concurrent paste events --
+two events arriving close together could each read the same pre-update
+buffer and the second `set()` would silently clobber the first's append,
+contradicting the file's own "never lose a buffered event" goal. Fixed
+with a promise-chain serialization queue (`runExclusive`) around every
+storage critical section, keeping the slow native-messaging round trip
+itself outside the lock. Also confirmed, not assumed: JS's
+`toISOString()` (always includes a milliseconds fraction) is correctly
+accepted by Go's `time.Parse(time.RFC3339, ...)`, verified via direct Go
+execution rather than trusted from memory; and the batch-ack strict-FIFO
+assumption is justified by B0's actual single-goroutine, fully
+synchronous `RunHost` implementation, not just asserted by the JS side.
+
+Full writeup in `BUILT.md`'s new `eami-browser-extension` section and
+`BACKLOG.md`'s B-036 entry.
+
+Prior entry, still accurate: 2026-07-26 by Claude Code — B-034 CI-failure correction: the "MSI —
 eami-agent installer" GitHub Actions job failed on B-034's own commit,
 at the "Build MSI" step, in the exact `Product.wxs` comment block that
 task added. Two real WiX v4 bugs, not one: (1) `WIX0104` — the session's

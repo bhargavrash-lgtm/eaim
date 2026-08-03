@@ -20,10 +20,16 @@ browser-specific pointer to that file — work differently on each OS.
   "path": "<absolute path to a hard-linked 'eami-agent-nmhost' copy of the binary>",
   "type": "stdio",
   "allowed_origins": [
-    "chrome-extension://PLACEHOLDER_EXTENSION_ID_REPLACE_AFTER_B1/"
+    "chrome-extension://ngmdfnecljeoleiancdedbmhjdihaoaa/"
   ]
 }
 ```
+
+`ngmdfnecljeoleiancdedbmhjdihaoaa` is B1's real, stable extension ID (no
+longer a placeholder as of B1) — derived deterministically from the RSA
+public key embedded in `eami-browser-extension/manifest.json`'s `key`
+field. See `eami-browser-extension/README.md` for the full derivation and
+how to regenerate it with a different key if ever needed.
 
 **Why not point `path` straight at `eami-agent`/`eami-agent.exe`:**
 Chrome/Edge's native-messaging manifest schema has no `args`/`arguments`

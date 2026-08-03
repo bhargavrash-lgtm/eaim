@@ -70,17 +70,16 @@ echo "eami-agent: config written to /etc/eami/agent.yaml"
 # install already created it.
 ln -f /usr/bin/eami-agent /usr/bin/eami-agent-nmhost
 
-# allowed_origins is a PLACEHOLDER -- there is no B1 (browser extension)
-# yet, so this host cannot be invoked by any real extension until the
-# real, published extension ID replaces PLACEHOLDER_EXTENSION_ID_REPLACE_AFTER_B1
-# below (see installer/native-messaging/README.md).
+# allowed_origins is B1's real, stable extension ID -- eami-browser-extension's
+# manifest.json pins this via its "key" field; see
+# eami-browser-extension/README.md for the derivation.
 NM_MANIFEST_JSON='{
   "name": "com.eami.agent",
   "description": "EAMI Agent native messaging host (real-time paste-event relay)",
   "path": "/usr/bin/eami-agent-nmhost",
   "type": "stdio",
   "allowed_origins": [
-    "chrome-extension://PLACEHOLDER_EXTENSION_ID_REPLACE_AFTER_B1/"
+    "chrome-extension://ngmdfnecljeoleiancdedbmhjdihaoaa/"
   ]
 }'
 
