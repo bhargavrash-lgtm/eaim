@@ -212,9 +212,23 @@ function sendBatch(events, done) {
 
   // If the host isn't registered/reachable (e.g. B0 not installed, or
   // this extension's ID isn't yet in B0's allowed_origins), Chrome
-  // disconnects immediately and sets chrome.runtime.lastError.
+  // disconnects immediately and sets chrome.runtime.lastError. This is
+  // deliberately never thrown/surfaced as a hard failure -- buffering and
+  // silently retrying next cycle is the correct production behavior
+  // (mirrors eami-collector's own forwarder, which logs transient send
+  // failures at WARN and keeps retrying, never crashing or alerting a
+  // user over a single failed attempt). But "silent" should mean "not a
+  // hard failure", not "invisible" -- a real gap found during manual
+  // testing: with nothing logged anywhere, there was no way to tell a
+  // clean no-op flush (empty buffer) apart from a failed connection
+  // attempt (host not registered) just by watching the console. Logging
+  // here doesn't change the retry semantics at all, just makes the
+  // reason visible for anyone actually looking (e.g. this extension's
+  // own service-worker DevTools console during testing).
   port.onDisconnect.addListener(function () {
-    void chrome.runtime.lastError; // acknowledge to avoid an "unchecked" warning
+    if (chrome.runtime.lastError) {
+      console.warn("eami: native messaging connection failed:", chrome.runtime.lastError.message);
+    }
     finish(acked);
   });
 
