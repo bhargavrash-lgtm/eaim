@@ -123,13 +123,30 @@ or prior context suggests otherwise, it is wrong; trust this line.
   (`ngmdfnecljeoleiancdedbmhjdihaoaa`) is wired into B0's
   `allowed_origins`, and the native-messaging→backend leg is fully
   live-verified (real message → real B0 host → real Docker
-  collector/API/Postgres → confirmed in `endpoint_reports`). Still no
-  live production install of the extension itself (local unpacked-load
+  collector/API/Postgres → confirmed in `endpoint_reports`). **All 5 steps
+  of `MANUAL_TESTING.md` have since been run to completion by the user
+  personally on a real Chrome/Edge install (2026-08-03) — B1 is now fully
+  manually verified, not just built and code-reviewed.** Two real bugs
+  surfaced only by that live pass, both found and fixed: `background.js`
+  silently swallowed a failed native-messaging connection (fixed, now
+  logs it); `eami-agent`'s `nmlauncher` parent-process check refused to
+  start the host for the user's real browser (fixed by failing open with
+  a warning instead of closed — see B-037 below for the required
+  follow-up before customer ship). Still no live production install of
+  the extension itself in the deployment sense (local unpacked-load
   only; enterprise force-install policy documented, not configured), and
   B-035 (paste events landing in the raw agent-report JSON blob rather
   than literally in B-032's `paste_events` table) is still open — that
   gap is unaffected by B1, since it's purely a server-side
   (`eami-collector`/`eami-api`) wiring task.
+- **B-037 (open, High priority before any customer install):** the
+  `nmlauncher` fail-open fix above is an explicitly user-accepted
+  dev-testing convenience, not the final security posture — the
+  confused-deputy protection this check exists for is currently
+  unenforced against any parent process not on its hardcoded allowlist.
+  Needs real data on why the user's actual browser wasn't matched, a more
+  reliable matching strategy, and fail-closed enforcement restored before
+  this ships to a real customer.
 - **This machine's shell runs elevated (Administrator)** — discovered
   2026-08-03 while attempting real Chrome/Edge automation for B1's
   verification: elevation causes Edge (and likely Chrome) to
@@ -154,7 +171,28 @@ or prior context suggests otherwise, it is wrong; trust this line.
   project's own `installer/build.ps1` both run for real on this machine.
 
 ## Last updated
-2026-08-03 by Claude Code — B1 manual-testing follow-up: fixed a real bug
+2026-08-03 by Claude Code — B1 (B-036) is now fully manually verified, closing
+the loop from the entry just below. The user personally ran all 5 steps of
+`eami-browser-extension/MANUAL_TESTING.md` to completion on a real
+Chrome/Edge install: extension ID and scoped permissions confirmed, paste
+capture with no raw content confirmed on an allowlisted domain,
+non-allowlisted-domain silence confirmed, service-worker-restart
+durability confirmed, and `flush()` confirmed sending with the event
+landing in `endpoint_reports` in the real Docker Postgres stack. This
+closes the one leg (the in-browser side) that couldn't be verified when
+B1 was originally built, per the entry below. Two real bugs were found
+and fixed by this live pass specifically (neither catchable by review or
+by this session's own synthetic testing, since both needed a genuine
+browser + genuine OS-level native-messaging registration to surface) —
+full detail in the prior entry immediately below and in
+`BUILT.md`/`BACKLOG.md`'s B-036 entries: (1) `background.js` silently
+discarded a failed native-messaging connection, now logged; (2)
+`nmlauncher`'s parent-process check refused the user's real browser, now
+fails open with a warning instead of closed, tracked as **B-037** for a
+real fix before any customer install (explicitly not the final security
+posture — see the new standing fact above).
+
+Prior entry, still accurate: 2026-08-03 by Claude Code — B1 manual-testing follow-up: fixed a real bug
 found only by the user's own hands-on click-through (not by review or
 automation), in `internal/nmlauncher` (B0's parent-process
 defense-in-depth check). Manual test step 5 (`flush()`) failed twice in a
