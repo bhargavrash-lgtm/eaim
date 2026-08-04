@@ -150,14 +150,28 @@ or prior context suggests otherwise, it is wrong; trust this line.
   `GetDefaultOrgID` does), so the fix landed entirely in `eami-api`, with
   zero changes to `eami-agent`/`eami-collector`. This closes the last
   open item in the paste-detection epic (B-032→B-034→B-036→B-038→B-035).
-- **B-037 (open, High priority before any customer install):** the
-  `nmlauncher` fail-open fix above is an explicitly user-accepted
-  dev-testing convenience, not the final security posture — the
-  confused-deputy protection this check exists for is currently
-  unenforced against any parent process not on its hardcoded allowlist.
-  Needs real data on why the user's actual browser wasn't matched, a more
-  reliable matching strategy, and fail-closed enforcement restored before
-  this ships to a real customer.
+- **B-037 (done, 2026-08-04):** fail-closed restored for `nmlauncher`'s
+  "parent determined but not recognized" case, closing the dev-testing
+  weakening above. Investigated rather than guessed: research confirmed
+  Chrome/Edge already use the identical executable name across every
+  Windows channel (so the Windows list was never actually incomplete —
+  that hypothesis is refuted), and confirmed Chrome's native-host launch
+  mechanism has used no `cmd.exe` intermediary since Chromium 113 (2023).
+  Real gaps found and closed: Linux/macOS both use distinct per-channel
+  process/bundle names, previously uncovered (researched, not verified on
+  a live host of those platforms). **The exact original failure was never
+  captured and can't be retroactively diagnosed** — leading theory,
+  stated plainly rather than left unexplained: the user's real default
+  browser is likely a different Chromium-family browser (Brave/Opera/
+  Vivaldi/etc.), since every other explanation was specifically checked
+  and ruled out. Scope kept to Chrome/Edge only per an explicit
+  user decision (not widened to other Chromium browsers) — a genuinely
+  different browser still requires `EAMI_NM_SKIP_PARENT_CHECK=1`.
+  Reviewer + security passes both ran; one real Medium (missing test
+  coverage for 4 new entries) and two Low findings, all fixed. Re-verified
+  live: fail-closed confirmed (non-browser parent refused), override
+  confirmed working, full protocol round trip confirmed landing correctly
+  in `paste_events` (B-035) through the real Docker stack.
 - **This machine's shell runs elevated (Administrator)** — discovered
   2026-08-03 while attempting real Chrome/Edge automation for B1's
   verification: elevation causes Edge (and likely Chrome) to
@@ -182,7 +196,57 @@ or prior context suggests otherwise, it is wrong; trust this line.
   project's own `installer/build.ps1` both run for real on this machine.
 
 ## Last updated
-2026-08-04 by Claude Code — B-035: paste events wired into the real
+2026-08-04 by Claude Code — B-037: `nmlauncher`'s parent-process allowlist
+fix, closing tonight's own dev-testing weakening (fail-open) with a
+properly researched fix rather than just re-flipping a flag. Investigated
+before building, per the task brief: confirmed (Chromium release-channel
+documentation, cross-checked against this machine's real running
+processes) that Chrome and Edge already use the identical executable name
+across every Windows channel — the Windows portion of the allowlist was
+never actually incomplete, refuting the hypothesis the original incident
+suggested. Also confirmed Chrome's native-messaging-host launch mechanism
+has used no `cmd.exe` intermediary since Chromium 113 (2023), ruling out
+an intermediary-process theory for any current browser. Real gaps found
+and closed instead: Linux and macOS both use distinct per-channel
+process/bundle names (unlike Windows), previously missing entirely —
+added, flagged as researched-but-unverified on a live host of those
+platforms, matching this package's existing per-OS honesty convention.
+Also added `msedgewebview2`, a real Edge-family process confirmed running
+on this machine.
+
+**The exact original failure was never captured and cannot be
+retroactively diagnosed** — surfaced plainly as an open question rather
+than left as an unexplained "fixed it anyway," per the user's explicit
+request. Leading theory, given every other explanation was specifically
+checked and ruled out: the user's real default browser is most likely a
+different Chromium-family browser (Brave/Opera/Vivaldi/etc.), not Chrome
+or Edge. The user was asked and explicitly chose to keep the allowlist
+scoped to Chrome/Edge only (not widened to other Chromium browsers, per
+this task's own acceptance criteria) — a genuinely different browser
+still requires `EAMI_NM_SKIP_PARENT_CHECK=1`. The logged `Reason` string
+still names the actual detected parent on every refusal, so a future
+recurrence can be checked against this theory directly rather than
+re-diagnosed from scratch.
+
+Fail-closed restored for "parent determined but not recognized"; "parent
+could not be determined at all" keeps its original fail-open-with-warning
+behavior, confirmed (not just carried over) as the correct original
+design. Reviewer + security subagent passes both ran: code review caught
+a real Medium (4 new allowlist entries lacked test coverage) and a Low
+(misleading comment grouping), both fixed; security review found no
+High/Medium issues and one Low (an entry's doc comment overclaimed
+verification), fixed by rewording. Re-verified live end-to-end: rebuilt
+`eami-agent.exe`, confirmed a non-browser parent is refused (exit 1),
+confirmed the override still works, and ran a full native-messaging
+protocol round trip through the real Docker stack that landed correctly
+in `paste_events` (B-035's table) — proving the whole B0→B1→B-035
+pipeline still works with this fix in place. `go build`/`go vet`/
+`go test ./...` clean across `eami-agent`.
+
+Full writeup in `BUILT.md`'s `eami-agent` section and `BACKLOG.md`'s
+B-037 entry.
+
+Prior entry, still accurate: 2026-08-04 by Claude Code — B-035: paste events wired into the real
 `paste_events` table, closing the last open item in the paste-detection
 epic (B-032→B-034→B-036→B-038→B-035, in build order). The brief's own
 assumption ("`eami-collector` already resolves org context for other
