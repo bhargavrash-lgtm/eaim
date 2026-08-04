@@ -7,13 +7,19 @@
 // # Revocation persistence
 //
 // Revocations are persisted so that a restarted Manager (or a second node
-// sharing the same key path) does not re-accept a revoked token.
+// sharing the same key path) does not re-accept a revoked token. Revocation
+// is permanent: the revoked_ai_tokens table has no expiry column (unlike,
+// e.g., sessions/approval_requests elsewhere in the schema, which do), so
+// once a jti is revoked it stays revoked for the life of the row.
 //
 //   - NewManager (no DB): revocations are appended to <keypairPath>.revocations
 //     (one JTI per line). Suitable for single-node dev and unit tests.
 //   - NewManagerWithDB: revocations are written to the revoked_ai_tokens
 //     Postgres table and hydrated from it on startup. Required for production
-//     and multi-node deployments.
+//     and multi-node deployments. Hydration failure is fatal (returned as an
+//     error, not logged-and-ignored): a gateway that cannot prove it knows
+//     the current revocation list must not start serving traffic as if the
+//     list were empty.
 package identity
 
 import (
@@ -76,10 +82,11 @@ type IssueResponse struct {
 // revocationStore is the persistence interface for the revocation list.
 // Two implementations are provided: fileRevocationStore and dbRevocationStore.
 type revocationStore interface {
-	// save persists a revoked JTI. expiresAt is advisory; pass time.Time{}
-	// when the expiry is unknown (file store ignores it).
-	save(ctx context.Context, jti string, expiresAt time.Time) error
-	// loadAll returns all currently-valid (non-expired) revoked JTIs.
+	// save persists a revoked JTI. agentID is the revoked token's subject
+	// (a gateway_agents.id UUID); the file store ignores it.
+	save(ctx context.Context, jti string, agentID string) error
+	// loadAll returns all revoked JTIs. Revocation has no expiry concept
+	// (see the package doc comment), so this is the complete list.
 	loadAll(ctx context.Context) ([]string, error)
 }
 
@@ -91,7 +98,7 @@ type fileRevocationStore struct {
 	mu   sync.Mutex
 }
 
-func (s *fileRevocationStore) save(_ context.Context, jti string, _ time.Time) error {
+func (s *fileRevocationStore) save(_ context.Context, jti string, _ string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
@@ -128,16 +135,12 @@ type dbRevocationStore struct {
 	pool *pgxpool.Pool
 }
 
-func (s *dbRevocationStore) save(ctx context.Context, jti string, expiresAt time.Time) error {
-	if expiresAt.IsZero() {
-		// Conservative upper bound: no token can live longer than maxTTL.
-		expiresAt = time.Now().UTC().Add(maxTTL * time.Second)
-	}
+func (s *dbRevocationStore) save(ctx context.Context, jti string, agentID string) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO revoked_ai_tokens (jti, expires_at)
+		INSERT INTO revoked_ai_tokens (jti, agent_id)
 		VALUES ($1, $2)
 		ON CONFLICT (jti) DO NOTHING
-	`, jti, expiresAt)
+	`, jti, agentID)
 	if err != nil {
 		return fmt.Errorf("revocation db insert: %w", err)
 	}
@@ -145,8 +148,7 @@ func (s *dbRevocationStore) save(ctx context.Context, jti string, expiresAt time
 }
 
 func (s *dbRevocationStore) loadAll(ctx context.Context) ([]string, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT jti FROM revoked_ai_tokens WHERE expires_at > NOW()`)
+	rows, err := s.pool.Query(ctx, `SELECT jti FROM revoked_ai_tokens`)
 	if err != nil {
 		return nil, fmt.Errorf("revocation db query: %w", err)
 	}
@@ -213,11 +215,16 @@ func newManager(pk *rsa.PrivateKey, defaultTTLSeconds int, issuer string, store 
 		revoked:    make(map[string]struct{}),
 		store:      store,
 	}
-	// Hydrate in-memory revocation set from the backing store.
+	// Hydrate in-memory revocation set from the backing store. Failure is
+	// fatal: a revocation list this process can't prove is complete must
+	// not be treated as empty (see the package doc comment). Callers
+	// (NewManager/NewManagerWithDB) propagate this error to their own
+	// caller, which for the real gateway means the process fails to start.
 	jtis, err := store.loadAll(context.Background())
 	if err != nil {
-		slog.Warn("identity: failed to load revocation list on startup", "err", err)
-	} else if len(jtis) > 0 {
+		return nil, fmt.Errorf("identity: failed to load revocation list on startup: %w", err)
+	}
+	if len(jtis) > 0 {
 		for _, jti := range jtis {
 			m.revoked[jti] = struct{}{}
 		}
@@ -301,12 +308,20 @@ func (m *Manager) Validate(tokenStr string) (*Claims, error) {
 
 // Revoke adds jti to the in-memory revocation set and persists it to the
 // backing store (file or DB) so that it survives gateway restarts.
-func (m *Manager) Revoke(jti string) {
+//
+// agentID must be the token's real gateway_agents.id UUID (required by
+// dbRevocationStore since revoked_ai_tokens.agent_id is a NOT NULL FK to
+// that table) — NOT Claims.Subject/the JWT sub, which is "agent:<name>"
+// (see internal/registry's doc comment), a different value entirely.
+// Callers must resolve the subject to its UUID first, the same way
+// internal/mcp and internal/episode already do via
+// registry.LookupByName(strings.TrimPrefix(claims.Subject, "agent:")).
+func (m *Manager) Revoke(jti string, agentID string) {
 	m.revokedMu.Lock()
 	m.revoked[jti] = struct{}{}
 	m.revokedMu.Unlock()
 
-	if err := m.store.save(context.Background(), jti, time.Time{}); err != nil {
+	if err := m.store.save(context.Background(), jti, agentID); err != nil {
 		slog.Error("identity: failed to persist revocation", "jti", jti, "err", err)
 	}
 }

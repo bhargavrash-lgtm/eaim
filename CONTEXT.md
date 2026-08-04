@@ -217,10 +217,47 @@ or prior context suggests otherwise, it is wrong; trust this line.
   just unit-tested: a real ESCALATE → real approval row → real admin
   decide (approve and, separately, deny) → real gateway resume/block,
   with Slack notification confirmed reached. **Unrelated bug found
-  incidentally, not fixed, queued as B-041**: `eami-gateway`'s JWT
-  revocation list fails to hydrate on every startup (queries a column,
-  `expires_at`, that doesn't exist on `revoked_ai_tokens`) — previously-
-  revoked tokens silently stop staying revoked across a restart.
+  incidentally, queued as B-041, now DONE (2026-08-04)**: see the new
+  standing fact immediately below for the fix.
+- **B-041 (done, 2026-08-04):** `eami-gateway`'s JWT revocation persistence
+  actually works now — both directions, not just the hydration query
+  originally reported. Investigation found the write path (`Revoke()`'s
+  DB INSERT) was *also* broken (same nonexistent `expires_at` column, plus
+  a missing required `agent_id`), so nothing had ever actually reached
+  `revoked_ai_tokens` for hydration to load — fixing only the SELECT (the
+  bug as originally filed) would not have closed the loop. Fixed both,
+  with the user's explicit sign-off to expand scope beyond the original
+  framing. Revocation is permanent by design (the table has no expiry
+  column at all — confirmed across every migration, not assumed).
+  Hydration failure is now fatal (propagates through existing `main.go`
+  error handling to `os.Exit(1)`) instead of a silent `slog.Warn` with an
+  empty revocation set. **A real, non-obvious gap found during this
+  task's own live-verification pass, fixed before shipping rather than
+  left for later:** `Claims.Subject` (the JWT `sub`) is `"agent:<name>"`,
+  never a `gateway_agents.id` UUID — a naive `Revoke(claims.ID,
+  claims.Subject)` call (the obvious-looking one) would fail the FK
+  insert on every real revoke. `Revoke()`'s new `agentID` parameter
+  requires the resolved UUID (via `registry.LookupByName`, the same
+  pattern `internal/mcp`/`internal/episode` already use), documented
+  explicitly in its doc comment. `Manager.Revoke` still has **zero
+  production callers** — the documented `POST /v1/gateway/tokens/{token}
+  /revoke` route was never wired into `main.go`'s router — filed as
+  **B-042**, not built here, along with two latent (currently
+  unreachable) gaps reviewer + security passes both independently found:
+  `Revoke()`/`save()` swallow persistence errors rather than returning
+  them, and `Issue()` accepts an unvalidated `AgentID`. **Live-verified
+  end-to-end against the real `docker-compose` stack, rebuilt fresh**:
+  issued a real token, revoked it via the real `dbRevocationStore.save`
+  code path against the real DB, confirmed the already-running gateway
+  process still accepted it (expected — no HTTP route calls `Revoke()`
+  yet), restarted the container, confirmed the startup log now reads
+  `"identity: hydrated revocation list" count=1` (previously the exact
+  `WARN` this item closes), and confirmed a real `GET /v1/mcp/sse`
+  request with that token now returns `401 ... has been revoked`.
+  Separately confirmed hydration-failure-is-fatal by stopping Postgres
+  and confirming the gateway crash-loops rather than starting degraded.
+  Full writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
+  B-041/B-042 entries.
 - **This machine's `localhost` resolves IPv6 (`::1`) before IPv4
   (`127.0.0.1`), and this Docker Desktop instance's IPv6 port-forwarding
   accepts the TCP handshake but silently drops all subsequent data** —
@@ -233,7 +270,106 @@ or prior context suggests otherwise, it is wrong; trust this line.
   that look like a real connectivity problem but aren't.
 
 ## Last updated
-2026-08-04 by Claude Code — B-039: the approval flow (flagship human-in-
+2026-08-04 by Claude Code — B-041: `eami-gateway`'s JWT revocation
+persistence actually works now, closing the gap B-039's live verification
+found incidentally. The bug as originally filed was narrower than reality:
+`dbRevocationStore.loadAll`'s startup-hydration query referenced a column,
+`revoked_ai_tokens.expires_at`, that has never existed on that table
+(confirmed by reading `schema.sql` and every file in `schema/migrations/`
+— revocation here is permanent by design, unlike `sessions`/
+`approval_requests` elsewhere in the same schema, which do have real
+expiry columns). But investigation before writing any fix found
+`dbRevocationStore.save` (`Revoke()`'s only DB side effect) was *also*
+broken — same nonexistent column, plus a missing required `agent_id` FK
+column — meaning every DB-backed revoke had always silently failed to
+persist (logged, never surfaced). Nothing had ever actually reached the
+table for hydration to load, so fixing the SELECT alone would not have
+closed the loop. Fixed both, with the user's explicit approval to expand
+scope beyond the brief's original "hydration query" framing, since AC1
+("a token revoked before restart is still rejected after restart") was
+provably unachievable without it.
+
+**A real, non-obvious gap found during this task's own live-verification
+pass, fixed before shipping rather than left for whoever builds next:**
+`Claims.Subject` (the JWT `sub`) is `"agent:<name>"` — `internal/
+registry`'s documented convention, the same value `internal/mcp`/
+`internal/episode` already resolve via `registry.LookupByName` before
+using — never a `gateway_agents.id` UUID directly. `Revoke()`'s new
+`agentID` parameter needs the real UUID; the obvious-looking
+`Revoke(claims.ID, claims.Subject)` call (what this task's own initial
+plan proposed, before live verification caught it) would fail the FK
+insert on every real revoke, reproducing this exact bug class via a new
+trigger. `Revoke()`'s doc comment now says this explicitly, with a
+pointer to the existing resolution pattern; `tokens_pg_test.go`'s
+restart-simulation test deliberately issues a token in the real
+`"agent:<name>"` shape and resolves it itself, rather than the
+UUID-shaped shortcut an earlier draft of the test used, so a future
+regression here would be caught.
+
+Hydration failure is now fatal, not a silent warning: `newManager()`
+returns the `loadAll` error instead of catching it into `slog.Warn`;
+`main.go`'s single production call site already treats a returned error
+as fatal, so this reuses existing error-propagation plumbing rather than
+adding a new fail-fast mechanism.
+
+`Manager.Revoke` has **zero production callers today** — confirmed by
+repo-wide grep — since the `POST /v1/gateway/tokens/{token}/revoke` route
+`api/openapi.yaml` documents was never wired into `main.go`'s router.
+Filed as **B-042**, not built here, per an explicit scope decision.
+Reviewer + security subagent passes both ran (mandatory, credential-
+revocation control): both clean against this diff, both independently
+found and agreed on two **PLAUSIBLE, currently-latent** (not exploitable
+today, since `Revoke()` has no live caller) gaps — persistence errors
+still aren't returned to the caller, and `Issue()` accepts an unvalidated
+`AgentID` — folded into B-042's acceptance criteria rather than fixed
+here, since they only become live the moment a real route calls `Revoke`.
+
+4 new real-Postgres integration tests in `internal/identity/
+tokens_pg_test.go`, following `internal/approval/router_pg_test.go`'s
+B-039-established pattern (`TEST_DATABASE_URL`, throwaway `orgs`/
+`gateway_agents` fixtures, relying on the schema's own `ON DELETE CASCADE`
+chain for cleanup). Also corrected two stale doc comments in
+`tokens_test.go` that claimed two already-passing tests were "CURRENTLY
+FAILING" (one of the two was unrelated to B-041 entirely — `WrongIssuer`
+had apparently been fixed at some earlier, undated point; the other,
+`SurvivesRestart`, only ever exercised the file-backed store, which never
+had B-041's bug in the first place) — fixed since they were directly
+adjacent to the code being touched, not left as drift for later.
+**Verified 2026-08-04 with a real toolchain: `go build`/`go vet`/
+`go test ./...` clean, 0 failures across the full `eami-gateway` module**
+(17 tests in `internal/identity` alone).
+
+**Live-verified end-to-end against the real `docker-compose` stack,
+rebuilt fresh first** (Docker Desktop wasn't running at session start;
+started with the user's explicit confirmation, per this session's
+standing norm around system-state changes): issued a real token via the
+real `POST /v1/gateway/tokens` for a real seeded org/`gateway_agents`
+row; revoked it via the actual `dbRevocationStore.save` code path against
+the real DB (no HTTP route exists yet to call `Manager.Revoke()`
+end-to-end — see B-042; this isolates exactly what B-041 fixes rather
+than being a gap in the proof); confirmed the row landed in
+`revoked_ai_tokens`; confirmed the already-running gateway process still
+accepted the token immediately after (expected, since only the DB was
+touched directly); restarted the container and confirmed the startup log
+now reads `"identity: hydrated revocation list" count=1` — the exact spot
+that previously logged the `WARN` this item exists to close; confirmed a
+real `GET /v1/mcp/sse` request bearing that exact token now returns
+`401 unauthorized: identity: token ... has been revoked` — **AC1, proven
+end-to-end.** Separately stopped Postgres entirely and restarted the
+gateway container: confirmed it fails fast and crash-loops rather than
+starting in a silently-degraded state (this specific scenario is actually
+caught upstream of identity hydration by the pre-existing `pool.Ping`
+check, but exercises the same "fail loud, not silent" contract end-to-end
+— the hydration-specific fatal path itself is covered directly by a unit
+test, `TestNewManagerWithDB_HydrationFailure_IsFatal`). All test fixtures
+(throwaway org/agent, the revocation row, and a scratch-only test file
+used solely to invoke the real revoke code path against this specific
+live token) were deleted/cleaned up afterward.
+
+Full writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
+B-041/B-042 entries.
+
+Prior entry, still accurate: 2026-08-04 by Claude Code — B-039: the approval flow (flagship human-in-
 the-loop AI-governance mechanism) completes a real cycle for the first
 time. An original module audit's three claimed bugs in
 `eami-gateway/internal/approval/router.go` were re-verified directly

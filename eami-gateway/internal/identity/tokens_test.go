@@ -1,16 +1,19 @@
 // tokens_test.go — eami-gateway/internal/identity
 // QA-EAMI — unit tests for Manager (JWT issuance, validation, revocation).
 //
-// Security regression tests (marked SECURITY-FAILING) verify behaviour that
-// SHOULD be enforced but currently is NOT. They will fail until the owning
-// agent resolves the linked tasks:
-//   - TestManager_Validate_WrongIssuer_ReturnsError   → TASK-053 (JWT-001)
-//   - TestManager_Validate_RevokedToken_SurvivesRestart → TASK-052 (JWT-002)
+// Security regression tests (marked SECURITY-FAILING) originally documented
+// behaviour that should be enforced but was not, linked to TASK-052/TASK-053.
+// Both now pass — TestManager_Validate_WrongIssuer_ReturnsError since
+// Validate() gained jwt.WithIssuer() (date/commit not tracked in this
+// comment); TestManager_Validate_RevokedToken_SurvivesRestart was already
+// passing against the file-backed store before B-041 (2026-08-04) — B-041's
+// actual bug was in the DB-backed store only (revoked_ai_tokens.expires_at
+// doesn't exist), never exercised by this file-backed test. See
+// tokens_pg_test.go for the real-Postgres coverage that does exercise it.
+// Left in place, not deleted, as ordinary regression coverage.
 //
 // Run:
 //   go test ./internal/identity/... -race -count=1
-// Run only security failing tests:
-//   go test ./internal/identity/... -run "WrongIssuer|SurvivesRestart" -v
 package identity_test
 
 import (
@@ -267,7 +270,7 @@ func TestManager_Validate_RevokedToken_ReturnsError(t *testing.T) {
 	jti := claims.ID
 
 	// Revoke the token.
-	m.Revoke(jti)
+	m.Revoke(jti, claims.Subject)
 
 	// Validate after revocation — must fail.
 	_, err = m.Validate(resp.Token)
@@ -287,16 +290,13 @@ func TestManager_Validate_MalformedToken_ReturnsError(t *testing.T) {
 	}
 }
 
-// ─── SECURITY-FAILING TESTS ───────────────────────────────────────────────────
-// These tests document security requirements that are NOT yet enforced.
-// They are expected to fail until the linked tasks are resolved.
-// DO NOT remove or skip these tests — they are the acceptance criteria.
+// ─── SECURITY REGRESSION TESTS ─────────────────────────────────────────────────
+// These tests originally documented security requirements that were NOT
+// enforced when written (TASK-052/TASK-053); both are now fixed and passing.
+// DO NOT remove or skip these tests — they guard against regressing either fix.
 
 // TestManager_Validate_WrongIssuer_ReturnsError verifies that a token carrying
-// an unexpected issuer is rejected. Linked: JWT-001 / TASK-053.
-//
-// CURRENTLY FAILING: Validate() does not call jwt.WithIssuer(), so any
-// issuer is accepted as long as signature and audience are valid.
+// an unexpected issuer is rejected. Linked: JWT-001 / TASK-053, fixed.
 func TestManager_Validate_WrongIssuer_ReturnsError(t *testing.T) {
 	keyPath := filepath.Join(t.TempDir(), "gateway.key")
 	m := newManager(t, keyPath, "eami-gateway")
@@ -332,10 +332,10 @@ func TestManager_Validate_WrongIssuer_ReturnsError(t *testing.T) {
 }
 
 // TestManager_Validate_RevokedToken_SurvivesRestart verifies that revocations
-// persist across Manager restarts (i.e., are written to the DB). Linked: JWT-002 / TASK-052.
-//
-// CURRENTLY FAILING: Revoke() only updates the in-memory map. A new Manager
-// instance (same key file) has no knowledge of prior revocations.
+// persist across Manager restarts. Linked: JWT-002 / TASK-052, fixed — this
+// specific test exercises the file-backed store (NewManager) and was already
+// passing before B-041; B-041 (2026-08-04) fixed the separate, still-broken
+// DB-backed store (NewManagerWithDB), covered instead by tokens_pg_test.go.
 func TestManager_Validate_RevokedToken_SurvivesRestart(t *testing.T) {
 	keyPath := filepath.Join(t.TempDir(), "gateway.key")
 
@@ -349,7 +349,7 @@ func TestManager_Validate_RevokedToken_SurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pre-revocation Validate: %v", err)
 	}
-	mA.Revoke(claimsA.ID)
+	mA.Revoke(claimsA.ID, claimsA.Subject)
 
 	// Simulate restart: new Manager B with the same key file.
 	// It should know about the prior revocation (by loading from DB).
