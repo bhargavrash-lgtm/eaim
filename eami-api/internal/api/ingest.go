@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -56,6 +57,27 @@ type agentReport struct {
 		Source string `json:"source"`
 		Port   int    `json:"port"`
 	} `json:"mcp_servers"`
+	// PasteEvents (B-035) is populated only by eami-agent's native-messaging
+	// relay (internal/nativemsg's outboundReport) -- a report shaped
+	// {agent_id, hostname, collected_at, paste_events} with no scan data at
+	// all. A real payload.Report scan never sets this field. This is a
+	// structural, mutually-exclusive distinction in the wire format today,
+	// not a heuristic: processIngestItem uses len(PasteEvents) > 0 to
+	// route relay items to processPasteEventRelayItem instead of the normal
+	// scan-report path below. If eami-agent's report shapes are ever
+	// merged, this distinction needs revisiting.
+	PasteEvents []rawPasteEvent `json:"paste_events"`
+}
+
+// rawPasteEvent is one paste event as eami-agent's native-messaging relay
+// sends it (see nativemsg.PasteEvent) -- no org_id/agent_id/hostname/
+// content, mirrors B-032's PasteEventReport no-raw-content guarantee.
+type rawPasteEvent struct {
+	DestinationDomain string  `json:"destination_domain"`
+	OccurredAt        string  `json:"occurred_at"`
+	ContentLength     *int32  `json:"content_length"`
+	ContentHash       *string `json:"content_hash"`
+	OSUsername        *string `json:"os_username"`
 }
 
 // allowedModelSources is the set of values accepted by the
@@ -137,6 +159,38 @@ func (s *Server) processIngestItem(ctx context.Context, orgID uuid.UUID, item ba
 	hostname := item.Hostname
 	if hostname == "" {
 		hostname = rep.Hostname
+	}
+
+	// B-035: a native-messaging-relayed paste event arrives through this
+	// same /v1/ingest/batch pipeline (eami-collector forwards it as opaque
+	// bytes, unchanged) but carries no scan data at all -- routing it
+	// through the normal path below would call UpsertAgentEndpoint with
+	// blank agent_version/os_info, silently clobbering a real endpoint's
+	// already-known metadata (the exact bug class ResolvePasteSourceEndpoint
+	// exists to avoid, see paste_events.sql.go). Handled entirely
+	// separately: resolves the endpoint via the non-clobbering upsert and
+	// writes straight to paste_events, never touching endpoint_reports or
+	// any normalised table for this item (AC4/AC5).
+	//
+	// Checked via != nil, not len() > 0 (caught by review): encoding/json
+	// only sets a slice field to non-nil when the "paste_events" key is
+	// actually present in the source JSON (nil if the key is absent
+	// entirely) -- so a relay item that happens to carry an empty-but-
+	// present `"paste_events": []` (e.g. a future no-op flush) is still
+	// correctly routed to the non-clobbering path instead of silently
+	// falling through to the scan-report path below.
+	if rep.PasteEvents != nil {
+		if rep.AgentVersion != "" {
+			// Defensive: today's two report shapes are structurally
+			// mutually exclusive (see agentReport's doc comment), so this
+			// should never fire. If eami-agent's wire format is ever
+			// changed to merge scan data and paste events into one report,
+			// this makes that change fail loudly (logged, scan data
+			// dropped) instead of silently discarding it forever.
+			slog.Warn("ingest: item carries both scan data and paste_events -- scan fields ignored, only paste_events processed",
+				"agent_id", agentID, "batch_id", item.ID)
+		}
+		return s.processPasteEventRelayItem(ctx, orgID, agentID, hostname, rep.PasteEvents)
 	}
 
 	// Build os_info JSONB from the parsed platform struct.
@@ -251,5 +305,71 @@ func (s *Server) processIngestItem(ctx context.Context, orgID uuid.UUID, item ba
 		}
 	}
 
+	return nil
+}
+
+// processPasteEventRelayItem writes the paste events carried by a
+// native-messaging-relayed item (see agentReport.PasteEvents' doc comment)
+// directly into paste_events -- deliberately bypassing UpsertAgentEndpoint/
+// InsertEndpointReport/every normalised-table insert above, both because
+// this item has no scan data to write there and because UpsertAgentEndpoint
+// would otherwise clobber a real endpoint's agent_version/os_info with the
+// blanks this item carries.
+//
+// orgID is always the server-resolved value from IngestBatch's
+// GetDefaultOrgID call, never anything from item.Report -- a compromised
+// eami-agent has no field in this wire format that can influence it.
+// Endpoint resolution uses ResolvePasteSourceEndpoint (B-032), the same
+// non-clobbering upsert paste_events.sql.go's own direct ingestion path
+// uses, so an agent that reports through both this relay path and a real
+// scan resolves to the identical endpoints row.
+// maxPasteEventsPerRelayItem bounds how many events a single relay item
+// can carry in one call -- today's real sender (nativemsg.RunHost) always
+// sends exactly one event per item, so this is generous headroom rather
+// than a tight limit, but this endpoint is reachable directly (bypassing
+// eami-agent's native-messaging host and its own protocol-level 1MB
+// message cap entirely) by anything holding the collector's service key,
+// so it must not be literally unbounded.
+const maxPasteEventsPerRelayItem = 100
+
+func (s *Server) processPasteEventRelayItem(ctx context.Context, orgID uuid.UUID, agentID, hostname string, raw []rawPasteEvent) error {
+	// agentID is never empty here -- IngestBatch already skips any item
+	// with an empty item.AgentID before processIngestItem is ever called,
+	// and agentID always resolves to item.AgentID when that's non-empty.
+	// hostname CAN legitimately be empty (both item.Hostname and the
+	// parsed report's hostname could be blank), so that check is real.
+	if hostname == "" {
+		return fmt.Errorf("paste event relay: hostname is required")
+	}
+	if len(raw) > maxPasteEventsPerRelayItem {
+		return fmt.Errorf("paste event relay: item carries %d events, exceeds max %d", len(raw), maxPasteEventsPerRelayItem)
+	}
+
+	endpointID, err := s.queries.ResolvePasteSourceEndpoint(ctx, store.ResolvePasteSourceEndpointParams{
+		OrgID:    orgID,
+		AgentID:  agentID,
+		Hostname: hostname,
+	})
+	if err != nil {
+		return fmt.Errorf("paste event relay: resolve source endpoint: %w", err)
+	}
+
+	var toInsert []store.PasteEventInput
+	for _, ev := range raw {
+		input, ok := validatePasteEvent(ev.DestinationDomain, ev.OccurredAt, ev.ContentLength, ev.ContentHash, ev.OSUsername)
+		if !ok {
+			continue
+		}
+		input.OrgID = orgID
+		input.SourceEndpointID = endpointID
+		toInsert = append(toInsert, input)
+	}
+	if len(toInsert) == 0 {
+		return fmt.Errorf("paste event relay: no valid paste events in item")
+	}
+
+	if _, err := s.queries.BatchInsertPasteEvents(ctx, toInsert); err != nil {
+		return fmt.Errorf("paste event relay: batch insert: %w", err)
+	}
 	return nil
 }

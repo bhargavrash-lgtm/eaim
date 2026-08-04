@@ -73,25 +73,20 @@ func (s *Server) IngestPasteEvents(w http.ResponseWriter, r *http.Request) {
 			rejected++
 			continue
 		}
-		if ev.AgentID == "" || ev.Hostname == "" || ev.DestinationDomain == "" {
+		if ev.AgentID == "" || ev.Hostname == "" {
 			rejected++
 			continue
 		}
-		occurredAt, err := time.Parse(time.RFC3339, ev.OccurredAt)
-		if err != nil {
-			rejected++
-			continue
-		}
-		// Server-side allowlist check -- never trust the client's own
-		// classification of what counts as a known AI-tool destination.
-		if !MatchesKnownPasteDestination(ev.DestinationDomain) {
+
+		input, ok := validatePasteEvent(ev.DestinationDomain, ev.OccurredAt, ev.ContentLength, ev.ContentHash, ev.OSUsername)
+		if !ok {
 			rejected++
 			continue
 		}
 
 		key := endpointKey{orgID: orgID, agentID: ev.AgentID}
-		endpointID, ok := resolved[key]
-		if !ok {
+		endpointID, resolvedOK := resolved[key]
+		if !resolvedOK {
 			endpointID, err = s.queries.ResolvePasteSourceEndpoint(ctx, store.ResolvePasteSourceEndpointParams{
 				OrgID:    orgID,
 				AgentID:  ev.AgentID,
@@ -104,15 +99,9 @@ func (s *Server) IngestPasteEvents(w http.ResponseWriter, r *http.Request) {
 			resolved[key] = endpointID
 		}
 
-		toInsert = append(toInsert, store.PasteEventInput{
-			OrgID:             orgID,
-			SourceEndpointID:  endpointID,
-			DestinationDomain: strings.ToLower(ev.DestinationDomain),
-			ContentLength:     ev.ContentLength,
-			ContentHash:       ev.ContentHash,
-			OSUsername:        ev.OSUsername,
-			OccurredAt:        occurredAt,
-		})
+		input.OrgID = orgID
+		input.SourceEndpointID = endpointID
+		toInsert = append(toInsert, input)
 	}
 
 	accepted := 0
@@ -126,6 +115,58 @@ func (s *Server) IngestPasteEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]int{"accepted": accepted, "rejected": rejected})
+}
+
+// Field length caps (security-review finding): these columns are coarse
+// indicators by convention/comment, not by any enforced bound -- nothing
+// stopped a compromised client from stuffing arbitrarily long values into
+// them (e.g. MatchesKnownPasteDestination's suffix match accepts any
+// length of subdomain prefix on a known domain). Values chosen generously
+// above any real value these fields ever legitimately take: 253 is DNS's
+// own max hostname length; 128 comfortably covers a hex-encoded SHA-512
+// (the longest hash this codebase uses anywhere); 256 is a generous cap
+// for an OS username.
+const (
+	maxDestinationDomainLen = 253
+	maxContentHashLen       = 128
+	maxOSUsernameLen        = 256
+)
+
+// validatePasteEvent validates one event's destination_domain (must be
+// non-empty, within maxDestinationDomainLen, and match the server-side
+// allowlist -- never trusts the client's own classification, same
+// principle as B1's background.js re-checking domains.js) and occurred_at
+// (must be RFC3339), returning a PasteEventInput with OrgID/
+// SourceEndpointID left zero for the caller to fill in -- they differ per
+// entry point: IngestPasteEvents parses org_id per-event from the request
+// body; ingest.go's processPasteEventRelayItem (B-035) uses the single
+// server-resolved orgID for the whole batch item. Shared so the two
+// ingestion paths can never validate a paste event differently from each
+// other.
+func validatePasteEvent(destinationDomain, occurredAtStr string, contentLength *int32, contentHash, osUsername *string) (store.PasteEventInput, bool) {
+	if destinationDomain == "" || len(destinationDomain) > maxDestinationDomainLen {
+		return store.PasteEventInput{}, false
+	}
+	if !MatchesKnownPasteDestination(destinationDomain) {
+		return store.PasteEventInput{}, false
+	}
+	if contentHash != nil && len(*contentHash) > maxContentHashLen {
+		return store.PasteEventInput{}, false
+	}
+	if osUsername != nil && len(*osUsername) > maxOSUsernameLen {
+		return store.PasteEventInput{}, false
+	}
+	occurredAt, err := time.Parse(time.RFC3339, occurredAtStr)
+	if err != nil {
+		return store.PasteEventInput{}, false
+	}
+	return store.PasteEventInput{
+		DestinationDomain: strings.ToLower(destinationDomain),
+		ContentLength:     contentLength,
+		ContentHash:       contentHash,
+		OSUsername:        osUsername,
+		OccurredAt:        occurredAt,
+	}, true
 }
 
 // ── Read path (B-038): admin UI over captured paste events ────────────────

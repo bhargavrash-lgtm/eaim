@@ -134,20 +134,22 @@ or prior context suggests otherwise, it is wrong; trust this line.
   a warning instead of closed — see B-037 below for the required
   follow-up before customer ship). Still no live production install of
   the extension itself in the deployment sense (local unpacked-load
-  only; enterprise force-install policy documented, not configured), and
-  B-035 (paste events landing in the raw agent-report JSON blob rather
-  than literally in B-032's `paste_events` table) is still open — that
-  gap is unaffected by B1, since it's purely a server-side
-  (`eami-collector`/`eami-api`) wiring task. **B2 (admin UI) now exists**
-  — B-038 (2026-08-03), `eami-ui`'s new `/paste-events` page + two new
-  `eami-api` GET routes, built directly against `paste_events` (not the
-  interim blob). **Confirmed live via direct query that this makes B-035
-  a hard practical blocker, not just a tidiness item**: the real `Dev
-  Org` has zero rows in `paste_events` today (only B-032's own disposable
-  synthetic test orgs have rows there), so B-038's UI is fully built,
-  tested, and ready, but shows an honest empty state for any real org
-  until B-035 wires real events into that table. B-035's priority raised
-  to High and it is now the explicit next task, per the user's direction.
+  only; enterprise force-install policy documented, not configured).
+  **B2 (admin UI) now exists** — B-038 (2026-08-03), `eami-ui`'s new
+  `/paste-events` page + two new `eami-api` GET routes, built directly
+  against `paste_events` (not the interim blob). At the time B-038
+  shipped, the real `Dev Org` had zero rows in `paste_events` (only
+  B-032's own disposable synthetic test orgs had rows there), so the UI
+  was fully built and tested but showed an honest empty state for any
+  real org. **B-035 (2026-08-04) has since closed that gap**: paste
+  events relayed by B0 now land directly in `paste_events`, not
+  `endpoint_reports`' raw blob — B-038's UI should now show real data
+  with zero code changes on its side, exactly as designed. The brief's
+  own assumption that `eami-collector` resolves org context was
+  investigated and found wrong (it resolves nothing — only `eami-api`'s
+  `GetDefaultOrgID` does), so the fix landed entirely in `eami-api`, with
+  zero changes to `eami-agent`/`eami-collector`. This closes the last
+  open item in the paste-detection epic (B-032→B-034→B-036→B-038→B-035).
 - **B-037 (open, High priority before any customer install):** the
   `nmlauncher` fail-open fix above is an explicitly user-accepted
   dev-testing convenience, not the final security posture — the
@@ -180,7 +182,64 @@ or prior context suggests otherwise, it is wrong; trust this line.
   project's own `installer/build.ps1` both run for real on this machine.
 
 ## Last updated
-2026-08-03 by Claude Code — B-038: B2, the first admin UI over B-032's
+2026-08-04 by Claude Code — B-035: paste events wired into the real
+`paste_events` table, closing the last open item in the paste-detection
+epic (B-032→B-034→B-036→B-038→B-035, in build order). The brief's own
+assumption ("`eami-collector` already resolves org context for other
+ingest paths") was investigated per its own explicit instruction and
+found **not accurate** — confirmed by grep that `eami-collector` resolves
+no `org_id` anywhere in its code at all; only `eami-api`'s `IngestBatch`
+does, via the pre-existing `GetDefaultOrgID` ("oldest org") single-tenant
+placeholder. Traced the wire format end-to-end and found `eami-agent`'s
+native-messaging relay (B0) already sends paste events through the
+existing, completely unmodified `/v1/ingest`→buffer→forward→
+`/v1/ingest/batch` pipeline — so **the entire fix landed in `eami-api`
+alone, zero changes to `eami-agent` or `eami-collector`**, a real
+simplification over the brief's own initial sketch (which anticipated a
+new `eami-collector` relay route).
+
+`processIngestItem` now detects a paste-event-only item (`rep.PasteEvents
+!= nil`) and routes it to a new `processPasteEventRelayItem`, which
+resolves the endpoint via B-032's non-clobbering `ResolvePasteSourceEndpoint`
+(not `UpsertAgentEndpoint`, which would otherwise blank out a real
+endpoint's `agent_version`/`os_info` with this item's empty scan fields —
+a real correctness bug found and designed around *before* writing any
+code, not discovered after) and writes via `BatchInsertPasteEvents`,
+never touching `endpoint_reports` for that item. `org_id` is always the
+value `IngestBatch` already resolved server-side — `agentReport` has no
+field anywhere a compromised `eami-agent` could use to influence it,
+structurally, not by convention.
+
+**Reviewer + security subagent passes both ran** (mandatory, org-
+resolution trust boundary). Security review: no High/Medium findings;
+confirmed the design stays safe if `GetDefaultOrgID` is ever replaced by
+real multi-tenant resolution, as long as whatever replaces it keeps
+deriving `orgID` from an authenticated channel rather than request-body
+fields. Code review caught a real Medium-High bug before ship: the
+original branch condition (`len(rep.PasteEvents) > 0`) couldn't
+distinguish an absent `paste_events` key from an empty-but-present `[]`
+— an edge case that would have silently fallen through to the clobbering
+path — fixed (checks `!= nil` instead) and locked in with a new
+regression test. Both reviews independently flagged missing length/
+array-size caps; added.
+
+6 new integration tests (`ingest_paste_relay_test.go`), all posting the
+exact JSON shape a real B0 relay produces. **Verified 2026-08-04 with a
+real toolchain: `go build`/`go vet`/`go test ./...` clean across
+`eami-api`, plus `eami-agent`/`eami-collector`/`eami-gateway` all
+confirmed still building clean** (proving the "zero changes needed"
+claim, not just asserting it). A genuine environment issue was hit and
+worked around mid-task, unrelated to this code: this machine's
+`localhost` resolves IPv6-first, and Docker Desktop's IPv6 port-forward
+here accepts the TCP handshake but silently drops all data after —
+diagnosed with a minimal standalone Go probe, worked around via
+`TEST_DATABASE_URL` forcing IPv4 for test runs (no code changes), full
+stack confirmed healthy via `127.0.0.1` afterward.
+
+Full writeup in `BUILT.md`'s `eami-api` section and `BACKLOG.md`'s B-035
+entry.
+
+Prior entry, still accurate: 2026-08-03 by Claude Code — B-038: B2, the first admin UI over B-032's
 `paste_events` (new `eami-ui` page at `/paste-events`, under the
 `Operations` sidebar group, plus two new `eami-api` GET routes:
 `/v1/paste-events` and `/v1/paste-events/timeseries`). Placement decided
