@@ -6,6 +6,27 @@ import (
 	"time"
 )
 
+// TestEscapeSlackText proves the security-review-caught fix: fields that
+// can originate from an untrusted/compromised caller (agent name, tool,
+// action, session ID) must have Slack's mrkdwn special characters escaped
+// before being interpolated into a notification a human approver reads,
+// so an attacker can't inject a fake <url|label> link or misleading
+// formatting into the approval decision UI.
+func TestEscapeSlackText(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"plain text", "plain text"},
+		{"<https://evil.example.com|Click here>", "&lt;https://evil.example.com|Click here&gt;"},
+		{"a & b", "a &amp; b"},
+		{"<a&b>", "&lt;a&amp;b&gt;"}, // & must be escaped first, not double-escaped via &lt;/&gt;
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := escapeSlackText(c.in); got != c.want {
+			t.Errorf("escapeSlackText(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // TestHandleNotification_PanicResolvingOneApproval_DoesNotCrash proves
 // acceptance criterion #2 for the approval router: a panic processing one
 // notification doesn't propagate out of handleNotification. resolve()'s own

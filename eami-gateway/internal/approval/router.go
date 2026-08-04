@@ -22,12 +22,16 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/eami/gateway/internal/proxy"
@@ -87,10 +91,40 @@ func New(
 	}
 }
 
+// defaultRiskLevel is used for every approval request until this codebase
+// has an actual risk-classification concept to derive it from (there is
+// none anywhere in the policy/schema today -- confirmed by inspection of
+// policies/policy_conditions, not assumed). "medium" is a defensible,
+// valid middle value under the risk_level CHECK constraint, not a
+// fabricated signal presented as real classification. See BACKLOG.md for
+// the follow-up item tracking this as a real, still-open design gap.
+const defaultRiskLevel = "medium"
+
 // Submit persists an approval request to approval_requests, fires a Slack
 // notification, and returns the new approval UUID. The caller must then call
 // Hold() with the returned ID to block until a decision arrives.
+//
+// approval_requests has five NOT NULL columns this function must supply
+// that the Request the dispatch pipeline builds doesn't carry any richer
+// signal for today: justification, risk_level, expires_at,
+// gateway_session_id, gateway_node_address. Kept deliberately synthesized
+// from data already available here (req.Tool/req.Action, r.holdTimeout,
+// req.SessionID, this process's own hostname) rather than threading the
+// policy engine's real escalation reason or the configured listen address
+// through from cmd/gateway/main.go -- a scoped decision, not an oversight;
+// see the doc comments on justification/gateway_node_address below for the
+// exact tradeoff.
 func (r *Router) Submit(ctx context.Context, req Request) (string, error) {
+	// org_id/agent_id are NOT NULL FK columns (schema.sql). The original
+	// code passed them through a nilIfEmpty helper that turned an empty
+	// string into SQL NULL -- for a NOT NULL column that would just
+	// reproduce this same bug class as a confusing DB constraint-violation
+	// error instead of a clear one (code review, this task). Validated
+	// directly here instead; nilIfEmpty had no other caller and was removed.
+	if req.OrgID == "" || req.AgentID == "" {
+		return "", fmt.Errorf("approval: org_id and agent_id are required")
+	}
+
 	approvalID, err := newUUID()
 	if err != nil {
 		return "", fmt.Errorf("approval: generate id: %w", err)
@@ -101,18 +135,46 @@ func (r *Router) Submit(ctx context.Context, req Request) (string, error) {
 		return "", fmt.Errorf("approval: marshal parameters: %w", err)
 	}
 
+	// justification: synthesized from the tool/action already in Request,
+	// not the policy engine's actual per-rule escalation reason (that
+	// lives in policy.Decision.Reason, which never reaches this function
+	// -- threading it through would mean changing cmd/gateway/main.go's
+	// dispatch closure, out of this fix's scope). Truthful (every
+	// escalation genuinely did match some policy for this exact
+	// tool/action), just less specific than the real reason would be.
+	justification := fmt.Sprintf("Escalated by policy: %s.%s", req.Tool, req.Action)
+
+	// gateway_node_address: this process's own hostname, not the
+	// configured listen address (cfg.ListenAddr) -- getting that would
+	// require a new Router constructor parameter threaded from main.go,
+	// same out-of-scope tradeoff as justification above. os.Hostname()
+	// keeps this fix fully self-contained in this package.
+	nodeAddress, hostErr := os.Hostname()
+	if hostErr != nil || nodeAddress == "" {
+		nodeAddress = "unknown"
+	}
+
+	expiresAt := time.Now().Add(r.holdTimeout)
+
 	_, err = r.pool.Exec(ctx, `
 		INSERT INTO approval_requests
-			(id, org_id, agent_id, agent_name, tool_name, action, parameters, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+			(id, org_id, agent_id, agent_name, tool_name, action, parameters,
+			 justification, risk_level, expires_at, gateway_session_id,
+			 gateway_node_address, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
 	`,
 		approvalID,
-		nilIfEmpty(req.OrgID),
-		nilIfEmpty(req.AgentID),
+		req.OrgID,
+		req.AgentID,
 		req.AgentName,
 		req.Tool,
 		req.Action,
 		params,
+		justification,
+		defaultRiskLevel,
+		expiresAt,
+		req.SessionID,
+		nodeAddress,
 	)
 	if err != nil {
 		return "", fmt.Errorf("approval: insert request: %w", err)
@@ -130,9 +192,11 @@ func (r *Router) Submit(ctx context.Context, req Request) (string, error) {
 }
 
 // Hold registers a pending waiter for approvalID and blocks until:
-//   - a decision arrives via Run() → if "allowed", forwards via proxy; if "denied", returns error
-//   - holdTimeout elapses → auto-denies and returns an error
-//   - ctx is cancelled → returns ctx.Err()
+//   - a decision arrives via Run() → if "approved", forwards via proxy; any
+//     other status (denied/expired/etc.) returns an error
+//   - holdTimeout elapses → marks the request expired and returns an error,
+//     unless a decision already committed in the same instant (see below)
+//   - ctx is cancelled (not a timeout) → returns ctx.Err(), no DB write
 func (r *Router) Hold(ctx context.Context, approvalID string, req Request) (json.RawMessage, error) {
 	entry := &pendingEntry{
 		ch:  make(chan decisionResult, 1),
@@ -149,18 +213,57 @@ func (r *Router) Hold(ctx context.Context, approvalID string, req Request) (json
 		return res.data, res.err
 
 	case <-holdCtx.Done():
-		// Record the timeout in the DB so eami-api knows the request expired.
-		_, _ = r.pool.Exec(context.Background(), `
-			UPDATE approval_requests
-			SET decision = 'denied', reason = 'timed out', decided_at = now()
-			WHERE id = $1 AND decision IS NULL
-		`, approvalID)
-
-		if holdCtx.Err() == context.DeadlineExceeded {
-			slog.Warn("approval: hold timed out", "approval_id", approvalID, "timeout", r.holdTimeout)
-			return nil, fmt.Errorf("approval timed out after %s", r.holdTimeout)
+		// Security review (this task) flagged a real timing race: Go's
+		// select doesn't have to prefer entry.ch just because a decision
+		// technically arrived a moment earlier, so a genuinely approved
+		// action could otherwise be reported as "timed out" and never
+		// forwarded even though the DB itself was never wrong. One last
+		// non-blocking check before falling through to the timeout path.
+		select {
+		case res := <-entry.ch:
+			return res.data, res.err
+		default:
 		}
-		return nil, holdCtx.Err()
+
+		if holdCtx.Err() != context.DeadlineExceeded {
+			// Parent ctx was cancelled (e.g. caller disconnected), not a
+			// real timeout -- don't write a misleading 'expired' status
+			// for what was actually a cancellation.
+			return nil, holdCtx.Err()
+		}
+
+		// Only commit 'expired' if the row is still genuinely pending. If
+		// eami-api's DecideApproval already committed a real decision in
+		// this same narrow window (after resolve() started but before it
+		// reached entry.ch, or before resolve() ran at all), honor that
+		// decision instead of overwriting it with a stale 'expired'
+		// status and reporting a bogus timeout for an action that was
+		// actually approved.
+		var status, decisionReason string
+		bg := context.Background()
+		err := r.pool.QueryRow(bg, `
+			UPDATE approval_requests
+			SET status = 'expired', decision_reason = 'timed out', decided_at = now()
+			WHERE id = $1 AND status = 'pending'
+			RETURNING status, COALESCE(decision_reason, '')
+		`, approvalID).Scan(&status, &decisionReason)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				// The UPDATE's WHERE clause matched nothing -- status was
+				// already something other than 'pending'. Fetch the real
+				// decision and honor it rather than declaring a timeout.
+				if fetchErr := r.pool.QueryRow(bg, `
+					SELECT status, COALESCE(decision_reason, '') FROM approval_requests WHERE id = $1
+				`, approvalID).Scan(&status, &decisionReason); fetchErr == nil {
+					res := r.outcomeFromStatus(ctx, approvalID, req, status, decisionReason)
+					return res.data, res.err
+				}
+			}
+			slog.Warn("approval: failed to record timeout", "approval_id", approvalID, "err", err)
+		}
+
+		slog.Warn("approval: hold timed out", "approval_id", approvalID, "timeout", r.holdTimeout)
+		return nil, fmt.Errorf("approval timed out after %s", r.holdTimeout)
 	}
 }
 
@@ -252,12 +355,18 @@ func (r *Router) resolve(ctx context.Context, approvalID string) {
 	}
 	entry := v.(*pendingEntry)
 
-	var decision, reason string
+	// status/decision_reason are the real approval_requests columns (the
+	// original code queried nonexistent decision/reason columns, which
+	// would have failed this query outright even with Submit()'s INSERT
+	// fixed). COALESCE keeps decisionReason as "" rather than NULL for
+	// the message-building below; status itself is NOT NULL in the
+	// schema so no COALESCE is needed for it.
+	var status, decisionReason string
 	err := r.pool.QueryRow(ctx, `
-		SELECT COALESCE(decision, ''), COALESCE(reason, '')
+		SELECT status, COALESCE(decision_reason, '')
 		FROM approval_requests
 		WHERE id = $1
-	`, approvalID).Scan(&decision, &reason)
+	`, approvalID).Scan(&status, &decisionReason)
 	if err != nil {
 		slog.Error("approval: fetch decision failed",
 			"approval_id", approvalID,
@@ -267,30 +376,50 @@ func (r *Router) resolve(ctx context.Context, approvalID string) {
 		return
 	}
 
-	switch decision {
-	case "allowed":
+	entry.ch <- r.outcomeFromStatus(ctx, approvalID, entry.req, status, decisionReason)
+}
+
+// outcomeFromStatus converts a fetched approval_requests status into a
+// decisionResult -- shared by resolve() (the LISTEN/NOTIFY path) and
+// Hold()'s timeout backstop (which re-checks the row directly if it was
+// already decided in the race window right at the timeout boundary), so
+// the two paths can never interpret the same status differently.
+func (r *Router) outcomeFromStatus(ctx context.Context, approvalID string, req Request, status, decisionReason string) decisionResult {
+	switch status {
+	case "approved":
+		// eami-api's DecideApproval (approvals.go) validates and writes
+		// only "approved"/"denied" -- matching that vocabulary exactly is
+		// the whole point of this fix; the original code checked for
+		// "allowed", which eami-api never writes.
 		slog.Info("approval: approved — forwarding to proxy", "approval_id", approvalID)
 		tr, proxyErr := r.fwd.Forward(ctx, proxy.ToolRequest{
-			ToolName:  entry.req.Tool,
-			Action:    entry.req.Action,
-			Params:    entry.req.Parameters,
-			SessionID: entry.req.SessionID,
+			ToolName:  req.Tool,
+			Action:    req.Action,
+			Params:    req.Parameters,
+			SessionID: req.SessionID,
 		})
-		entry.ch <- decisionResult{data: tr.Body, err: proxyErr}
+		return decisionResult{data: tr.Body, err: proxyErr}
 
-	case "denied":
-		msg := "approval denied"
-		if reason != "" {
-			msg = "approval denied: " + reason
-		}
-		slog.Info("approval: denied", "approval_id", approvalID, "reason", reason)
-		entry.ch <- decisionResult{err: fmt.Errorf("%s", msg)}
+	case "pending":
+		// Notification arrived before eami-api's UPDATE actually
+		// committed (shouldn't happen -- NOTIFY fires after the row is
+		// written -- but defensive, not assumed impossible). Return an
+		// error; the waiter will see it, and Hold()'s own timeout is the
+		// backstop if this repeats.
+		slog.Warn("approval: notified but status still pending", "approval_id", approvalID)
+		return decisionResult{err: fmt.Errorf("approval: status still pending for %s", approvalID)}
 
 	default:
-		// Decision not yet set — notification arrived before eami-api committed?
-		// Return an error; the waiter will see it.
-		slog.Warn("approval: decision row has no decision", "approval_id", approvalID, "decision", decision)
-		entry.ch <- decisionResult{err: fmt.Errorf("approval: decision row has no decision for %s", approvalID)}
+		// "denied", "expired", or any other non-approved status all
+		// block the action the same way -- the original action must
+		// never proceed once anything other than an explicit approval
+		// has been recorded.
+		msg := fmt.Sprintf("approval %s", status)
+		if decisionReason != "" {
+			msg += ": " + decisionReason
+		}
+		slog.Info("approval: not approved", "approval_id", approvalID, "status", status, "reason", decisionReason)
+		return decisionResult{err: fmt.Errorf("%s", msg)}
 	}
 }
 
@@ -304,10 +433,19 @@ func (r *Router) notifySlack(approvalID string, req Request) {
 	approveURL := fmt.Sprintf("%s/approvals/%s", r.uiBaseURL, approvalID)
 	denyURL := fmt.Sprintf("%s/approvals/%s?action=deny", r.uiBaseURL, approvalID)
 
+	// Security review (this task): AgentName/Tool/Action/SessionID can
+	// originate from an untrusted or compromised caller and were
+	// previously interpolated into the message text raw -- Slack's
+	// mrkdwn treats &, <, > specially (e.g. <url|label> link syntax), so
+	// an attacker-influenced value could inject a fake link or misleading
+	// formatting into what a human approver reads before making a
+	// judgment call. Escaped per Slack's own documented escaping rules;
+	// the message-sending mechanics below (client, request, goroutine)
+	// are unchanged.
 	payload := map[string]any{
 		"text": fmt.Sprintf(
 			"*EAMI Gateway — Approval Required*\n*Agent:* %s\n*Tool:* %s\n*Action:* %s\n*Session:* %s\n<%s|✅ Approve> | <%s|❌ Deny>",
-			req.AgentName, req.Tool, req.Action, req.SessionID,
+			escapeSlackText(req.AgentName), escapeSlackText(req.Tool), escapeSlackText(req.Action), escapeSlackText(req.SessionID),
 			approveURL, denyURL,
 		),
 	}
@@ -343,12 +481,15 @@ func (r *Router) notifySlack(approvalID string, req Request) {
 	}()
 }
 
-// nilIfEmpty returns nil for empty strings (for nullable UUID columns in Postgres).
-func nilIfEmpty(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
+// escapeSlackText escapes the three characters Slack's mrkdwn format
+// treats specially (&, <, >), per Slack's own documented escaping rules
+// (https://api.slack.com/reference/surfaces/formatting#escaping) -- must
+// replace & first so escaping < and > doesn't get double-escaped.
+func escapeSlackText(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
 }
 
 // newUUID generates a RFC 4122 v4 UUID without external dependencies.

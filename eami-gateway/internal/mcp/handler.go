@@ -239,8 +239,21 @@ func (h *Handler) ServeMessages(w http.ResponseWriter, r *http.Request) {
 	// Respond 202 immediately; result arrives via SSE stream.
 	w.WriteHeader(http.StatusAccepted)
 
+	// dispatch runs in a detached goroutine (the result arrives later via
+	// SSE, not as this handler's own response), but net/http cancels
+	// r.Context() the moment ServeHTTP returns -- which happens right
+	// after the 202 write above, before dispatch (including a
+	// potentially minutes-long approval Hold()) has any real chance to
+	// run. context.WithoutCancel keeps this goroutine's context alive
+	// for its own natural lifetime (dispatch/Submit/Hold already have
+	// their own internal timeouts) while still carrying any values the
+	// original request context set. Found live (B-039): every ESCALATE
+	// decision's Submit() failed with "context canceled" until this was
+	// fixed -- a real, separate root cause from the three in
+	// internal/approval/router.go, not previously known.
+	dispatchCtx := context.WithoutCancel(r.Context())
 	go func() {
-		result, err := h.dispatch(r.Context(), ac)
+		result, err := h.dispatch(dispatchCtx, ac)
 		if err != nil {
 			slog.Warn("mcp/messages: rejected", "agent", ac.AgentName, "err", err)
 			// Policy denials get a structured JSON-RPC error (code -32600 + data).

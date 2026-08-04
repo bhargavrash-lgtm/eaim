@@ -194,9 +194,118 @@ or prior context suggests otherwise, it is wrong; trust this line.
   `eami-agent/installer/Product.wxs` could only be reviewed by eye, never
   actually compiled locally. That gap is closed now: `wix build` and the
   project's own `installer/build.ps1` both run for real on this machine.
+- **The approval flow (human-in-the-loop AI-governance escalation) works
+  end-to-end for the first time — B-039 (2026-08-04)**. An original
+  module audit's three claimed root causes in
+  `eami-gateway/internal/approval/router.go` (a `Submit()` INSERT missing
+  5 `NOT NULL` columns; `Hold()`/`resolve()` querying nonexistent
+  `decision`/`reason` columns instead of the real `status`/
+  `decision_reason`; a `"allowed"` vs `eami-api`'s real `"approved"`
+  vocabulary mismatch) were all re-confirmed directly against current
+  code, not assumed still true, and all three fixed. **A fourth,
+  previously-unknown root cause was found live**: `internal/mcp/
+  handler.go`'s `ServeMessages` ran the real dispatch/`Submit()`/`Hold()`
+  logic in a goroutine passed the HTTP request's own context, which
+  `net/http` cancels the instant the handler returns (right after its
+  `202` response) — every escalation's `Submit()` was racing its own
+  context being torn down. Fixed with `context.WithoutCancel`, after
+  explicitly confirming with the user this justified going beyond
+  `router.go`'s originally stated file scope. `risk_level` remains a
+  hardcoded `"medium"` placeholder (no risk-classification concept exists
+  anywhere in the policy/schema — real design work queued as B-040, not
+  solved here). Proven live against the real `docker-compose` stack, not
+  just unit-tested: a real ESCALATE → real approval row → real admin
+  decide (approve and, separately, deny) → real gateway resume/block,
+  with Slack notification confirmed reached. **Unrelated bug found
+  incidentally, not fixed, queued as B-041**: `eami-gateway`'s JWT
+  revocation list fails to hydrate on every startup (queries a column,
+  `expires_at`, that doesn't exist on `revoked_ai_tokens`) — previously-
+  revoked tokens silently stop staying revoked across a restart.
+- **This machine's `localhost` resolves IPv6 (`::1`) before IPv4
+  (`127.0.0.1`), and this Docker Desktop instance's IPv6 port-forwarding
+  accepts the TCP handshake but silently drops all subsequent data** —
+  discovered 2026-08-04 during B-035's test runs (diagnosed with a
+  minimal standalone Go probe) and hit again identically during B-039's
+  live verification. Any future session running Go tests or ad-hoc
+  clients against this stack's published ports should default to
+  `127.0.0.1` explicitly (or `TEST_DATABASE_URL`, already this
+  convention) rather than `localhost`, to avoid silent multi-second hangs
+  that look like a real connectivity problem but aren't.
 
 ## Last updated
-2026-08-04 by Claude Code — B-037: `nmlauncher`'s parent-process allowlist
+2026-08-04 by Claude Code — B-039: the approval flow (flagship human-in-
+the-loop AI-governance mechanism) completes a real cycle for the first
+time. An original module audit's three claimed bugs in
+`eami-gateway/internal/approval/router.go` were re-verified directly
+against current code before touching anything, per the task's own
+instruction — all three still held exactly as described: `Submit()`'s
+INSERT omitted 5 real `NOT NULL` `approval_requests` columns
+(`justification`/`risk_level`/`expires_at`/`gateway_session_id`/
+`gateway_node_address`); `Hold()`/`resolve()` queried nonexistent
+`decision`/`reason` columns (real: `status`/`decision_reason` — plausible
+cause noted: `audit_log`, a different table, has its own `decision`
+column with the exact `'allowed'`/`'denied'` vocabulary this code
+mistakenly reused); `resolve()` checked for `"allowed"`, but `eami-api`'s
+`DecideApproval` (independently re-confirmed correct, unchanged) only
+ever writes `"approved"`/`"denied"`. Fixed, confined to `router.go` per
+an explicit scope decision the user confirmed: `justification`
+synthesized from `req.Tool`/`req.Action` and `gateway_node_address` from
+`os.Hostname()`, rather than threading the real policy reason/configured
+listen address through from `main.go`; `risk_level` defaults to
+`"medium"` (no risk-classification concept exists anywhere in the
+policy/schema — new B-040 queued for the real design work).
+
+**A fourth, previously-unknown root cause was found only during live
+verification** — outside `router.go`, in `internal/mcp/handler.go` —
+and fixed only after explicitly asking the user whether to expand scope,
+since it wasn't in the brief's stated file list: `ServeMessages` ran the
+real dispatch/`Submit()`/`Hold()` logic in a detached goroutine passed
+`r.Context()`, which `net/http` cancels the instant the handler returns
+(right after its `202` response) — every escalation's `Submit()` was
+racing its own context being torn down and losing almost every time,
+regardless of the other three fixes. Fixed with
+`context.WithoutCancel(r.Context())`.
+
+Reviewer + security subagent passes both ran (mandatory — this is the
+AI-governance human-in-the-loop control). Security review found no
+fail-open bypass, one real Medium (a genuine timing race at the `Hold()`
+timeout boundary could silently drop an already-approved action — fixed
+with a non-blocking channel re-check plus a conditional `UPDATE ...
+RETURNING` that honors an already-decided row instead of clobbering it),
+one Low (Slack notification text wasn't escaping attacker-influenceable
+fields against Slack's own mrkdwn special characters — fixed). Code
+review caught a real Medium (`nilIfEmpty` silently turned an empty
+`org_id`/`agent_id` into SQL `NULL` for two `NOT NULL` FK columns — would
+have reproduced this exact bug class — fixed) and a stale doc comment.
+
+**Proven live, end-to-end, against the real running `docker-compose`
+stack — every acceptance criterion, not just unit tests:** rebuilt and
+redeployed both `eami-gateway` and `eami-api` first (this session's own
+standing lesson about stale images, applied proactively this time).
+Seeded a real org/agent/ESCALATE policy/admin user, got a real signed
+agent JWT, opened a real SSE session, posted a real `tool_call` — a real
+`approval_requests` row appeared, was visible via the real admin-login +
+`GET /v1/approvals/{id}`, a real `POST .../decide {"approved"}` correctly
+resumed the action via a temporary local fake downstream, a second real
+escalation denied the same way was correctly and permanently blocked, and
+Slack was confirmed reached via a temporary local fake webhook (the
+real configured webhook deliberately left untouched, not spammed with a
+test message). A test-environment mistake (a stray anonymous Docker
+volume briefly broke the gateway's config load) was caught and fixed
+transparently before finishing, with the real stack confirmed healthy
+afterward. `go build`/`go vet`/`go test ./...` clean across both
+`eami-gateway` and `eami-api`.
+
+One unrelated bug found incidentally during live verification, not fixed
+(out of scope, queued as B-041): `eami-gateway`'s JWT revocation list
+fails to hydrate on every startup (queries a column, `expires_at`, that
+doesn't exist on `revoked_ai_tokens`) — previously-revoked tokens
+silently stop staying revoked across a restart.
+
+Full writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
+B-039/B-040/B-041 entries.
+
+Prior entry, still accurate: 2026-08-04 by Claude Code — B-037: `nmlauncher`'s parent-process allowlist
 fix, closing tonight's own dev-testing weakening (fail-open) with a
 properly researched fix rather than just re-flipping a flag. Investigated
 before building, per the task brief: confirmed (Chromium release-channel
