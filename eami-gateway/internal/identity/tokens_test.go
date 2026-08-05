@@ -270,7 +270,9 @@ func TestManager_Validate_RevokedToken_ReturnsError(t *testing.T) {
 	jti := claims.ID
 
 	// Revoke the token.
-	m.Revoke(jti, claims.Subject)
+	if err := m.Revoke(jti, claims.Subject); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
 
 	// Validate after revocation — must fail.
 	_, err = m.Validate(resp.Token)
@@ -349,7 +351,9 @@ func TestManager_Validate_RevokedToken_SurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pre-revocation Validate: %v", err)
 	}
-	mA.Revoke(claimsA.ID, claimsA.Subject)
+	if err := mA.Revoke(claimsA.ID, claimsA.Subject); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
 
 	// Simulate restart: new Manager B with the same key file.
 	// It should know about the prior revocation (by loading from DB).

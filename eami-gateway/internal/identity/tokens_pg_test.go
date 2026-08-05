@@ -172,7 +172,9 @@ func TestManagerWithDB_Validate_RevokedToken_SurvivesRestart(t *testing.T) {
 	if claimsA.Subject == env.agentID.String() {
 		t.Fatal("test setup bug: Subject should be the \"agent:<name>\" form, not already a UUID")
 	}
-	mA.Revoke(claimsA.ID, env.agentID.String()) // the resolved UUID, not claimsA.Subject
+	if err := mA.Revoke(claimsA.ID, env.agentID.String()); err != nil { // the resolved UUID, not claimsA.Subject
+		t.Fatalf("Revoke: %v", err)
+	}
 
 	// Simulate a gateway restart: new Manager B, same key file, same DB.
 	mB, err := NewManagerWithDB(keyPath, 300, "eami-gateway", env.pool)

@@ -98,6 +98,44 @@ func (r *Registry) queryByName(ctx context.Context, name string) (*AgentRecord, 
 	return &rec, nil
 }
 
+// LookupByNameAndOrg resolves an agent by name, scoped to a specific org.
+//
+// name alone is NOT unique in gateway_agents -- only (org_id, name) is
+// (schema.sql's UNIQUE (org_id, name) constraint). LookupByName's
+// unscoped "WHERE name = $1 LIMIT 1" is safe for every existing caller
+// (internal/mcp, internal/episode) because their name always comes from a
+// signature-verified JWT sub, itself scoped to whichever single org issued
+// that token -- there is no cross-org ambiguity to exploit there, even
+// though the query itself doesn't enforce it. LookupByNameAndOrg exists
+// for callers where that guarantee doesn't hold: internal/identity's
+// revoke handler (B-042) accepts org_id as directly caller-supplied input
+// (no JWT backs it -- there's no session concept on that endpoint's
+// service-key auth path at all, matching internal/episode/http.go's own
+// documented org_id-is-caller-supplied trust boundary for its service-key
+// path), so an unscoped lookup there would let one org's caller resolve
+// -- and revoke a token for -- a different org's identically-named agent.
+//
+// Deliberately bypasses the name-only cache above: caching by name alone
+// would either serve the wrong org's cached record or require a cache-key
+// scheme change affecting LookupByName's existing callers, and this is a
+// low-frequency admin action, not a hot path that needs the 30s cache.
+func (r *Registry) LookupByNameAndOrg(ctx context.Context, name, orgID string) (*AgentRecord, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT id::text, org_id::text, name, scope, risk_tier, status
+		FROM gateway_agents
+		WHERE name = $1 AND org_id = $2
+		LIMIT 1
+	`, name, orgID)
+	var rec AgentRecord
+	if err := row.Scan(&rec.ID, &rec.OrgID, &rec.Name, &rec.Scope, &rec.RiskTier, &rec.Status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("%w: %s", ErrAgentNotFound, name)
+		}
+		return nil, fmt.Errorf("registry: query agent %q in org %q: %w", name, orgID, err)
+	}
+	return &rec, checkStatus(rec.Status)
+}
+
 func checkStatus(status string) error {
 	if status == "suspended" || status == "revoked" {
 		return fmt.Errorf("%w: status=%s", ErrAgentSuspended, status)

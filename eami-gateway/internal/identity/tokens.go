@@ -307,7 +307,12 @@ func (m *Manager) Validate(tokenStr string) (*Claims, error) {
 }
 
 // Revoke adds jti to the in-memory revocation set and persists it to the
-// backing store (file or DB) so that it survives gateway restarts.
+// backing store (file or DB) so that it survives gateway restarts. Returns
+// a persistence error rather than only logging it (B-042) — the in-memory
+// revocation still takes effect immediately regardless (this process
+// rejects the token right away), but a caller that needs the revocation to
+// survive a restart must know if persistence failed, not just this process's
+// own log stream.
 //
 // agentID must be the token's real gateway_agents.id UUID (required by
 // dbRevocationStore since revoked_ai_tokens.agent_id is a NOT NULL FK to
@@ -316,14 +321,15 @@ func (m *Manager) Validate(tokenStr string) (*Claims, error) {
 // Callers must resolve the subject to its UUID first, the same way
 // internal/mcp and internal/episode already do via
 // registry.LookupByName(strings.TrimPrefix(claims.Subject, "agent:")).
-func (m *Manager) Revoke(jti string, agentID string) {
+func (m *Manager) Revoke(jti string, agentID string) error {
 	m.revokedMu.Lock()
 	m.revoked[jti] = struct{}{}
 	m.revokedMu.Unlock()
 
 	if err := m.store.save(context.Background(), jti, agentID); err != nil {
-		slog.Error("identity: failed to persist revocation", "jti", jti, "err", err)
+		return fmt.Errorf("identity: persist revocation: %w", err)
 	}
+	return nil
 }
 
 // PublicKeyPEM returns the public key in PEM format.

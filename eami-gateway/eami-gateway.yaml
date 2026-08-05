@@ -55,6 +55,12 @@ api:
   # is validated inbound) so a leak of one doesn't also grant the other.
   # Generate: openssl rand -hex 32. Override via GATEWAY_EPISODE_READ_SERVICE_KEY.
   episode_read_service_key: ""
+  # Required. Dedicated secret validated on inbound calls to
+  # POST /v1/gateway/tokens/{jti}/revoke (B-042). Gateway-local only
+  # today — no caller exists yet, see BACKLOG.md B-042. Separate from the
+  # other keys above so a leak of one doesn't also grant the others.
+  # Generate: openssl rand -hex 32. Override via GATEWAY_TOKEN_REVOKE_SERVICE_KEY.
+  token_revoke_service_key: ""
 
 # Logging
 log:

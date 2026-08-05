@@ -298,9 +298,12 @@ func run() error {
 	}
 
 	mcpHandler := mcp.NewHandler(idManager, agentRegistry, dispatch)
+	// agentRegistry (*registry.Registry) satisfies identity.AgentResolver structurally.
+	revokeHandler := identity.NewRevokeHandler(idManager, agentRegistry, cfg.API.TokenRevokeServiceKey)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/gateway/tokens", idManager.HandleIssue)
+	mux.HandleFunc("POST /v1/gateway/tokens/{jti}/revoke", revokeHandler.HandleRevoke)
 	mux.HandleFunc("/.well-known/gateway-jwks.json", idManager.HandleJWKS)
 	// MCP SSE transport (ADR-004):
 	//   GET  /v1/mcp/sse      - persistent SSE stream per agent session

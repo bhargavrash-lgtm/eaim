@@ -118,6 +118,9 @@ services:
       GATEWAY_UI_BASE_URL: ${GATEWAY_UI_BASE_URL:-http://localhost:5173}
       GATEWAY_API_SERVICE_KEY: ${GATEWAY_API_SERVICE_KEY}
       GATEWAY_EPISODE_READ_SERVICE_KEY: ${GATEWAY_EPISODE_READ_SERVICE_KEY}
+      # Gates POST /v1/gateway/tokens/{jti}/revoke (B-042). Gateway-local
+      # only today -- no caller exists yet, see BACKLOG.md B-042.
+      GATEWAY_TOKEN_REVOKE_SERVICE_KEY: ${GATEWAY_TOKEN_REVOKE_SERVICE_KEY}
       GATEWAY_PPROF_ADDR: ${GATEWAY_PPROF_ADDR:-}
     volumes:
       - gateway_certs:/certs

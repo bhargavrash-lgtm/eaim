@@ -65,6 +65,15 @@ type APIConfig struct {
 	// memory proxy. Keeping them distinct means a leak of one does not also
 	// grant the other capability.
 	EpisodeReadServiceKey string `yaml:"episode_read_service_key"`
+
+	// TokenRevokeServiceKey is the shared secret required (as X-Service-Key)
+	// on inbound calls to POST /v1/gateway/tokens/{jti}/revoke (B-042, see
+	// internal/identity/revoke_http.go). Gateway-local only today — no
+	// caller exists yet (a future eami-api admin-facing proxy is the
+	// intended consumer, not built as of B-042). Kept separate from
+	// ServiceKey/EpisodeReadServiceKey so a leak of one does not also grant
+	// the others.
+	TokenRevokeServiceKey string `yaml:"token_revoke_service_key"`
 }
 
 // LogConfig controls logging behaviour.
@@ -136,6 +145,9 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("GATEWAY_EPISODE_READ_SERVICE_KEY"); v != "" {
 		cfg.API.EpisodeReadServiceKey = v
+	}
+	if v := os.Getenv("GATEWAY_TOKEN_REVOKE_SERVICE_KEY"); v != "" {
+		cfg.API.TokenRevokeServiceKey = v
 	}
 
 	// Policy rules file: default to empty (allows gateway to start without rules)
@@ -235,6 +247,9 @@ func validate(cfg *Config) error {
 	}
 	if cfg.API.EpisodeReadServiceKey == "" {
 		return fmt.Errorf("config: api.episode_read_service_key is required (gates full episode content access — see GATEWAY_EPISODE_READ_SERVICE_KEY)")
+	}
+	if isPlaceholderSecret(cfg.API.TokenRevokeServiceKey) {
+		return fmt.Errorf("config: api.token_revoke_service_key (GATEWAY_TOKEN_REVOKE_SERVICE_KEY) must be set to a real secret, not empty or a known placeholder — gates AI token revocation (generate: openssl rand -hex 32)")
 	}
 
 	// Bounds check

@@ -258,6 +258,66 @@ or prior context suggests otherwise, it is wrong; trust this line.
   and confirming the gateway crash-loops rather than starting degraded.
   Full writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-041/B-042 entries.
+- **B-042 (done, 2026-08-05):** `POST /v1/gateway/tokens/{jti}/revoke` is
+  now real and wired — `Manager.Revoke` has a live HTTP caller for the
+  first time. Two deliberate, investigated, user-approved deviations from
+  `api/openapi.yaml`: (1) auth is a new gateway-local `X-Service-Key`
+  (`GATEWAY_TOKEN_REVOKE_SERVICE_KEY`, required/fail-closed at startup),
+  not the documented `BearerAuth` — that scheme is `eami-api`'s
+  user-session JWT, which `eami-gateway` architecturally cannot validate.
+  A real future proxy (`eami-api`-hosted, `requireRole("admin",
+  "operator")`, matching `/v1/gateway/agents*`'s already-shipped
+  precedent for this exact class of action) is the intended long-term
+  caller, not built here — would have required solving an unscoped
+  problem (no "list active tokens" surface exists for an admin to pick a
+  `jti` from). (2) the path uses `{jti}` (the token's ID), not `{token}`
+  (the full JWT `openapi.yaml` implies), so a live bearer credential
+  never lands in a URL/access log. Both documented explicitly in
+  `revoke_http.go`'s doc comment. Closes B-041's two flagged latent gaps:
+  the handler resolves `agent_name` via the registry before calling
+  `Revoke` (never passes a raw JWT `sub`), and `Manager.Revoke` now
+  returns an `error` (the one approved exception to `tokens.go` staying
+  frozen this task) instead of only `slog.Error`-logging a persistence
+  failure — the handler surfaces a real `500`, never a false `204`.
+  **A third, more severe gap found during this task's own security
+  review, required to be fixed in-task per explicit user direction (not
+  deferred the way B-041→B-042 itself was staged):** `registry.
+  LookupByName`'s query has no `org_id` filter — safe for every existing
+  caller only because their `agent_name` always comes from a
+  signature-verified, org-bound JWT `sub`; this handler is the first
+  caller passing a raw, client-supplied `agent_name`, so an Org A caller
+  could otherwise resolve, and cause the revocation of, Org B's
+  identically-named agent's token. Fixed with a new, purely additive
+  `registry.LookupByNameAndOrg` (`LookupByName` and all its existing
+  callers untouched — confirmed via diff) and a required, UUID-validated
+  `org_id` in the revoke request body — caller-supplied and trusted,
+  matching `episode/http.go`'s own already-shipped precedent for its
+  service-key path's `org_id` param, not a new trust model invented here.
+  Reviewer + security passes ran twice (base implementation, then a
+  focused follow-up on the org-scoping fix) — both clean against the
+  final diff. One more real gap found by the initial passes, **not**
+  fixed here per the user's explicit direction: `Manager.Revoke()` only
+  updates the in-memory set on whichever node handles the request — no
+  real cross-node broadcast exists despite schema/doc comments claiming
+  Serf-based multi-node support — filed as **B-043** (predates B-042
+  entirely; this task just made it concretely reachable for the first
+  time). 9 new tests (5 real-Postgres integration tests including a
+  cross-org-rejection test proving the org-scoping fix — a real second
+  org, a real agent, wrong `org_id` → `403`, token stays valid — plus 4
+  config tests for the new required secret). **Verified 2026-08-05 with a
+  real toolchain: `go build`/`go vet`/`go test ./...` clean across the
+  full `eami-gateway` module** (26 tests in `internal/identity` alone).
+  **Live-verified end-to-end against the real `docker-compose` stack,
+  rebuilt fresh**: a wrong-service-key revoke attempt returned real `401`
+  with the token confirmed still valid (AC2); a correctly-authenticated
+  request returned real `204`, the row landed in `revoked_ai_tokens` with
+  the correct `agent_id`, and a subsequent request with that token
+  returned `401 ... has been revoked` (AC1) — then, beyond the brief's
+  minimum, the gateway was restarted and the same HTTP-route-driven
+  revocation was confirmed to survive it too, proving the full
+  B-041→B-042 chain works together end-to-end. Full writeup in
+  `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s B-042/B-043
+  entries.
 - **This machine's `localhost` resolves IPv6 (`::1`) before IPv4
   (`127.0.0.1`), and this Docker Desktop instance's IPv6 port-forwarding
   accepts the TCP handshake but silently drops all subsequent data** —
@@ -270,7 +330,114 @@ or prior context suggests otherwise, it is wrong; trust this line.
   that look like a real connectivity problem but aren't.
 
 ## Last updated
-2026-08-04 by Claude Code — B-041: `eami-gateway`'s JWT revocation
+2026-08-05 by Claude Code — B-042: `POST /v1/gateway/tokens/{jti}/revoke`
+is real and wired, closing the "Manager.Revoke has zero production
+callers" gap B-041 left open. Two deliberate, investigated, user-approved
+deviations from `api/openapi.yaml`, both documented in `revoke_http.go`'s
+own doc comment rather than silent: (1) auth is a new gateway-local
+`X-Service-Key` (`GATEWAY_TOKEN_REVOKE_SERVICE_KEY`, required/fail-closed
+at startup, same treatment as the pre-existing `EpisodeReadServiceKey`),
+not the documented `BearerAuth` — that scheme is explicitly defined
+elsewhere in the same spec as "JWT issued by `POST /v1/auth/login`",
+`eami-api`'s user-session JWT, which `eami-gateway` has no code path to
+validate at all (different issuer/key/claims). Real precedent found for
+the intended eventual shape: `eami-api/internal/api/router.go` already
+gates the structurally-identical `POST/PATCH/DELETE /v1/gateway/agents*`
+behind `requireRole("admin", "operator")` — building that full proxy now
+was explicitly considered and rejected as exceeding this task's scope (it
+would also require solving an unscoped problem: no "list active tokens"
+surface exists anywhere for an admin to pick a `jti` from). A real
+`eami-api`-hosted, role-gated proxy using this service key is the
+intended long-term caller, not built here. (2) the path uses `{jti}` (the
+token's ID) instead of `{token}` (the full JWT `openapi.yaml` implies),
+specifically so a live bearer credential never lands in a URL/access log.
+
+Closes B-041's two flagged latent gaps, confirmed against the actual
+review findings before treating them as fixed: the handler resolves
+`agent_name` via the registry before ever calling `Revoke` (never passes
+a raw JWT `sub` string); `Manager.Revoke(jti, agentID string)` now
+returns an `error` instead of only `slog.Error`-logging a persistence
+failure internally — the one approved exception to `tokens.go` staying
+otherwise frozen this task — so the handler surfaces a real `500`, never
+a false `204`, on a genuine DB failure.
+
+**A third, more severe gap found during this task's own security review —
+required to be fixed in-task per explicit user direction, not deferred
+the way B-041→B-042 itself was staged across two tasks:** `registry.
+LookupByName`'s query (`WHERE name = $1`, no `org_id` filter) is safe for
+every *existing* caller (`internal/mcp`, `internal/episode`) only because
+their `agent_name` always comes from a signature-verified JWT `sub`,
+itself inherently bound to one org at issuance. This new handler is the
+first caller passing a raw, client-supplied `agent_name` with no such
+cryptographic binding — since `gateway_agents.name` is only unique per
+`(org_id, name)` (`schema.sql`'s own constraint), an Org A caller could
+otherwise resolve, and cause the permanent-audit-record revocation of,
+Org B's identically-named agent's token. Fixed with a new, purely
+additive `registry.LookupByNameAndOrg(ctx, name, orgID string)` — direct
+`WHERE name = $1 AND org_id = $2`, deliberately uncached to avoid any
+interaction with `LookupByName`'s existing name-only cache —
+`LookupByName` itself and all its existing callers are completely
+untouched, confirmed via `git diff` (pure addition, zero deletions). The
+revoke request body now requires `org_id`, validated as a well-formed
+UUID before any query — caller-supplied and trusted, matching
+`episode/http.go`'s own already-shipped, already-documented precedent for
+its service-key path's `org_id` query param, not a new trust model
+invented for this task. Also correctly preserved, not accidentally
+dropped in the port: an agent whose registration is already
+suspended/revoked still resolves (only a genuinely-unknown name returns
+`nil`) — the handler deliberately treats revoking such an agent's token
+as valid, not an error, since a session established before suspension may
+still hold a live, revocable token.
+
+Reviewer + security subagent passes ran twice: an initial pass against
+the base implementation came back clean on the auth/persistence-error
+design and separately surfaced three findings — the org-scoping gap above
+(fixed), a real multi-node revocation-broadcast gap (`Manager.Revoke()`
+only updates the in-memory set on whichever node handles the request;
+`schema.sql`/`NewManagerWithDB`'s doc comments both claim Serf-based
+broadcast that a repo-wide grep confirmed doesn't exist anywhere —
+predates B-042 entirely, this task just made it concretely reachable for
+the first time; **not fixed here per the user's explicit direction, filed
+as new B-043**), and transient-DB-errors-collapsing-to-`403`-with-raw-
+error-text-in-the-response (confirmed to be a pre-existing pattern
+already shipped in `episode/http.go`/`mcp/handler.go`, not a regression
+introduced here — left as-is, matching this codebase's convention of not
+fixing unrelated pre-existing patterns outside a task's own diff). A
+focused follow-up pass, run specifically against the org-scoping fix
+after it was built, came back fully clean.
+
+9 new tests: `internal/identity/revoke_http_pg_test.go` (5 real-Postgres
+integration tests — happy path, wrong/missing service key, unknown agent,
+**cross-org agent_name rejection** proven with a real second org and a
+real agent rather than simulated, and a simulated persistence failure via
+a `fakeResolver` test seam that triggers a genuine FK violation) plus 4
+new/updated `internal/config/config_test.go` cases for the new required
+secret. **Verified 2026-08-05 with a real toolchain: `go build`/`go
+vet`/`go test ./...` all clean, 0 failures across the full `eami-gateway`
+module** — `internal/identity` alone now has 26 tests (17 pre-B-042 + 9
+new).
+
+**Live-verified end-to-end against the real `docker-compose` stack,
+rebuilt fresh first (not a stale image):** seeded a real org/
+`gateway_agents` row, issued a real token, confirmed it valid via a real
+`GET /v1/mcp/sse` request. **AC2**: a revoke attempt with the wrong
+`X-Service-Key` returned real `401`, token confirmed still valid
+immediately after. **AC1**: a request with the real service key, correct
+`agent_name`, and correct `org_id` returned real `204`; the row was
+confirmed present in `revoked_ai_tokens` with the correct `agent_id`; a
+subsequent request with that exact token returned `401 unauthorized:
+identity: token ... has been revoked`. **Went further than the brief's
+minimum:** restarted the `eami-gateway` container and confirmed this
+specific HTTP-route-driven revocation survives the restart too
+(`"identity: hydrated revocation list" count=1`, token still rejected
+afterward) — proving the full B-041→B-042 chain works together
+end-to-end, not just each half verified in isolation. All test fixtures
+(throwaway orgs/agents, the revocation row) deleted/cleaned up afterward.
+
+Full writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
+B-042/B-043 entries.
+
+Prior entry, still accurate: 2026-08-04 by Claude Code — B-041: `eami-gateway`'s JWT revocation
 persistence actually works now, closing the gap B-039's live verification
 found incidentally. The bug as originally filed was narrower than reality:
 `dbRevocationStore.loadAll`'s startup-hydration query referenced a column,

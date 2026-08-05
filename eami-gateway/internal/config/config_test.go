@@ -15,6 +15,7 @@ func validConfig() *Config {
 		API: APIConfig{
 			ServiceKey:            "a-real-generated-service-key",
 			EpisodeReadServiceKey: "a-real-generated-episode-key",
+			TokenRevokeServiceKey: "a-real-generated-revoke-key",
 		},
 	}
 }
@@ -42,6 +43,17 @@ func TestValidate_RejectsEmptyEpisodeReadServiceKey(t *testing.T) {
 	cfg.API.EpisodeReadServiceKey = ""
 	if err := validate(cfg); err == nil {
 		t.Error("validate() with empty API.EpisodeReadServiceKey: expected error, got nil")
+	}
+}
+
+func TestValidate_RejectsPlaceholderTokenRevokeServiceKey(t *testing.T) {
+	cases := []string{"", "changeme", "CHANGEME", " changeme ", "devpassword"}
+	for _, v := range cases {
+		cfg := validConfig()
+		cfg.API.TokenRevokeServiceKey = v
+		if err := validate(cfg); err == nil {
+			t.Errorf("validate() with API.TokenRevokeServiceKey=%q: expected error, got nil", v)
+		}
 	}
 }
 
@@ -107,7 +119,7 @@ func clearSecretEnv(t *testing.T) {
 		"GATEWAY_LISTEN_ADDR", "GATEWAY_LISTEN_API_PORT", "GATEWAY_DB_HOST", "GATEWAY_DB_NAME",
 		"GATEWAY_DB_USER", "GATEWAY_DB_PASSWORD", "GATEWAY_JWT_KEY_PATH",
 		"GATEWAY_APPROVAL_SLACK_WEBHOOK", "GATEWAY_UI_BASE_URL", "GATEWAY_API_BASE_URL",
-		"GATEWAY_API_SERVICE_KEY", "GATEWAY_EPISODE_READ_SERVICE_KEY",
+		"GATEWAY_API_SERVICE_KEY", "GATEWAY_EPISODE_READ_SERVICE_KEY", "GATEWAY_TOKEN_REVOKE_SERVICE_KEY",
 	} {
 		os.Unsetenv(k)
 	}
@@ -142,6 +154,7 @@ func TestLoad_RejectsPlaceholderDBPassword(t *testing.T) {
 	clearSecretEnv(t)
 	t.Setenv("GATEWAY_API_SERVICE_KEY", "a-real-generated-service-key")
 	t.Setenv("GATEWAY_EPISODE_READ_SERVICE_KEY", "a-real-generated-episode-key")
+	t.Setenv("GATEWAY_TOKEN_REVOKE_SERVICE_KEY", "a-real-generated-revoke-key")
 	t.Setenv("GATEWAY_DB_HOST", "postgres")
 	t.Setenv("GATEWAY_DB_PASSWORD", "devpassword")
 
@@ -154,6 +167,7 @@ func TestLoad_AcceptsRealSecrets(t *testing.T) {
 	clearSecretEnv(t)
 	t.Setenv("GATEWAY_API_SERVICE_KEY", "a-real-generated-service-key")
 	t.Setenv("GATEWAY_EPISODE_READ_SERVICE_KEY", "a-real-generated-episode-key")
+	t.Setenv("GATEWAY_TOKEN_REVOKE_SERVICE_KEY", "a-real-generated-revoke-key")
 	t.Setenv("GATEWAY_DB_HOST", "postgres")
 	t.Setenv("GATEWAY_DB_USER", "eami_app")
 	t.Setenv("GATEWAY_DB_PASSWORD", "S3cur3Pass")
