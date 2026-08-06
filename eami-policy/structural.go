@@ -84,6 +84,13 @@ func matchesRule(ac ActionContext, r Rule) bool {
 		}
 	}
 
+	// --- ToolServerIDs (set membership) ---
+	if len(c.ToolServerIDs) > 0 {
+		if !stringInSlice(ac.ToolServerID, c.ToolServerIDs) {
+			return false
+		}
+	}
+
 	// --- ActionTypes (set membership) ---
 	if len(c.ActionTypes) > 0 {
 		if !stringInSlice(ac.ActionType, c.ActionTypes) {

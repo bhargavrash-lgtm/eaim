@@ -318,6 +318,57 @@ or prior context suggests otherwise, it is wrong; trust this line.
   B-041→B-042 chain works together end-to-end. Full writeup in
   `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s B-042/B-043
   entries.
+- **B-044 (done, 2026-08-06):** MCP tool routing is dynamic for the first
+  time. `proxy.Forward` always forwarded every tool call to one hardcoded
+  static URL, regardless of tool name — `gateway_tools` (built by
+  B-022/B-023) had zero live consumers anywhere in `eami-gateway`,
+  confirmed by a routing investigation via repo-wide grep. New
+  `internal/toolrouter` package resolves an incoming tool_call's parsed
+  name against `gateway_tools`, org-scoped, and — for `rest_api`-type rows
+  only, `mcp`/`database` explicitly deferred — dispatches to that tool's
+  real `base_url` using real decrypted credentials, with policy checked
+  against the specific resolved tool first via a new `ActionContext.
+  ToolServerID`/`Conditions.ToolServerIDs` (additive, mirrors the existing
+  `ToolNames` pattern).
+  **Two of the task brief's own stated assumptions were wrong, corrected
+  before building rather than silently worked around:** B-023's SSRF guard
+  and B-022's credential cipher both live in `eami-api/internal/...` —
+  `eami-gateway`/`eami-api` are separate Go modules, so neither is
+  importable regardless of export status. Matched this repo's own B-025
+  precedent (duplicate small security-relevant helpers rather than build
+  shared infrastructure) instead: `toolrouter/dial.go`/`creds.go` are
+  deliberate duplicates (`creds.go`'s cipher is decrypt-only — the gateway
+  never writes credentials); `eami-api`'s originals are untouched, still
+  needed for its own connectivity-test feature.
+  **A genuine design fork was presented to the user rather than decided
+  unilaterally**: when a tool name matches no `gateway_tools` row at all
+  (100% of today's live traffic) — user chose **fall back to the existing
+  static path**, not reject. Dynamic routing is strictly additive/opt-in
+  per registered `rest_api` tool; `proxy.go` and `internal/approval/
+  router.go` are completely untouched, so approved escalations keep using
+  the static proxy exactly as before.
+  Reviewer + security passes both ran and came back clean — no exploitable
+  vulnerabilities. Security review specifically re-derived that Go's
+  default redirect-following doesn't bypass the SSRF guard (it's the
+  `Transport`'s `DialContext`, re-invoked on every redirect hop) and that
+  the duplicated cipher is genuinely interoperable with `eami-api`'s
+  original (verified via a real round-trip test). One real bug caught by
+  code review before shipping: `Router.Forward` had no nil-row guard
+  (unreachable via the single production call site, but the package is
+  importable) — fixed with a one-line check + a new test.
+  **Live-verified end-to-end against the real `docker-compose` stack,
+  rebuilt fresh**: routed a real tool_call to a real public echo endpoint
+  with the real decrypted credential arriving as a real header (AC1).
+  **A genuinely unplanned live discovery**: the first attempt used
+  `host.docker.internal` as a local test target — the real SSRF guard
+  correctly rejected it, since that hostname resolves to a private-range
+  address inside Docker's own network — organic, not staged, proof the
+  guard is active on the real dispatch path (AC3). A second org's agent
+  calling the identical tool name fell through to the same static-fallback
+  error shape as an unregistered call, proving cross-org isolation live
+  (AC4); a real `mcp`-type row did the same, confirming it isn't
+  accidentally dynamically dispatched (AC6). Full writeup in `BUILT.md`'s
+  `eami-gateway`/`eami-policy` sections and `BACKLOG.md`'s B-044 entry.
 - **This machine's `localhost` resolves IPv6 (`::1`) before IPv4
   (`127.0.0.1`), and this Docker Desktop instance's IPv6 port-forwarding
   accepts the TCP handshake but silently drops all subsequent data** —
@@ -330,7 +381,155 @@ or prior context suggests otherwise, it is wrong; trust this line.
   that look like a real connectivity problem but aren't.
 
 ## Last updated
-2026-08-05 by Claude Code — B-042: `POST /v1/gateway/tokens/{jti}/revoke`
+2026-08-06 by Claude Code — B-044: MCP tool routing is dynamic for the
+first time. `eami-gateway/internal/proxy.Forward` had always forwarded
+every tool call to one hardcoded static URL (`cfg.Proxy.DownstreamSSEAddr`)
+regardless of which tool was named — `gateway_tools` (schema, CRUD,
+credential encryption via B-022, connectivity testing via B-023) had zero
+live consumers anywhere in `eami-gateway`, confirmed by an investigation
+via repo-wide grep before this task was scoped.
+
+New `internal/toolrouter` package resolves an incoming tool_call's parsed
+tool name against `gateway_tools`, scoped to the caller's org (same
+org-safety discipline as B-042's `registry.LookupByNameAndOrg` fix), and —
+for `rest_api`-type rows only, `mcp`/`database` explicitly out of scope
+this brief — dispatches to that tool's real `base_url` using its real
+decrypted credentials, instead of the static URL. Policy is checked
+against the specific resolved tool via new `eami-policy` fields,
+`ActionContext.ToolServerID`/`Conditions.ToolServerIDs` (additive, mirrors
+the existing `ToolNames` by-string-name matcher exactly, but pins to the
+resolved `gateway_tools.id` — immutable, unlike a tool's name).
+
+**Two of the task brief's own stated assumptions were wrong, and were
+corrected before building rather than silently worked around, per the
+kickoff line's own instruction to confirm understanding first:** the
+brief assumed B-023's SSRF guard (`safeDialContext`/`isBlockedTestTarget`)
+and B-022's credential cipher (`toolcreds.Cipher`) could simply be
+"relocated/exported to a shared location" or reused "as-is." Both live in
+`eami-api/internal/...` — `eami-gateway` and `eami-api` are separate Go
+modules under `go.work`, and Go's `internal/` package visibility is
+scoped to the module tree, so neither is importable across that boundary
+regardless of export status; "relocate to a shared location" would
+require standing up a new shared Go module, real structural work outside
+this brief's scope. This repo already has a precedent for exactly this
+situation: B-025 duplicated `isPlaceholderSecret`/
+`dsnHasPlaceholderPassword` verbatim into both modules rather than build
+shared infrastructure for ~30 lines. Same call here: new
+`toolrouter/dial.go` and `toolrouter/creds.go` are deliberate, documented
+duplicates (`creds.go`'s `Cipher` is decrypt-only — `eami-gateway` never
+writes credentials, only ever reads what `eami-api` already encrypted);
+`eami-api`'s originals are completely untouched, still needed for its own
+connectivity-test feature.
+
+**A genuine architectural fork was presented to the user before building,
+rather than decided unilaterally:** what should happen when a tool_call's
+name matches no `gateway_tools` row at all for the caller's org — the
+case for 100% of today's live traffic, since nothing has ever been
+registered? Two real options existed: fall back to the existing static
+path (strictly additive/opt-in dynamic routing, zero regression risk to
+live traffic), or reject outright (architecturally "complete," but a real
+outage for every existing tool call the moment this shipped). **User
+chose fall-back-to-static.** This also meant `proxy.go` and
+`internal/approval/router.go` (the escalation/approval path) could stay
+**completely untouched** — dynamic routing only applies to `dispatch`'s
+immediate-allow branch; an approved escalation still always uses the
+static proxy exactly as before, avoiding any exception to "approval flow
+internals frozen."
+
+`resolveDynamicTool` (new, `cmd/gateway/main.go`) is `dispatch`'s routing
+decision extracted into a small, named, unit-testable function
+specifically so this coverage didn't require standing up the full
+MCP/SSE/dispatch machinery.
+
+**Reviewer + security subagent passes both ran** (mandatory — new
+outbound dispatch to admin-supplied destinations, at least B-023 rigor):
+**both came back clean, no exploitable vulnerabilities, no blocking
+findings.** Security review specifically re-derived, not trusted from
+comments: the duplicated SSRF guard is byte-for-byte equivalent in
+protective effect to the original, including the resolve-once/dial-the-
+validated-IP DNS-rebinding protection; no code path reaches the network
+without the guarded dialer (the only unrestricted dialer is confined to
+`router_pg_test.go`, confirmed via grep); Go's default redirect-following
+does NOT bypass the guard, since it's implemented as the `Transport`'s
+`DialContext` (re-invoked on every redirect hop, not a one-time pre-check
+on the original URL) — a malicious `rest_api` target can't 3xx its way
+around the block; no decrypted credential ever reaches a log line or
+error message across every branch of `Forward`; `toolrouter.Cipher` and
+`eami-api`'s `toolcreds.Cipher` are genuinely interoperable (compared
+line-by-line — identical key size, AES-GCM construction, nonce framing,
+no AAD on either side — and confirmed via a real round-trip test, not
+assumed). One informational, not-a-vulnerability note: the guard's
+correct, conservative RFC1918 blocking also blocks an on-prem gateway's
+legitimate access to a customer's own internal APIs — flagged for product
+as a future allowlist decision, not fixed here (fails closed correctly in
+the meantime, the safe failure mode). Code review's two other minor
+findings (no `gateway_tools.status` filter in `Resolve`; `db_connection_
+string` `auth_type` silently ignored on `rest_api` rows, same class as
+B-023's already-accepted `basic`-auth gap) left as documented,
+non-blocking limitations.
+
+**A real correctness bug was found and fixed during code review, before
+it ever shipped:** `Router.Forward` dereferenced `row.Type` with no
+nil-guard — unreachable via the single production call site (already
+correctly guarded), but `Router` is an importable package and its own doc
+comment promises no failure path ever panics. Fixed with a one-line check
+plus a new regression test.
+
+22 new tests: `internal/toolrouter/router_pg_test.go` (11 real-Postgres
+tests, including an injectable-dialer test seam mirroring B-023's own
+`dialContextFunc` convention exactly — production `New()` always uses the
+real guard, only `_test.go` files construct the unrestricted one needed
+to reach a local `httptest` server without tripping the loopback block),
+`cmd/gateway/main_pg_test.go` (6 tests for `resolveDynamicTool`'s every
+branch), `eami-policy/policy_test.go` (`TestMatchesRule_ToolServerIDs`),
+`eami-gateway/internal/policyloader/loader_pg_test.go` (1 real-DB
+round-trip test). **Verified 2026-08-06 with a real toolchain: `go
+build`/`go vet`/`go test ./...` clean across `eami-gateway`, `eami-policy`
+— `eami-api` confirmed unaffected** (untouched module, build/vet clean).
+
+**Live-verified end-to-end against the real `docker-compose` stack,
+rebuilt fresh first:** seeded a real org/agent/`gateway_tools` row with
+real AES-256-GCM-encrypted credentials (the real `TOOL_CREDENTIALS_
+ENCRYPTION_KEY`), issued a real token, opened a real SSE session, posted a
+real `tool_call`. **AC1**: routed to the tool's real `base_url` — a real
+public echo endpoint (`postman-echo.com/post`) — with the real decrypted
+API key confirmed arriving as a real `Authorization: Bearer` header at the
+real destination. **AC3, discovered organically, not staged as a planned
+test case**: the first live-verification attempt used `host.docker.
+internal` (a local throwaway echo server) as the tool's `base_url` — the
+real SSRF guard correctly rejected it, since Docker Desktop's
+`host.docker.internal` resolves to a private-range address inside
+Docker's own internal network, exactly the class of target this guard
+exists to block. Genuine, unplanned live proof the guard is active on the
+real dispatch path, not just a designed scenario. **AC4**: a second real
+org/agent calling the identical tool name did not reach the first org's
+registered destination — fell through to the exact same static-fallback
+error shape as an ordinary unregistered call, proving cross-org isolation
+live. **AC6**: a real `mcp`-type `gateway_tools` row, called live, also
+fell through to the identical static-fallback path, confirming `mcp`/
+`database`-type registration doesn't accidentally trigger dynamic
+dispatch. `audit_log` correctly recorded all four live calls (`allowed`
+for the real successful dispatch, `denied` for the SSRF-blocked/cross-org/
+mcp-fallback attempts), confirming auditing is unaffected. All test
+fixtures (throwaway orgs/agents/tools, the local echo server process)
+cleaned up afterward; final `go build`/`go vet`/`go test ./...` re-run
+clean post-cleanup.
+
+**Known limitations, documented not silently left**: no `gateway_tools.
+status` filter (an admin-disabled tool is still dynamically routable);
+`db_connection_string` auth on a `rest_api` row silently sends no auth
+header; on-prem customers' legitimate internal (RFC1918) REST targets are
+unreachable by the SSRF guard's design (no allowlist mechanism exists,
+flagged for product); no per-endpoint action-to-path mapping (every
+action for a tool POSTs to the same single `base_url`, per the routing
+investigation's own explicit scope boundary); `mcp`/`database`-type
+dynamic routing and MCP server capability discovery remain future,
+separate work per that investigation's own phasing recommendation.
+
+Full writeup in `BUILT.md`'s `eami-gateway`/`eami-policy` sections and
+`BACKLOG.md`'s B-044 entry.
+
+Prior entry, still accurate: 2026-08-05 by Claude Code — B-042: `POST /v1/gateway/tokens/{jti}/revoke`
 is real and wired, closing the "Manager.Revoke has zero production
 callers" gap B-041 left open. Two deliberate, investigated, user-approved
 deviations from `api/openapi.yaml`, both documented in `revoke_http.go`'s

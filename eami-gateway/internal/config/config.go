@@ -74,6 +74,15 @@ type APIConfig struct {
 	// ServiceKey/EpisodeReadServiceKey so a leak of one does not also grant
 	// the others.
 	TokenRevokeServiceKey string `yaml:"token_revoke_service_key"`
+
+	// ToolCredentialsEncryptionKey decrypts gateway_tools.credentials_encrypted
+	// for dynamic rest_api tool dispatch (B-044, see internal/toolrouter).
+	// The SAME key/value eami-api's own TOOL_CREDENTIALS_ENCRYPTION_KEY
+	// encrypts with — not a gateway-specific secret. Optional at startup,
+	// same convention as eami-api's own handling of this exact key: unset
+	// does not fail boot, it just means toolrouter.Router.Forward fails
+	// closed per-request for any resolved tool that has stored credentials.
+	ToolCredentialsEncryptionKey string `yaml:"tool_credentials_encryption_key"`
 }
 
 // LogConfig controls logging behaviour.
@@ -148,6 +157,9 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("GATEWAY_TOKEN_REVOKE_SERVICE_KEY"); v != "" {
 		cfg.API.TokenRevokeServiceKey = v
+	}
+	if v := os.Getenv("TOOL_CREDENTIALS_ENCRYPTION_KEY"); v != "" {
+		cfg.API.ToolCredentialsEncryptionKey = v
 	}
 
 	// Policy rules file: default to empty (allows gateway to start without rules)

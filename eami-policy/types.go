@@ -30,6 +30,15 @@ type ActionContext struct {
 	ActionType string // verb: "read" | "write" | "delete" | "create" | "execute"
 	ActionVerb string // more specific: "delete_records" | "send_email" | etc.
 
+	// ToolServerID is the resolved gateway_tools.id UUID for this call, set
+	// by the dispatch caller only when the tool name resolved to a real,
+	// usable row (B-044's dynamic routing). Empty when unresolved (no
+	// matching row, or a row of a type dynamic routing doesn't yet cover) --
+	// rules using ToolServerIDs simply never match in that case, the same
+	// "empty = wildcard, never a match" convention every other Conditions
+	// field already follows.
+	ToolServerID string
+
 	Parameters  map[string]any
 	Environment string // "production" | "staging" | "development" | "unknown"
 
@@ -58,6 +67,13 @@ type Conditions struct {
 	// ToolNames is a set of allowed tool names.
 	// Empty = match any tool.
 	ToolNames []string
+
+	// ToolServerIDs is a set of allowed gateway_tools.id UUIDs (B-044) --
+	// pins a rule to a specific, immutable resolved tool row, unlike
+	// ToolNames' by-string-name match (a tool can be renamed, or deleted
+	// and recreated under the same name, without ToolServerIDs following
+	// it). Empty = match any (including unresolved calls).
+	ToolServerIDs []string
 
 	// ActionTypes is a set of allowed action types (read, write, delete, create, execute).
 	// Empty = match any action type.

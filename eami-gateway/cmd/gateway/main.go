@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -34,6 +35,7 @@ import (
 	"github.com/eami/gateway/internal/proxy"
 	"github.com/eami/gateway/internal/registry"
 	"github.com/eami/gateway/internal/safego"
+	"github.com/eami/gateway/internal/toolrouter"
 	policy "github.com/eami/policy"
 )
 
@@ -127,6 +129,25 @@ func run() error {
 	fwdProxy := proxy.New(proxy.Config{DownstreamURL: cfg.Proxy.DownstreamSSEAddr}, nil)
 	slog.Info("proxy configured", "downstream", cfg.Proxy.DownstreamSSEAddr)
 
+	// Dynamic rest_api tool routing (B-044). toolCipher is optional at
+	// startup, same convention as eami-api's own construction of this exact
+	// key (internal/api/router.go): unset does not fail boot, it just means
+	// toolRouter.Forward will cleanly reject any resolved tool that has
+	// stored credentials, per-request, rather than silently proceeding
+	// without them. A configured-but-invalid key is a real misconfiguration,
+	// logged loudly rather than silently ignored.
+	var toolCipher *toolrouter.Cipher
+	if cfg.API.ToolCredentialsEncryptionKey != "" {
+		tc, cipherErr := toolrouter.NewCipher(cfg.API.ToolCredentialsEncryptionKey)
+		if cipherErr != nil {
+			slog.Error("tool credentials encryption key is set but invalid -- dynamic routing to any rest_api tool with stored credentials will fail closed", "err", cipherErr)
+		} else {
+			toolCipher = tc
+		}
+	}
+	toolRouter := toolrouter.New(pool, toolCipher)
+	slog.Info("tool router ready", "credentials_configured", toolCipher != nil)
+
 	holdTimeout := time.Duration(cfg.Approval.ExpirySeconds) * time.Second
 	approvalRouter := approval.New(
 		pool,
@@ -160,7 +181,18 @@ func run() error {
 
 	dispatch := func(reqCtx context.Context, ac mcp.ActionContext) (json.RawMessage, error) {
 		start := time.Now()
-		decision, evalErr := pLoader.Evaluator().Evaluate(reqCtx, ac.ToPolicyContext())
+
+		// Resolve ac.Tool against gateway_tools, org-scoped, before policy
+		// evaluation (B-044) -- so a rule can target the resolved
+		// gateway_tools.id via ToolServerID, and so the ActionAllow branch
+		// below already knows whether to dynamically dispatch.
+		resolvedTool := resolveDynamicTool(reqCtx, toolRouter, ac.OrgID, ac.Tool)
+
+		pc := ac.ToPolicyContext()
+		if resolvedTool != nil {
+			pc.ToolServerID = resolvedTool.ID
+		}
+		decision, evalErr := pLoader.Evaluator().Evaluate(reqCtx, pc)
 		if evalErr != nil {
 			// Semantic evaluation errors are non-fatal; log and default to allow.
 			slog.Warn("policy eval error — defaulting to allow", "err", evalErr)
@@ -250,12 +282,23 @@ func run() error {
 			return result, holdErr
 
 		default: // policy.ActionAllow
-			tr, proxyErr := fwdProxy.Forward(reqCtx, proxy.ToolRequest{
+			toolReq := proxy.ToolRequest{
 				ToolName:  ac.Tool,
 				Action:    ac.Action,
 				Params:    ac.Parameters,
 				SessionID: ac.SessionID,
-			})
+			}
+			var tr proxy.ToolResponse
+			var proxyErr error
+			if resolvedTool != nil {
+				// B-044: dynamically dispatch to this org's registered
+				// rest_api tool's real base_url/credentials, instead of the
+				// static fwdProxy every other call below still uses
+				// unchanged.
+				tr, proxyErr = toolRouter.Forward(reqCtx, resolvedTool, toolReq)
+			} else {
+				tr, proxyErr = fwdProxy.Forward(reqCtx, toolReq)
+			}
 			if proxyErr != nil {
 				auditEntry.Decision = "denied"
 				_ = auditWriter.Write(reqCtx, auditEntry)
@@ -352,6 +395,36 @@ func run() error {
 		slog.Info("gateway stopped cleanly")
 		return nil
 	}
+}
+
+// resolveDynamicTool looks up tool within org's gateway_tools (B-044),
+// returning the row only when it's a usable rest_api entry -- nil in every
+// other case (empty org/tool, no matching row, a non-rest_api row, or a
+// genuine DB error resolving it). nil signals dispatch to fall back to the
+// existing static fwdProxy exactly as before B-044: dynamic routing is
+// strictly additive/opt-in per registered rest_api tool, never a new way
+// for an existing, previously-working call to break. Extracted from
+// dispatch's closure body so it's unit-testable (main_test.go) without
+// needing the full MCP/SSE request machinery.
+func resolveDynamicTool(ctx context.Context, tr *toolrouter.Router, orgID, tool string) *toolrouter.ToolRow {
+	if orgID == "" || tool == "" {
+		return nil
+	}
+	row, err := tr.Resolve(ctx, orgID, tool)
+	if err != nil {
+		if !errors.Is(err, toolrouter.ErrNotFound) {
+			// A genuine DB error resolving the tool is not the same as
+			// "not found" -- log it, but still fall through to static
+			// forwarding rather than failing the whole call over a lookup
+			// that was never required before B-044.
+			slog.Warn("toolrouter: resolve failed -- falling back to static proxy", "tool", tool, "err", err)
+		}
+		return nil
+	}
+	if row.Type != "rest_api" {
+		return nil
+	}
+	return row
 }
 
 // tokenUsagePayload is the body sent to POST /v1/internal/token-usage on eami-api.

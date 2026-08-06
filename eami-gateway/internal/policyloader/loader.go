@@ -121,7 +121,8 @@ func (l *Loader) queryRules(ctx context.Context) ([]policy.Rule, error) {
 			pc.environments,
 			pc.record_count_gt,
 			pc.semantic_rule,
-			COALESCE(pc.scope_drift, FALSE) AS scope_drift
+			COALESCE(pc.scope_drift, FALSE) AS scope_drift,
+			pc.tool_server_ids
 		FROM policies p
 		LEFT JOIN policy_conditions pc ON pc.policy_id = p.id
 		WHERE p.status = 'active'
@@ -148,11 +149,12 @@ func (l *Loader) queryRules(ctx context.Context) ([]policy.Rule, error) {
 			recordCountGT    *int
 			semanticRule     *string
 			scopeDrift       bool
+			toolServerIDs    []string
 		)
 		if err := rows.Scan(
 			&id, &name, &priority, &action, &alert,
 			&agentPattern, &toolNames, &actionTypes, &environments,
-			&recordCountGT, &semanticRule, &scopeDrift,
+			&recordCountGT, &semanticRule, &scopeDrift, &toolServerIDs,
 		); err != nil {
 			return nil, fmt.Errorf("policyloader: scan row: %w", err)
 		}
@@ -180,6 +182,9 @@ func (l *Loader) queryRules(ctx context.Context) ([]policy.Rule, error) {
 		}
 		if semanticRule != nil {
 			cond.SemanticRule = *semanticRule
+		}
+		if len(toolServerIDs) > 0 {
+			cond.ToolServerIDs = toolServerIDs
 		}
 
 		rules = append(rules, policy.Rule{

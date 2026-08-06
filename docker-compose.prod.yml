@@ -108,6 +108,10 @@ services:
       # Gates POST /v1/gateway/tokens/{jti}/revoke (B-042). Gateway-local
       # only today -- no caller exists yet, see BACKLOG.md B-042.
       GATEWAY_TOKEN_REVOKE_SERVICE_KEY: ${GATEWAY_TOKEN_REVOKE_SERVICE_KEY}
+      # Decrypts gateway_tools credentials for dynamic rest_api tool
+      # dispatch (B-044). Same value as eami-api's own
+      # TOOL_CREDENTIALS_ENCRYPTION_KEY -- one shared secret, two consumers.
+      TOOL_CREDENTIALS_ENCRYPTION_KEY: ${TOOL_CREDENTIALS_ENCRYPTION_KEY}
       GATEWAY_PPROF_ADDR: ${GATEWAY_PPROF_ADDR:-}
     volumes:
       - gateway_certs:/certs

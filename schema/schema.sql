@@ -202,7 +202,8 @@ CREATE TABLE policy_conditions (
     environments         TEXT[],                  -- empty = any
     record_count_gt      INTEGER,                 -- NULL = no limit
     semantic_rule        TEXT,                    -- LLM-evaluated natural language rule
-    scope_drift          BOOLEAN DEFAULT FALSE
+    scope_drift          BOOLEAN DEFAULT FALSE,
+    tool_server_ids      TEXT[]                   -- gateway_tools.id UUIDs, empty/NULL = any (B-044, migration 009)
 );
 CREATE INDEX idx_policy_conditions_policy ON policy_conditions(policy_id);
 

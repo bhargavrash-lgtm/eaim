@@ -96,6 +96,34 @@ func TestMatchesRule_ToolNames(t *testing.T) {
 	}
 }
 
+func TestMatchesRule_ToolServerIDs(t *testing.T) {
+	cases := []struct {
+		name          string
+		toolServerIDs []string
+		toolServerID  string
+		want          bool
+	}{
+		{"in list", []string{"11111111-1111-1111-1111-111111111111"}, "11111111-1111-1111-1111-111111111111", true},
+		{"not in list", []string{"11111111-1111-1111-1111-111111111111"}, "22222222-2222-2222-2222-222222222222", false},
+		{"empty list matches all", []string{}, "any-server-id", true},
+		{"empty list matches unresolved (empty ToolServerID)", []string{}, "", true},
+		{"non-empty list never matches unresolved", []string{"11111111-1111-1111-1111-111111111111"}, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ac := baseAC()
+			ac.ToolServerID = tc.toolServerID
+			rule := Rule{
+				Conditions: Conditions{ToolServerIDs: tc.toolServerIDs},
+				Action:     ActionDeny,
+			}
+			if matchesRule(ac, rule) != tc.want {
+				t.Errorf("toolServerID=%q list=%v: got %v, want %v", tc.toolServerID, tc.toolServerIDs, !tc.want, tc.want)
+			}
+		})
+	}
+}
+
 func TestMatchesRule_ActionTypes(t *testing.T) {
 	cases := []struct {
 		name        string
