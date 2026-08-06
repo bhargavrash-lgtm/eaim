@@ -379,9 +379,176 @@ or prior context suggests otherwise, it is wrong; trust this line.
   `127.0.0.1` explicitly (or `TEST_DATABASE_URL`, already this
   convention) rather than `localhost`, to avoid silent multi-second hangs
   that look like a real connectivity problem but aren't.
+- **B-045 (done, 2026-08-06):** Tools page gains Edit — confirmed as a real
+  gap during B-044's own manual testing (fixing a wrong `base_url` needed
+  a raw SQL `UPDATE`, since the UI had no way to correct it). Investigated
+  whether this was a broader pattern first: it wasn't — Agents/Policies/
+  Settings all already had `PATCH`/`PUT`, Tools was the only outlier. New
+  `PATCH /v1/gateway/tools/{toolId}` reuses `UpdateAgent`'s exact
+  `COALESCE($n, column)` partial-update convention; applied to
+  `credentials_encrypted` specifically so an admin can edit name/base_url
+  without ever being forced to re-enter a working credential they aren't
+  changing. `type`/`auth_type` stay immutable (matches `UpdateAgent`'s own
+  precedent). `api/openapi.yaml` deliberately not touched — ships
+  undocumented, matching B-038's precedent. A real, necessary scope
+  correction confirmed with the user before building: `apiFetch()` (the
+  documented "no raw fetch in components" escape hatch) was GET-only, so
+  it gained optional `{method, body}` params — small and generic, not
+  tool-specific. Security review found the core logic sound but flagged a
+  real gap (credential-preservation was only proven against a fake store,
+  never real Postgres) — closed with 4 new real-Postgres tests reading
+  real decrypted bytes back. Code review caught and this session fixed two
+  real bugs before shipping: no empty-`name` validation (would have
+  silently blanked a tool's name via `COALESCE`), and a whitespace-only
+  `mcp_args` input that would have silently wiped a tool's existing stored
+  args. AC4 (no stale routing after an edit) verified against B-044's
+  `toolrouter` — confirmed no caching exists, then proven with a new test
+  that edits a row mid-test and confirms the very next dispatch uses the
+  new config. Live-verified against the real stack: edited B-044's own
+  "Test" tool via a real admin JWT, and a single subsequent real
+  `tool_call` proved both AC2 and AC4 simultaneously — dispatch reached
+  the edited `base_url`, while the untouched original credential was still
+  applied correctly. Full writeup in `BUILT.md`'s `eami-api`/`eami-ui`
+  sections and `BACKLOG.md`'s B-045 entry.
 
 ## Last updated
-2026-08-06 by Claude Code — B-044: MCP tool routing is dynamic for the
+2026-08-06 by Claude Code — B-045: the Tools admin page gains a real Edit
+flow, closing a gap B-044's own manual testing surfaced directly (fixing a
+wrong `base_url` required a raw SQL `UPDATE`, since the UI had no way to
+correct it — only Create/List/Delete/Test existed).
+
+**Investigated the brief's own "is this a broader pattern" question
+first, per its explicit instruction:** it wasn't. `Agents` (`PATCH
+/v1/gateway/agents/{agentId}`), `Policies` (`PATCH /v1/gateway/policies/
+{policyId}`), and `Settings` (`PUT /v1/settings/org`/`/notifications`) all
+already had Edit — confirmed via `router.go`'s full route table, not
+assumed. Tools was the one isolated outlier.
+
+New `PATCH /v1/gateway/tools/{toolId}` (`store.UpdateTool`/`Server.
+UpdateTool`) reuses the exact `COALESCE($n, column)` partial-update
+convention `UpdateAgent`/`agents.sql.go` already established elsewhere in
+this same file — a `nil` Go value means "leave this column unchanged."
+Applied directly to `credentials_encrypted`: the request omitting
+`credentials` → `nil` bytes → `COALESCE` preserves the existing encrypted
+blob untouched, so an admin can fix a typo in `base_url` without ever
+being forced to re-enter a working secret they aren't changing (the
+brief's own stated UX goal). `credentials` present → re-encrypted via the
+exact same `credentialsProvided`/`s.toolCreds.Encrypt` path `CreateTool`
+already uses, same fail-closed-if-cipher-unconfigured guarantee.
+`type`/`auth_type` deliberately not editable — matches `UpdateAgent`'s own
+precedent of exposing only operational fields, not identity-shaping ones;
+changing a tool's fundamental integration type is closer to
+delete-and-recreate than a partial edit. `api/openapi.yaml` deliberately
+not touched (Architect-EAMI-owned, no PATCH documented for tools) — ships
+undocumented, matching B-038's already-established precedent for exactly
+this situation.
+
+**A real, necessary scope correction, presented to the user and confirmed
+before building, not silently worked around:** `ToolsPage.tsx`'s existing
+hooks call the generated OpenAPI client, which has no typed call for an
+undocumented route; the documented fallback, `apiFetch()` in `src/api/
+client.ts` (CLAUDE.md's own explicit "only through the generated client
+or `apiFetch()` — no raw `fetch`/`axios` in components" convention), was
+GET-only — no method or body parameters at all. Extended it with optional
+`{method, body}` — small, generic, not tied to Tools specifically, so a
+future edit flow on any other undocumented endpoint can reuse it instead
+of reaching for a raw `fetch()` call, which the convention explicitly
+disallows. Confirmed backward compatible: `apiFetch`'s only two existing
+callers (`MemoryPage.tsx`, `usePasteEvents.ts`) call it with no second
+argument, unaffected by the new optional parameter.
+
+**AC4 (no stale routing after an edit) — verified, not assumed, per the
+brief's own explicit instruction:** grepped `eami-gateway/internal/
+toolrouter/router.go` (B-044) for any caching layer — none exists;
+`Router.Resolve` is a direct `pool.QueryRow` on every single dispatch, so
+an edit takes effect on the very next tool call by construction. Proven
+directly, not just reasoned about, with a new real-Postgres test
+(`TestResolve_PicksUpEditedConfig_NoStaleCache`): dispatch to server A,
+edit the row's `base_url` via a real `UPDATE` (the same SQL effect
+`UpdateTool`'s `COALESCE` produces for a real PATCH), dispatch again,
+confirm server B — not server A — is now hit.
+
+**Reviewer + security subagent passes both ran** (mandatory — credential
+handling): security review found the core credential-preservation/
+rotation logic sound — specifically re-derived, not assumed, that
+`toolcreds.Cipher.Encrypt` can never produce a zero-length ciphertext (a
+12-byte nonce plus a 16-byte GCM tag are the unconditional minimum), so
+"credentials explicitly submitted" and "credentials omitted" can never be
+confused by an empty-blob collision — but flagged a real, specific gap:
+every test proving credential preservation ran against `fakeToolStore`
+only, never against real Postgres, so the actual `COALESCE`-over-a-real-
+bytea-column mechanism was asserted by code-reading, not proven to work.
+**Closed, not left as a note**: new `tools_update_pg_test.go`, 4
+real-Postgres tests using the real `store.Queries.UpdateTool` against a
+real database, reading the real stored bytes back and decrypting them
+with a real `toolcreds.Cipher` to confirm the actual end state — including
+that a credential-rotation edit produces the NEW plaintext and the OLD
+plaintext is genuinely gone, not just that no error occurred.
+
+Code review caught and this session fixed two real, if narrow,
+correctness bugs before either ever shipped: (1) **Medium** — `UpdateTool`
+had no validation rejecting an explicitly-empty `name`, unlike
+`CreateTool`'s identical check on the same field; a bare `{"name":""}`
+would have silently blanked a tool's name via `COALESCE` (an empty string
+is a real, non-NULL value, so nothing stopped it) — fixed with the same
+check `CreateTool` already has, and the only guard preventing this before
+the fix was the frontend's HTML `required` attribute, which any direct
+API caller trivially bypasses. (2) **Low** — the Edit panel's `mcp_args`
+handling treated a whitespace-only input as "provided" (JavaScript
+truthiness doesn't distinguish `"   "` from a real value), and
+`.split(' ').filter(Boolean)` on it produced an explicit `[]` rather than
+`undefined` — silently wiping an existing tool's stored args instead of
+leaving them unchanged, the opposite of every other field's "blank means
+no change" semantic. Fixed to check `.trim()` before treating the field
+as present. A follow-up focused review — including actually running the
+new real-Postgres tests live against the real database, not just reading
+the diff — confirmed both fixes correct and complete, with no
+regressions to the already-passing legitimate-omission cases.
+
+**Test coverage:** 17 new. 10 fake-store unit tests (`tools_update_test.
+go`: name/base_url persistence, all three credential cases — omitted/
+empty-object/provided — encryption-not-configured fails closed, no
+credential leakage in any response, not-found, invalid-tool-id, and the
+new empty-name rejection). 4 real-Postgres tests (`tools_update_pg_test.
+go`, described above, plus one proving `mcp_args` preservation
+specifically — verifying pgx v5's nil-slice-to-SQL-NULL array encoding
+directly against real Postgres rather than assuming it, since that field
+uses a different encoding path than the `pgtype.Text`-wrapped scalar
+fields). 1 new real-Postgres routing test in `eami-gateway` (AC4, above).
+`eami-ui`: real `tsc && vite build` via the established Docker
+builder-stage trick (Node/npm still absent locally), run twice — once
+before and once after the `mcp_args` fix, both clean. **Verified
+2026-08-06 with a real toolchain: `go build`/`go vet`/`go test ./...`
+clean across `eami-api` and `eami-gateway`.**
+
+**Live-verified end-to-end against the real `docker-compose` stack,
+rebuilt fresh first:** edited the real "Test" `gateway_tools` row that
+B-044's own manual-testing session had created, via a real admin JWT (a
+throwaway admin user seeded in the same real org for this purpose,
+deleted afterward — the real pre-existing dev user's password wasn't
+known and wasn't guessed at). Renamed the tool, then edited its
+`base_url` to a distinguishable real `postman-echo.com` path. A single
+subsequent real `tool_call` sent through the live gateway proved AC2 and
+AC4 simultaneously, in one response: the dispatch reached the **edited**
+`base_url` (not stale/cached configuration), while the **original**
+credential — set during B-044's own live verification, never touched by
+any of these edits — was still applied correctly as a real `Authorization`
+header. The tool's `base_url` was restored to a clean value afterward;
+all throwaway fixtures (the admin user, tokens, SSE sessions) cleaned up.
+
+**Known limitations, documented not silently left**: no way to clear
+(set to empty) `base_url`/`mcp_command` via the Edit panel once set — a
+blank field means "no change" (matching the credential field's own
+established semantic by design), never "clear it"; a rename that collides
+with another tool's name in the same org surfaces as a raw `500` with the
+Postgres error text, not a clean `409` (a pre-existing pattern shared with
+`CreateTool`, not introduced by this task, out of scope to fix a
+convention used elsewhere in the same file).
+
+Full writeup in `BUILT.md`'s `eami-api`/`eami-ui` sections and
+`BACKLOG.md`'s B-045 entry.
+
+Prior entry, still accurate: 2026-08-06 by Claude Code — B-044: MCP tool routing is dynamic for the
 first time. `eami-gateway/internal/proxy.Forward` had always forwarded
 every tool call to one hardcoded static URL (`cfg.Proxy.DownstreamSSEAddr`)
 regardless of which tool was named — `gateway_tools` (schema, CRUD,

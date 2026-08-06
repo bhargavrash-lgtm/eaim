@@ -358,3 +358,63 @@ func TestForward_SSRFBlocked_PrivateAddress(t *testing.T) {
 		})
 	}
 }
+
+// TestResolve_PicksUpEditedConfig_NoStaleCache proves B-045's AC4:
+// Router.Resolve has no caching layer (confirmed by inspection -- it's a
+// direct pool.QueryRow on every call, unlike e.g. internal/registry's 30s
+// TTL cache) -- an edit to a gateway_tools row a real eami-api PATCH would
+// make (simulated here via a direct UPDATE, since that handler lives in a
+// different Go module) takes effect on the very next Resolve/Forward, not
+// after some delay or a gateway restart.
+func TestResolve_PicksUpEditedConfig_NoStaleCache(t *testing.T) {
+	env := newToolrouterTestEnv(t)
+	r := newWithDialer(env.pool, nil, unrestrictedDialer)
+
+	var hitA, hitB bool
+	srvA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hitA = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srvA.Close()
+	srvB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hitB = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srvB.Close()
+
+	env.insertTool(t, env.orgID, "editable-tool", "rest_api", "api_key", strPtr(srvA.URL), nil)
+
+	row, err := r.Resolve(context.Background(), env.orgID.String(), "editable-tool")
+	if err != nil {
+		t.Fatalf("Resolve (before edit): %v", err)
+	}
+	if _, err := r.Forward(context.Background(), row, toolRequestFor("editable-tool", "call", nil)); err != nil {
+		t.Fatalf("Forward (before edit): %v", err)
+	}
+	if !hitA || hitB {
+		t.Fatalf("before edit: hitA=%v hitB=%v, want only hitA", hitA, hitB)
+	}
+
+	// Simulate the real eami-api UpdateTool PATCH (a different Go module --
+	// this direct UPDATE is the same SQL effect UpdateTool's COALESCE
+	// produces for a base_url-only edit).
+	if _, err := env.pool.Exec(context.Background(),
+		`UPDATE gateway_tools SET base_url = $1 WHERE org_id = $2 AND name = $3`,
+		srvB.URL, env.orgID, "editable-tool"); err != nil {
+		t.Fatalf("simulate edit: %v", err)
+	}
+
+	row2, err := r.Resolve(context.Background(), env.orgID.String(), "editable-tool")
+	if err != nil {
+		t.Fatalf("Resolve (after edit): %v", err)
+	}
+	if *row2.BaseURL != srvB.URL {
+		t.Fatalf("Resolve after edit returned stale base_url %q, want %q", *row2.BaseURL, srvB.URL)
+	}
+	if _, err := r.Forward(context.Background(), row2, toolRequestFor("editable-tool", "call", nil)); err != nil {
+		t.Fatalf("Forward (after edit): %v", err)
+	}
+	if !hitB {
+		t.Fatal("after edit: the dispatch should have reached the NEW server (srvB), it didn't -- stale routing")
+	}
+}

@@ -1,7 +1,7 @@
 // ToolsPage.tsx -- Gateway / Tools
 // Owned by FE-Gateway
 import { useState } from 'react'
-import { Plus, Trash2, Zap, CheckCircle, AlertCircle, WifiOff, HelpCircle } from 'lucide-react'
+import { Plus, Trash2, Pencil, Zap, CheckCircle, AlertCircle, WifiOff, HelpCircle } from 'lucide-react'
 import {
   PageHeader,
   ConfirmDialog,
@@ -11,10 +11,11 @@ import {
 import {
   useTools,
   useCreateTool,
+  useUpdateTool,
   useDeleteTool,
   useTestTool,
 } from '@/hooks/useTools'
-import type { Tool, ToolCreate } from '@/hooks/useTools'
+import type { Tool, ToolCreate, ToolUpdate } from '@/hooks/useTools'
 
 // Status badge
 
@@ -213,6 +214,141 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
   )
 }
 
+// Edit Tool panel (B-045)
+
+function EditToolPanel({ tool, onClose }: { tool: Tool; onClose: () => void }) {
+  const update = useUpdateTool()
+  const [toast, setToast] = useState<string | null>(null)
+
+  const [name, setName]       = useState(tool.name)
+  const [mcpCommand, setMcpCommand] = useState(tool.mcp_command ?? '')
+  const [mcpArgs, setMcpArgs] = useState('') // display-only default; mcp_args isn't returned by ListTools today
+  const [baseUrl, setBaseUrl] = useState(tool.base_url ?? '')
+  // Credential field always starts blank -- the current value is never
+  // returned by any API response (B-022), so there's nothing to pre-fill.
+  // Left blank and submitted, it's simply omitted from the request body,
+  // which the backend treats as "keep the existing encrypted value"
+  // (AC2) -- not "clear it."
+  const [credValue, setCredValue] = useState('')
+
+  const credLabel =
+    tool.auth_type === 'api_key' ? 'API key' :
+    tool.auth_type === 'db_connection_string' ? 'Connection string' :
+    null
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    try {
+      const body: ToolUpdate = {
+        name,
+        mcp_command: tool.type === 'mcp' ? (mcpCommand || undefined) : undefined,
+        // trim() first: a whitespace-only value is truthy in JS but
+        // .split(' ').filter(Boolean) on it still yields [] -- an
+        // explicit empty array, not "omitted" -- which would silently
+        // wipe the tool's existing stored args instead of leaving them
+        // unchanged (found during B-045's code review).
+        mcp_args: tool.type === 'mcp' && mcpArgs.trim() ? mcpArgs.trim().split(/\s+/).filter(Boolean) : undefined,
+        base_url: tool.type === 'rest_api' ? (baseUrl || undefined) : undefined,
+      }
+      // Only include `credentials` at all if the admin actually typed
+      // something -- an empty/omitted object here must never reach the
+      // backend as "clear the credential," and credentialsProvided()
+      // server-side treats an omitted field exactly this way.
+      if (credValue) {
+        body.credentials =
+          tool.auth_type === 'api_key' ? { api_key: credValue } :
+          tool.auth_type === 'db_connection_string' ? { connection_string: credValue } :
+          undefined
+      }
+      await update.mutateAsync({ id: tool.id, body })
+      setToast('Tool updated')
+      setTimeout(() => { setToast(null); onClose() }, 1000)
+    } catch {
+      setToast('Failed to update tool')
+    }
+  }
+
+  return (
+    <div className="fixed inset-y-0 right-0 w-[440px] bg-white shadow-xl flex flex-col z-50 border-l border-gray-200">
+      <div className="flex items-center justify-between px-6 py-4 border-b">
+        <h2 className="font-semibold text-gray-900">Edit Tool Connection</h2>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">x</button>
+      </div>
+
+      {toast && (
+        <div className={`mx-6 mt-4 px-4 py-2 rounded text-sm border ${
+          toast.includes('Failed') ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'
+        }`}>
+          {toast}
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto px-6 py-4">
+        <form id="tool-edit-form" onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Tool name</label>
+            <input required value={name} onChange={e => setName(e.target.value)}
+              className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+              <div className="w-full border rounded px-3 py-2 text-sm bg-gray-50 text-gray-500">{tool.type}</div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Auth type</label>
+              <div className="w-full border rounded px-3 py-2 text-sm bg-gray-50 text-gray-500">{tool.auth_type}</div>
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 -mt-2">Type and auth method can't be changed after creation. Remove and re-add the tool to switch either.</p>
+
+          {tool.type === 'mcp' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">MCP command</label>
+                <input value={mcpCommand} onChange={e => setMcpCommand(e.target.value)}
+                  className="w-full border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">MCP args (space-separated)</label>
+                <input value={mcpArgs} onChange={e => setMcpArgs(e.target.value)}
+                  placeholder="Leave blank to keep current args"
+                  className="w-full border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+            </>
+          )}
+
+          {tool.type === 'rest_api' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Base URL</label>
+              <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)}
+                className="w-full border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </div>
+          )}
+
+          {credLabel && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{credLabel} (stored encrypted)</label>
+              <input type="password" value={credValue} onChange={e => setCredValue(e.target.value)}
+                className="w-full border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Leave blank to keep the current value" />
+            </div>
+          )}
+        </form>
+      </div>
+
+      <div className="px-6 py-4 border-t flex gap-3">
+        <button type="submit" form="tool-edit-form" disabled={update.isPending}
+          className="flex-1 bg-indigo-600 text-white rounded px-4 py-2 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+          {update.isPending ? 'Saving...' : 'Save changes'}
+        </button>
+        <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 // Helpers
 
 function formatLastUsed(iso?: string | null): string {
@@ -234,6 +370,7 @@ export function ToolsPage() {
   const testTool   = useTestTool()
 
   const [showAdd, setShowAdd]           = useState(false)
+  const [editTarget, setEditTarget]     = useState<Tool | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Tool | null>(null)
   const [testResult, setTestResult]     = useState<Record<string, { state: TestState; message?: string }>>({})
 
@@ -332,6 +469,10 @@ export function ToolsPage() {
                               </button>
                             )
                           })()}
+                          <button onClick={() => setEditTarget(tool)}
+                            className="text-gray-400 hover:text-indigo-600" title="Edit">
+                            <Pencil className="h-4 w-4" />
+                          </button>
                           <button onClick={() => setDeleteTarget(tool)}
                             className="text-gray-400 hover:text-red-600" title="Remove">
                             <Trash2 className="h-4 w-4" />
@@ -351,6 +492,13 @@ export function ToolsPage() {
         <>
           <div className="fixed inset-0 bg-black/20 z-40" onClick={() => setShowAdd(false)} />
           <AddToolPanel onClose={() => setShowAdd(false)} />
+        </>
+      )}
+
+      {editTarget && (
+        <>
+          <div className="fixed inset-0 bg-black/20 z-40" onClick={() => setEditTarget(null)} />
+          <EditToolPanel tool={editTarget} onClose={() => setEditTarget(null)} />
         </>
       )}
 

@@ -43,6 +43,11 @@ type fakeToolStore struct {
 	createErr    error
 	created      store.CreateToolParams
 
+	updateCalled bool
+	updateErr    error
+	updated      store.UpdateToolParams
+	updateResult store.GatewayTool // returned on success if non-zero, else a synthesized one
+
 	getForTestRow     toolTestRow
 	getForTestErr     error
 	markTestedStatus  string
@@ -66,6 +71,23 @@ func (f *fakeToolStore) CreateTool(_ context.Context, p store.CreateToolParams) 
 		Name:      p.Name,
 		Type:      p.Type,
 		AuthType:  p.AuthType,
+		Status:    "connected",
+		CreatedAt: time.Now(),
+	}, nil
+}
+
+func (f *fakeToolStore) UpdateTool(_ context.Context, p store.UpdateToolParams) (store.GatewayTool, error) {
+	f.updateCalled = true
+	f.updated = p
+	if f.updateErr != nil {
+		return store.GatewayTool{}, f.updateErr
+	}
+	if f.updateResult.ID != uuid.Nil {
+		return f.updateResult, nil
+	}
+	return store.GatewayTool{
+		ID:        p.ID,
+		OrgID:     p.OrgID,
 		Status:    "connected",
 		CreatedAt: time.Now(),
 	}, nil

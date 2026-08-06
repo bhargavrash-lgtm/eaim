@@ -73,6 +73,53 @@ RETURNING id, org_id, name, type, auth_type, mcp_command, base_url,
 	return t, err
 }
 
+// UpdateToolParams holds fields for a partial tool update (B-045). Only
+// non-nil/non-empty fields are applied -- a nil field leaves that column
+// unchanged (COALESCE), matching UpdateAgent's established convention for
+// this exact "optional partial update" shape. CredentialsEncrypted is nil
+// when the caller didn't submit new credentials (existing value preserved)
+// vs the newly encrypted blob when they did -- the encryption/decision of
+// which case applies happens in tools.go's UpdateTool handler, not here.
+type UpdateToolParams struct {
+	ID                   uuid.UUID
+	OrgID                uuid.UUID
+	Name                 *string
+	MCPCommand           *string
+	MCPArgs              []string
+	BaseURL              *string
+	CredentialsEncrypted []byte
+}
+
+// UpdateTool applies a partial update to an existing tool and returns the
+// updated row. type/auth_type are deliberately not editable here -- an
+// admin changing the fundamental integration type/auth mechanism is
+// closer to "delete and recreate" than a partial edit, matching
+// UpdateAgent's own precedent of only exposing operational fields.
+func (q *Queries) UpdateTool(ctx context.Context, p UpdateToolParams) (GatewayTool, error) {
+	const sql = `
+UPDATE gateway_tools SET
+    name                  = COALESCE($3, name),
+    mcp_command           = COALESCE($4, mcp_command),
+    mcp_args              = COALESCE($5, mcp_args),
+    base_url              = COALESCE($6, base_url),
+    credentials_encrypted = COALESCE($7, credentials_encrypted)
+WHERE id = $1 AND org_id = $2
+RETURNING id, org_id, name, type, auth_type, mcp_command, base_url,
+          status, last_used, last_tested, created_at`
+
+	var t GatewayTool
+	err := q.db.QueryRow(ctx, sql,
+		toPgtypeUUID(p.ID), toPgtypeUUID(p.OrgID),
+		toPgtypeText(p.Name), toPgtypeText(p.MCPCommand), p.MCPArgs, toPgtypeText(p.BaseURL),
+		p.CredentialsEncrypted,
+	).Scan(
+		&t.ID, &t.OrgID, &t.Name, &t.Type, &t.AuthType,
+		&t.MCPCommand, &t.BaseURL, &t.Status,
+		&t.LastUsed, &t.LastTested, &t.CreatedAt,
+	)
+	return t, err
+}
+
 // DeleteTool removes a tool by ID scoped to an org. Returns false if not found.
 func (q *Queries) DeleteTool(ctx context.Context, orgID, toolID uuid.UUID) (bool, error) {
 	const sql = `DELETE FROM gateway_tools WHERE id = $1 AND org_id = $2`

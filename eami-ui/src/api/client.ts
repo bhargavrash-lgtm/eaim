@@ -25,11 +25,28 @@ api.use({
 
 // apiFetch — lightweight fetch helper for endpoints not yet in the OpenAPI schema.
 // Automatically injects the Bearer token from the auth store.
-export async function apiFetch<T = unknown>(path: string): Promise<T> {
+//
+// method/body (B-045) are optional so existing GET-only call sites are
+// unaffected -- generic, not tied to any one resource, so future
+// undocumented-endpoint write flows (edit forms on other pages, same
+// situation Tools hit here) can reuse this instead of a raw fetch/axios
+// call, which CLAUDE.md's frontend-API-access convention disallows in
+// components.
+export async function apiFetch<T = unknown>(
+  path: string,
+  options?: { method?: string; body?: unknown },
+): Promise<T> {
   const { accessToken } = useAuthStore.getState()
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`
-  const res = await fetch(path, { headers })
+  const res = await fetch(path, {
+    method: options?.method ?? 'GET',
+    headers,
+    body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
+  })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  // PATCH/DELETE-style endpoints may return 204 No Content -- res.json()
+  // would throw on an empty body, so only parse when there's content.
+  if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
 }

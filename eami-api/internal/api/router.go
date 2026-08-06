@@ -162,6 +162,7 @@ func (s *Server) Handler() http.Handler {
 			r.Patch("/v1/gateway/policies/{policyId}", s.UpdatePolicy)
 			r.Delete("/v1/gateway/policies/{policyId}", s.DeletePolicy)
 			r.Post("/v1/gateway/tools", s.CreateTool)
+			r.Patch("/v1/gateway/tools/{toolId}", s.UpdateTool)
 			r.Delete("/v1/gateway/tools/{toolId}", s.DeleteTool)
 			r.Post("/v1/gateway/tools/{toolId}/test", s.TestTool)
 			r.Delete("/v1/gateway/nodes/{nodeId}", s.DeleteNode)

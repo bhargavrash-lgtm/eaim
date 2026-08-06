@@ -25,6 +25,7 @@ import (
 type toolStore interface {
 	ListTools(ctx context.Context, orgID uuid.UUID) ([]store.GatewayTool, error)
 	CreateTool(ctx context.Context, p store.CreateToolParams) (store.GatewayTool, error)
+	UpdateTool(ctx context.Context, p store.UpdateToolParams) (store.GatewayTool, error)
 	DeleteTool(ctx context.Context, orgID, toolID uuid.UUID) (bool, error)
 	MarkToolTested(ctx context.Context, orgID, toolID uuid.UUID, status string, latencyMs int) error
 	// GetToolForTest reads back credentials_encrypted -- deliberately NOT
@@ -249,6 +250,96 @@ func (s *Server) CreateTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, toolToResp(t))
+}
+
+// UpdateTool handles PATCH /v1/gateway/tools/{toolId} (B-045). Not yet
+// documented in api/openapi.yaml (Architect-EAMI-owned, out of this task's
+// scope) -- mirrors B-038's precedent of shipping an undocumented route
+// and flagging the spec gap rather than touching that file. Partial
+// update: only fields present in the request body are changed. name/
+// base_url/mcp_command/mcp_args behave like a normal partial update;
+// credentials is special-cased below so editing other fields never
+// requires re-submitting a working secret.
+func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
+	uc := claimsFromContext(r)
+	toolID, err := uuid.Parse(chi.URLParam(r, "toolId"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid tool ID")
+		return
+	}
+
+	var body struct {
+		Name        *string         `json:"name"`
+		MCPCommand  *string         `json:"mcp_command"`
+		MCPArgs     []string        `json:"mcp_args"`
+		BaseURL     *string         `json:"base_url"`
+		Credentials json.RawMessage `json:"credentials"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
+		return
+	}
+	// A present-but-empty name would otherwise pass straight through
+	// COALESCE and blank out the tool's name (nothing else guards this --
+	// the frontend's HTML `required` attribute is not a server-side
+	// control, and this route has no generated-client/schema validation
+	// backstop since it isn't documented in openapi.yaml yet). Matches
+	// CreateTool's identical check for the same field.
+	if body.Name != nil && *body.Name == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "name cannot be empty")
+		return
+	}
+
+	ts, ok := s.toolQueries()
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "internal_error", "tool store is not configured")
+		return
+	}
+
+	// credentialsProvided distinguishes "field omitted" (preserve the
+	// existing encrypted value -- AC2) from "field present" (re-encrypt --
+	// AC3), the same way CreateTool already does. Omitted credentials means
+	// encrypted stays nil, and UpdateTool's COALESCE(NULL, credentials_encrypted)
+	// leaves the stored value exactly as it was -- never nulled out, never
+	// requiring the admin to re-enter a secret they aren't changing.
+	hasCredentials, err := credentialsProvided(body.Credentials)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+
+	var encrypted []byte
+	if hasCredentials {
+		if s.toolCreds == nil {
+			writeError(w, http.StatusInternalServerError, "internal_error",
+				"tool credential encryption is not configured; cannot store credentials")
+			return
+		}
+		encrypted, err = s.toolCreds.Encrypt(body.Credentials)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to encrypt credentials")
+			return
+		}
+	}
+
+	t, err := ts.UpdateTool(r.Context(), store.UpdateToolParams{
+		ID:                   toolID,
+		OrgID:                uc.OrgID,
+		Name:                 body.Name,
+		MCPCommand:           body.MCPCommand,
+		MCPArgs:              body.MCPArgs,
+		BaseURL:              body.BaseURL,
+		CredentialsEncrypted: encrypted,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "not_found", "tool not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, toolToResp(t))
 }
 
 // DeleteTool handles DELETE /v1/gateway/tools/{toolId}
