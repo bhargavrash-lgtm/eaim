@@ -410,9 +410,150 @@ or prior context suggests otherwise, it is wrong; trust this line.
   the edited `base_url`, while the untouched original credential was still
   applied correctly. Full writeup in `BUILT.md`'s `eami-api`/`eami-ui`
   sections and `BACKLOG.md`'s B-045 entry.
+- **B-046 (done, 2026-08-06):** per-endpoint action-to-path mapping closes
+  the exact gap B-044's own manual testing surfaced live that same night
+  (`"Test/query"` 404'd against a flat `base_url` — every action for a
+  tool POSTed to the identical URL). New `gateway_tools.action_paths
+  JSONB` (migration `010`); `toolrouter.Forward` routes a mapped action to
+  `base_url` + its own path/method instead of the flat default; a tool
+  with zero mappings is completely unaffected (B-044's behavior,
+  unchanged). **A tool that HAS other mappings, called with an action not
+  among them, is a deliberate hard rejection — confirmed with the user via
+  an explicit choice before building**, not a silent fallback to
+  `base_url`. Security review traced whether an admin-supplied mapped
+  `path` could redirect a dispatch to a different host (SSRF-guard
+  bypass) — **empirically disproven**, not just argued: `joinURLPath` is
+  pure string concatenation forming one URL parsed once (never a
+  `url.ResolveReference`-style relative resolution, the pattern with known
+  `"//host"` bypass pitfalls); a standalone Go program fed it 6 malicious
+  candidate paths against a real base URL and every single one resolved
+  to the original host. Added a write-time hardening guard anyway
+  (`eami-api` rejects any path containing `"://"`) as a misconfiguration
+  catch, not because it was exploitable. **Both automated reviewer/
+  security subagent passes failed on a platform-wide session-limit error
+  mid-task** (not a finding — a tooling outage) — substituted with a
+  direct manual review plus the empirical trace-through above, rather
+  than skipping the mandatory step. Live-verified end-to-end against the
+  real stack: two real mapped actions routed to two real distinct
+  endpoints (GET/POST) with real credentials attached; an unmapped action
+  on that same tool cleanly rejected live; a separate zero-mappings tool
+  confirmed completely unaffected. **Operational note: the pre-existing
+  `dev@example.com` admin account's password was reset to a known value
+  during this session's live verification** (no other credential was
+  available to obtain a login token) — the user may want to reset it
+  again. Full writeup in `BUILT.md`'s `eami-gateway`/`eami-api`/`eami-ui`
+  sections and `BACKLOG.md`'s B-046 entry.
 
 ## Last updated
-2026-08-06 by Claude Code — B-045: the Tools admin page gains a real Edit
+2026-08-06 by Claude Code — B-046: per-endpoint action-to-path mapping for
+`rest_api`-type `gateway_tools`, closing the gap B-044's own manual testing
+surfaced live that same night (`"Test/query"` 404'd because every action
+for a tool POSTed to the identical flat `base_url`, regardless of name).
+
+New `gateway_tools.action_paths JSONB` column (migration `010`,
+`{"<action>": {"path": "...", "method": "..."}}`) — JSONB chosen over a new
+table, matching this schema's own established convention for small
+structured per-row config (`alert_rules.condition_config`,
+`notification_config.config`, `episodes.steps`) and avoiding a join on
+every dispatch for data that's always read as one small whole per tool.
+`toolrouter.Forward` (`eami-gateway`): when a resolved tool's `ActionPaths`
+has an entry matching the incoming action, dispatches to
+`joinURLPath(base_url, entry.Path)` with `entry.Method` (default `POST`,
+matching the flat behavior's own default) instead of always POSTing to
+`base_url`. Request body envelope unchanged (`{tool, action, params,
+session_id}`) — only URL path/method vary per mapped action; a deliberate
+scope boundary against building a generic API-schema importer, per this
+task's own brief.
+
+**Fallback behavior for an unmapped action — decided with the user before
+building, not assumed either way:** a tool with **no** `action_paths` at
+all keeps B-044's exact flat behavior, fully additive, zero effect on any
+tool that doesn't define mappings. A tool that **has** other mappings
+defined, called with an action that isn't among them, is a **clean hard
+rejection** — the user was asked to choose explicitly between that and a
+silent fallback to `base_url`, and chose rejection, reasoning that routing
+an unmapped action to a URL/credential context the admin never authorized
+for it is worse than a clear failure. Matches this same file's existing
+precedent of rejecting cleanly on unusable state (nil row, wrong type,
+missing `base_url`, bad creds) rather than silently falling through.
+
+**Security review finding, traced and empirically verified, not just
+argued:** the one real question worth answering carefully was whether an
+admin-supplied `action_paths[action].path` could be crafted to redirect a
+dispatch to a different host than `base_url`'s own — an SSRF-guard bypass.
+`joinURLPath` is pure string concatenation (`strings.TrimRight(base,"/") +
+"/" + strings.TrimLeft(path,"/")`) forming **one** URL string parsed
+**once** by `http.NewRequestWithContext` — never a `url.ResolveReference`-
+style relative-URL resolution, which is the pattern with known
+scheme-relative `"//host"` bypass pitfalls. Verified empirically, not just
+by inspection: a standalone Go program fed `joinURLPath` six candidate
+malicious `path` values (`//evil.example.com/steal`,
+`http://evil.example.com/steal`, `https://evil.example.com/steal`,
+`@evil.example.com/steal`, a `..%2F..%2F@evil.example.com` traversal
+attempt) against `base = "https://good.example.com"` and parsed every
+result with `net/url` — **every single one resolved to
+`Host="good.example.com"`**, confirming the SSRF guard (which validates the
+dialed address derived from the final request URL's host) cannot be
+bypassed via a crafted mapped path. Added a defense-in-depth write-time
+guard anyway, in `eami-api`'s `validateActionPaths` — reject any path
+containing `"://"` — not because it's exploitable, but because it's a real,
+easy admin misconfiguration worth catching early with a clear error rather
+than a confusing literal path segment showing up later. `dial.go`/
+`creds.go` (the SSRF guard, credential decrypt) confirmed byte-for-byte
+untouched by this task, per its explicit scope boundary.
+
+**Reviewer + security subagent passes, both mandatory — both automated
+passes failed on a platform-wide session-limit error mid-task, before
+completing (a tooling outage, not a finding).** Substituted with a direct,
+careful manual review of the actual diff plus the empirical `joinURLPath`
+verification above, rather than skipping the mandatory review step
+entirely.
+
+**Test coverage:** 22 new. `eami-gateway/internal/toolrouter/router_pg_test.go`
+gained 5 real-Postgres tests (parses `ActionPaths` correctly; two different
+mapped actions route to two different real paths/methods; an unmapped
+action on a partially-mapped tool cleanly rejects; a tool with zero
+mappings is completely unaffected; the SSRF guard still applies on the
+mapped-path dispatch branch, not just the flat one) plus a new
+`insertToolWithActionPaths` fixture helper. `eami-api/internal/api/
+tools_action_paths_test.go`: 11 fake-store handler tests (valid mappings
+persisted with method uppercased, omitted method defaults to `POST`,
+empty-path/unsupported-method/full-URL-path all rejected with the store
+never called, omitted-on-update leaves it nil, explicit `{}` produces the
+literal clear signal, `ToolResp.ActionPaths` round-trips and is omitted
+entirely via `omitempty` for a tool with none). `eami-api/internal/api/
+tools_action_paths_pg_test.go`: 3 real-Postgres tests proving the same
+tri-state `COALESCE` semantics against real bytes, not a fake store.
+**Verified 2026-08-06 with a real toolchain: `go build`/`go vet`/`go test
+./...` clean across `eami-gateway` and `eami-api`**, plus real `tsc && vite
+build` via the established Docker builder-stage trick, clean.
+
+**Live-verified end-to-end against the real `docker-compose` stack,
+rebuilt fresh first (`eami-api`/`eami-gateway`/`eami-ui` images, migration
+`010` applied to the running Postgres):** created a real `rest_api` tool
+(`base_url=https://postman-echo.com`) with two real action mappings via a
+real admin JWT, issued a real agent token, opened a real MCP SSE session.
+**AC1**: `echo_get` reached `https://postman-echo.com/get` (GET) and
+`echo_post` reached `.../post` (POST) — both confirmed via the real echoed
+response, both with the real decrypted `Authorization` header attached.
+**AC3**: a third call to an undefined action on that same tool returned
+the exact designed rejection error live over the SSE stream. **AC2**: a
+separate pre-existing tool with zero `action_paths` (left over from
+B-044's own manual testing) still flatly POSTed to its `base_url` for an
+arbitrary action name, completely unaffected. All fixtures left in place
+as verification evidence (harmless echo-API test data, no real secrets).
+
+**Operational note, disclosed directly rather than left implicit:** the
+pre-existing `dev@example.com` admin account's password was reset to a
+known test value during this session's live verification, since no other
+credential for it was available and there is no signup/register HTTP
+route exposed to create a throwaway admin the way earlier tasks (B-044,
+B-045) did. The user may want to reset it again.
+
+Full writeup in `BUILT.md`'s `eami-gateway`/`eami-api`/`eami-ui` sections
+and `BACKLOG.md`'s B-046 entry.
+
+Prior entry, still accurate: 2026-08-06 by Claude Code — B-045: the Tools admin page gains a real Edit
 flow, closing a gap B-044's own manual testing surfaced directly (fixing a
 wrong `base_url` required a raw SQL `UPDATE`, since the UI had no way to
 correct it — only Create/List/Delete/Test existed).

@@ -129,18 +129,79 @@ func credentialsProvided(raw json.RawMessage) (bool, error) {
 	return len(obj) > 0, nil
 }
 
+// ── Action path mappings (B-046) ────────────────────────────────────────────────
+
+// ActionPathMapping is one named action's routing entry for a rest_api
+// tool: the path (relative to base_url) and HTTP method eami-gateway's
+// toolrouter should use for that action, instead of B-044's flat
+// "always POST to base_url" default. Mirrors eami-gateway/internal/
+// toolrouter.ActionPathEntry's JSON shape exactly -- kept as a separate
+// duplicate type (not shared) since the two modules cannot import each
+// other's internal packages (established B-044/B-025 constraint).
+type ActionPathMapping struct {
+	Path   string `json:"path"`
+	Method string `json:"method"`
+}
+
+var allowedActionPathMethods = map[string]bool{
+	http.MethodGet: true, http.MethodPost: true, http.MethodPut: true,
+	http.MethodPatch: true, http.MethodDelete: true,
+}
+
+// validateActionPaths normalizes and validates a submitted action_paths
+// map: every entry needs a non-empty action name and path; method defaults
+// to POST (matching toolrouter.Forward's own default) and is restricted to
+// a fixed allow-list. A nil/empty input returns (nil, nil) -- callers use
+// that together with whether the field was present at all in the request
+// body to distinguish "don't change action_paths" from "clear it".
+func validateActionPaths(m map[string]ActionPathMapping) (map[string]ActionPathMapping, error) {
+	if len(m) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]ActionPathMapping, len(m))
+	for action, entry := range m {
+		if strings.TrimSpace(action) == "" {
+			return nil, errors.New("action_paths: action name cannot be empty")
+		}
+		if strings.TrimSpace(entry.Path) == "" {
+			return nil, fmt.Errorf("action_paths[%s]: path cannot be empty", action)
+		}
+		// path is always joined onto base_url as a literal path segment
+		// (toolrouter.joinURLPath, eami-gateway) -- never resolved as a
+		// separate/relative URL -- so a scheme-qualified value here can
+		// never actually redirect a dispatch to a different host. Rejected
+		// anyway at write time: an admin pasting a full URL by mistake is a
+		// real, easy-to-make error worth catching early with a clear
+		// message, rather than silently accepting it and having it show up
+		// as an odd literal path segment on base_url later.
+		if strings.Contains(entry.Path, "://") {
+			return nil, fmt.Errorf("action_paths[%s]: path must be relative to the tool's base_url, not a full URL", action)
+		}
+		method := strings.ToUpper(strings.TrimSpace(entry.Method))
+		if method == "" {
+			method = http.MethodPost
+		}
+		if !allowedActionPathMethods[method] {
+			return nil, fmt.Errorf("action_paths[%s]: unsupported method %q", action, entry.Method)
+		}
+		out[action] = ActionPathMapping{Path: entry.Path, Method: method}
+	}
+	return out, nil
+}
+
 // ── Response types ────────────────────────────────────────────────────────────
 
 type ToolResp struct {
-	ID        uuid.UUID  `json:"id"`
-	Name      string     `json:"name"`
-	Type      string     `json:"type"`
-	AuthType  string     `json:"auth_type"`
-	MCPCommand *string   `json:"mcp_command,omitempty"`
-	BaseURL   *string    `json:"base_url,omitempty"`
-	Status    string     `json:"status"`
-	LastUsed  *time.Time `json:"last_used,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
+	ID          uuid.UUID                    `json:"id"`
+	Name        string                       `json:"name"`
+	Type        string                       `json:"type"`
+	AuthType    string                       `json:"auth_type"`
+	MCPCommand  *string                      `json:"mcp_command,omitempty"`
+	BaseURL     *string                      `json:"base_url,omitempty"`
+	Status      string                       `json:"status"`
+	LastUsed    *time.Time                   `json:"last_used,omitempty"`
+	CreatedAt   time.Time                    `json:"created_at"`
+	ActionPaths map[string]ActionPathMapping `json:"action_paths,omitempty"`
 }
 
 func toolToResp(t store.GatewayTool) ToolResp {
@@ -157,6 +218,12 @@ func toolToResp(t store.GatewayTool) ToolResp {
 	if t.LastUsed.Valid {
 		ts := t.LastUsed.Time
 		r.LastUsed = &ts
+	}
+	if len(t.ActionPaths) > 0 {
+		// Malformed stored JSON would only happen via a direct DB write
+		// bypassing this API's validation -- surfacing it as "no mappings"
+		// rather than a 500 keeps ListTools/GetTool resilient to that.
+		_ = json.Unmarshal(t.ActionPaths, &r.ActionPaths)
 	}
 	return r
 }
@@ -188,13 +255,14 @@ func (s *Server) CreateTool(w http.ResponseWriter, r *http.Request) {
 	uc := claimsFromContext(r)
 
 	var body struct {
-		Name        string          `json:"name"`
-		Type        string          `json:"type"`
-		AuthType    string          `json:"auth_type"`
-		MCPCommand  *string         `json:"mcp_command"`
-		MCPArgs     []string        `json:"mcp_args"`
-		BaseURL     *string         `json:"base_url"`
-		Credentials json.RawMessage `json:"credentials"`
+		Name        string                       `json:"name"`
+		Type        string                       `json:"type"`
+		AuthType    string                       `json:"auth_type"`
+		MCPCommand  *string                      `json:"mcp_command"`
+		MCPArgs     []string                     `json:"mcp_args"`
+		BaseURL     *string                      `json:"base_url"`
+		Credentials json.RawMessage              `json:"credentials"`
+		ActionPaths map[string]ActionPathMapping `json:"action_paths"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
@@ -214,6 +282,20 @@ func (s *Server) CreateTool(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
+	}
+
+	actionPaths, err := validateActionPaths(body.ActionPaths)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	var actionPathsJSON []byte
+	if actionPaths != nil {
+		actionPathsJSON, err = json.Marshal(actionPaths)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to encode action_paths")
+			return
+		}
 	}
 
 	var encrypted []byte
@@ -244,6 +326,7 @@ func (s *Server) CreateTool(w http.ResponseWriter, r *http.Request) {
 		MCPArgs:              body.MCPArgs,
 		BaseURL:              body.BaseURL,
 		CredentialsEncrypted: encrypted,
+		ActionPaths:          actionPathsJSON,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -269,11 +352,12 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name        *string         `json:"name"`
-		MCPCommand  *string         `json:"mcp_command"`
-		MCPArgs     []string        `json:"mcp_args"`
-		BaseURL     *string         `json:"base_url"`
-		Credentials json.RawMessage `json:"credentials"`
+		Name        *string                      `json:"name"`
+		MCPCommand  *string                      `json:"mcp_command"`
+		MCPArgs     []string                     `json:"mcp_args"`
+		BaseURL     *string                      `json:"base_url"`
+		Credentials json.RawMessage              `json:"credentials"`
+		ActionPaths map[string]ActionPathMapping `json:"action_paths"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
@@ -322,12 +406,37 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// body.ActionPaths is nil for both an omitted field and an explicit
+	// JSON null (encoding/json's documented behavior for maps) -- either
+	// way that means "leave action_paths unchanged". A present, even
+	// empty, {} object means "replace" -- encoded to the literal bytes
+	// "{}" so it's non-nil and UpdateTool's COALESCE overwrites rather
+	// than preserves, letting an admin explicitly clear all mappings.
+	var actionPathsJSON []byte
+	if body.ActionPaths != nil {
+		actionPaths, verr := validateActionPaths(body.ActionPaths)
+		if verr != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", verr.Error())
+			return
+		}
+		if len(actionPaths) == 0 {
+			actionPathsJSON = []byte("{}")
+		} else {
+			actionPathsJSON, err = json.Marshal(actionPaths)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal_error", "failed to encode action_paths")
+				return
+			}
+		}
+	}
+
 	t, err := ts.UpdateTool(r.Context(), store.UpdateToolParams{
 		ID:                   toolID,
 		OrgID:                uc.OrgID,
 		Name:                 body.Name,
 		MCPCommand:           body.MCPCommand,
 		MCPArgs:              body.MCPArgs,
+		ActionPaths:          actionPathsJSON,
 		BaseURL:              body.BaseURL,
 		CredentialsEncrypted: encrypted,
 	})

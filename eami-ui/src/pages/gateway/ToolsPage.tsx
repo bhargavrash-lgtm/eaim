@@ -15,7 +15,7 @@ import {
   useDeleteTool,
   useTestTool,
 } from '@/hooks/useTools'
-import type { Tool, ToolCreate, ToolUpdate } from '@/hooks/useTools'
+import type { ActionPathMapping, ToolCreateWithActions, ToolUpdate, ToolWithActions } from '@/hooks/useTools'
 
 // Status badge
 
@@ -75,6 +75,80 @@ function TypeBadge({ type }: { type: string }) {
   )
 }
 
+// Action mappings editor (B-046) -- rest_api-only. Lets an admin define
+// per-action path/method routing instead of every action flatly POSTing
+// to base_url (B-044's original behavior, still the fallback for any
+// action left unmapped here).
+
+type ActionPathRow = { action: string; path: string; method: string }
+
+const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
+
+// Converts editable rows to the {action: {path, method}} shape the API
+// expects, silently dropping rows with no action name or no path -- an
+// in-progress blank row shouldn't become a stored mapping to "" against
+// the tool's base_url. Duplicate action names: last row wins, matching
+// ordinary object-literal semantics rather than being flagged as an error.
+function rowsToActionPaths(rows: ActionPathRow[]): Record<string, ActionPathMapping> {
+  const out: Record<string, ActionPathMapping> = {}
+  for (const row of rows) {
+    const action = row.action.trim()
+    const path = row.path.trim()
+    if (!action || !path) continue
+    out[action] = { path, method: row.method }
+  }
+  return out
+}
+
+function ActionPathsEditor({ rows, onChange }: { rows: ActionPathRow[]; onChange: (rows: ActionPathRow[]) => void }) {
+  function updateRow(i: number, patch: Partial<ActionPathRow>) {
+    onChange(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
+  }
+  function removeRow(i: number) {
+    onChange(rows.filter((_, idx) => idx !== i))
+  }
+  function addRow() {
+    onChange([...rows, { action: '', path: '', method: 'POST' }])
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <label className="block text-sm font-medium text-gray-700">Action mappings</label>
+        <button type="button" onClick={addRow} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
+          + Add mapping
+        </button>
+      </div>
+      <p className="text-xs text-gray-400 mb-2">
+        Route specific actions to their own endpoint under this tool's base URL. Any action left unmapped here falls back to a plain POST to the base URL.
+      </p>
+      {rows.length === 0 ? (
+        <p className="text-xs text-gray-400 italic">No per-action mappings -- every action uses the base URL.</p>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((row, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input value={row.action} onChange={e => updateRow(i, { action: e.target.value })}
+                placeholder="action name"
+                className="w-1/3 border rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              <select value={row.method} onChange={e => updateRow(i, { method: e.target.value })}
+                className="border rounded px-1.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                {HTTP_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+              <input value={row.path} onChange={e => updateRow(i, { path: e.target.value })}
+                placeholder="/contacts"
+                className="flex-1 border rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              <button type="button" onClick={() => removeRow(i)} className="text-gray-400 hover:text-red-600" title="Remove mapping">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Add Tool panel
 
 function AddToolPanel({ onClose }: { onClose: () => void }) {
@@ -89,11 +163,13 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
   const [baseUrl, setBaseUrl]   = useState('')
   const [credKey, setCredKey]   = useState('')
   const [connStr, setConnStr]   = useState('')
+  const [actionRows, setActionRows] = useState<ActionPathRow[]>([])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     try {
-      const body: ToolCreate = {
+      const actionPaths = type === 'rest_api' ? rowsToActionPaths(actionRows) : {}
+      const body: ToolCreateWithActions = {
         name, type, auth_type: authType,
         mcp_command: type === 'mcp' ? mcpCommand || undefined : undefined,
         mcp_args: type === 'mcp' && mcpArgs ? mcpArgs.split(' ').filter(Boolean) : undefined,
@@ -102,6 +178,7 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
           api_key: authType === 'api_key' ? credKey || undefined : undefined,
           connection_string: authType === 'db_connection_string' ? connStr || undefined : undefined,
         },
+        action_paths: Object.keys(actionPaths).length > 0 ? actionPaths : undefined,
       }
       await create.mutateAsync(body)
       setToast('Tool added')
@@ -183,6 +260,10 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
+          {type === 'rest_api' && (
+            <ActionPathsEditor rows={actionRows} onChange={setActionRows} />
+          )}
+
           {authType === 'api_key' && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">API key (stored encrypted)</label>
@@ -216,7 +297,7 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
 
 // Edit Tool panel (B-045)
 
-function EditToolPanel({ tool, onClose }: { tool: Tool; onClose: () => void }) {
+function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () => void }) {
   const update = useUpdateTool()
   const [toast, setToast] = useState<string | null>(null)
 
@@ -230,6 +311,9 @@ function EditToolPanel({ tool, onClose }: { tool: Tool; onClose: () => void }) {
   // which the backend treats as "keep the existing encrypted value"
   // (AC2) -- not "clear it."
   const [credValue, setCredValue] = useState('')
+  const [actionRows, setActionRows] = useState<ActionPathRow[]>(() =>
+    Object.entries(tool.action_paths ?? {}).map(([action, m]) => ({ action, path: m.path, method: m.method }))
+  )
 
   const credLabel =
     tool.auth_type === 'api_key' ? 'API key' :
@@ -249,6 +333,12 @@ function EditToolPanel({ tool, onClose }: { tool: Tool; onClose: () => void }) {
         // unchanged (found during B-045's code review).
         mcp_args: tool.type === 'mcp' && mcpArgs.trim() ? mcpArgs.trim().split(/\s+/).filter(Boolean) : undefined,
         base_url: tool.type === 'rest_api' ? (baseUrl || undefined) : undefined,
+        // Always sent (even {}) when the tool is rest_api, mirroring how
+        // base_url/mcp_command above reflect current form state rather
+        // than being diffed against the original -- this is also how an
+        // admin explicitly clears all mappings (empty rows -> {} -> the
+        // backend's documented "present-but-empty" clear semantics).
+        action_paths: tool.type === 'rest_api' ? rowsToActionPaths(actionRows) : undefined,
       }
       // Only include `credentials` at all if the admin actually typed
       // something -- an empty/omitted object here must never reach the
@@ -327,6 +417,10 @@ function EditToolPanel({ tool, onClose }: { tool: Tool; onClose: () => void }) {
             </div>
           )}
 
+          {tool.type === 'rest_api' && (
+            <ActionPathsEditor rows={actionRows} onChange={setActionRows} />
+          )}
+
           {credLabel && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">{credLabel} (stored encrypted)</label>
@@ -370,11 +464,11 @@ export function ToolsPage() {
   const testTool   = useTestTool()
 
   const [showAdd, setShowAdd]           = useState(false)
-  const [editTarget, setEditTarget]     = useState<Tool | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<Tool | null>(null)
+  const [editTarget, setEditTarget]     = useState<ToolWithActions | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<ToolWithActions | null>(null)
   const [testResult, setTestResult]     = useState<Record<string, { state: TestState; message?: string }>>({})
 
-  const tools: Tool[] = (data as any)?.data ?? []
+  const tools: ToolWithActions[] = (data as any)?.data ?? []
 
   async function handleTest(id: string) {
     setTestResult(prev => ({ ...prev, [id]: { state: 'testing' } }))

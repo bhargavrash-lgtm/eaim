@@ -9,11 +9,17 @@
 // itself, it only ever answers "did I find a usable rest_api row, yes or
 // no."
 //
-// No per-endpoint action-to-path mapping exists yet (gateway_tools has no
-// column for it -- see the data-access-governance/routing investigation's
-// B7 finding: that's real, larger, deferred future work). Forward's
-// minimum-viable behavior is one endpoint per tool: every action for a
-// given tool POSTs the same JSON envelope to that tool's single base_url.
+// Per-endpoint action-to-path mapping (B-046): a rest_api tool may define
+// gateway_tools.action_paths, a JSONB map of action name -> {path, method}.
+// When present and the incoming action matches an entry, Forward dispatches
+// to base_url+path using that method. When action_paths is unset entirely,
+// Forward falls back to B-044's original flat behavior: every action POSTs
+// the same JSON envelope to the tool's single base_url. When action_paths
+// IS set but the incoming action has no entry in it, Forward rejects with a
+// clear error rather than silently falling back to base_url -- an unmapped
+// action on a tool that otherwise has explicit mappings is treated as
+// unusable state, not a soft fallback (same precedent as this file's other
+// clean-rejection paths: nil row, wrong type, missing base_url, bad creds).
 package toolrouter
 
 import (
@@ -24,6 +30,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -42,6 +49,14 @@ const (
 // proxy, not treat this as a hard failure -- see the package doc comment.
 var ErrNotFound = errors.New("toolrouter: no matching tool found")
 
+// ActionPathEntry is one named action's routing mapping (B-046): the path
+// (joined onto base_url) and HTTP method to use for that action, in place
+// of the flat "always POST to base_url" default.
+type ActionPathEntry struct {
+	Path   string `json:"path"`
+	Method string `json:"method"`
+}
+
 // ToolRow is the subset of gateway_tools fields dispatch needs.
 type ToolRow struct {
 	ID                   string
@@ -49,6 +64,7 @@ type ToolRow struct {
 	AuthType             string // "oauth2" | "api_key" | "basic" | "db_connection_string"
 	BaseURL              *string
 	CredentialsEncrypted []byte
+	ActionPaths          map[string]ActionPathEntry // nil/empty = no mappings, B-044's flat base_url behavior
 }
 
 // Router resolves gateway_tools rows and dispatches rest_api-type tool calls.
@@ -89,17 +105,23 @@ func newWithDialer(pool *pgxpool.Pool, cipher *Cipher, dial dialContextFunc) *Ro
 // agent) when no row matches; any other error is a genuine DB failure.
 func (r *Router) Resolve(ctx context.Context, orgID, name string) (*ToolRow, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id::text, type, auth_type, base_url, credentials_encrypted
+		SELECT id::text, type, auth_type, base_url, credentials_encrypted, action_paths
 		FROM gateway_tools
 		WHERE org_id = $1 AND name = $2
 	`, orgID, name)
 
 	var t ToolRow
-	if err := row.Scan(&t.ID, &t.Type, &t.AuthType, &t.BaseURL, &t.CredentialsEncrypted); err != nil {
+	var actionPathsRaw []byte
+	if err := row.Scan(&t.ID, &t.Type, &t.AuthType, &t.BaseURL, &t.CredentialsEncrypted, &actionPathsRaw); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("toolrouter: query tool %q: %w", name, err)
+	}
+	if len(actionPathsRaw) > 0 {
+		if err := json.Unmarshal(actionPathsRaw, &t.ActionPaths); err != nil {
+			return nil, fmt.Errorf("toolrouter: tool %q has malformed action_paths: %w", name, err)
+		}
 	}
 	return &t, nil
 }
@@ -113,6 +135,18 @@ type downstreamRequest struct {
 	Action    string         `json:"action"`
 	Params    map[string]any `json:"params,omitempty"`
 	SessionID string         `json:"session_id,omitempty"`
+}
+
+// joinURLPath joins base and path with exactly one slash between them,
+// regardless of whether either side already has one -- admin-supplied
+// base_url and action_paths.path values are free-form strings (e.g. one or
+// both of "https://api.example.com/" and "/contacts"), and naive
+// concatenation would silently produce a malformed or wrong-host-relative
+// URL. path is always appended after base's existing path (never replaces
+// it), matching how a real REST API's per-action endpoints are always
+// sub-paths of that API's base.
+func joinURLPath(base, path string) string {
+	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(path, "/")
 }
 
 // Forward dispatches req to row's real base_url using its real decrypted
@@ -152,6 +186,21 @@ func (r *Router) Forward(ctx context.Context, row *ToolRow, req proxy.ToolReques
 		}
 	}
 
+	method := http.MethodPost
+	targetURL := *row.BaseURL
+	if len(row.ActionPaths) > 0 {
+		entry, ok := row.ActionPaths[req.Action]
+		if !ok {
+			return proxy.ToolResponse{}, fmt.Errorf(
+				"toolrouter: tool %s has action mappings defined but none for action %q -- refusing to fall back to base_url for an unmapped action",
+				row.ID, req.Action)
+		}
+		if entry.Method != "" {
+			method = strings.ToUpper(entry.Method)
+		}
+		targetURL = joinURLPath(*row.BaseURL, entry.Path)
+	}
+
 	body := downstreamRequest{
 		Tool:      req.ToolName,
 		Action:    req.Action,
@@ -163,7 +212,7 @@ func (r *Router) Forward(ctx context.Context, row *ToolRow, req proxy.ToolReques
 		return proxy.ToolResponse{}, fmt.Errorf("toolrouter: marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, *row.BaseURL, bytes.NewReader(bodyBytes))
+	httpReq, err := http.NewRequestWithContext(ctx, method, targetURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return proxy.ToolResponse{}, fmt.Errorf("toolrouter: create request: %w", err)
 	}

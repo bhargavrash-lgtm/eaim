@@ -87,6 +87,25 @@ func (e *toolrouterTestEnv) insertTool(t *testing.T, orgID uuid.UUID, name, tool
 	}
 }
 
+// insertToolWithActionPaths is insertTool plus an action_paths JSONB value
+// (B-046) -- kept as a separate helper rather than widening insertTool's
+// signature, since every existing call site relies on positional args and
+// most tests genuinely have no mappings (NULL, B-044's flat behavior).
+func (e *toolrouterTestEnv) insertToolWithActionPaths(t *testing.T, orgID uuid.UUID, name, toolType, authType string, baseURL *string, credsEncrypted []byte, actionPaths map[string]ActionPathEntry) {
+	t.Helper()
+	id := uuid.New()
+	actionPathsJSON, err := json.Marshal(actionPaths)
+	if err != nil {
+		t.Fatalf("marshal action_paths: %v", err)
+	}
+	if _, err := e.pool.Exec(context.Background(), `
+		INSERT INTO gateway_tools (id, org_id, name, type, auth_type, base_url, credentials_encrypted, action_paths)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`, id, orgID, name, toolType, authType, baseURL, credsEncrypted, actionPathsJSON); err != nil {
+		t.Fatalf("insert gateway_tools row: %v", err)
+	}
+}
+
 // unrestrictedDialer is a plain net.Dialer with no SSRF restrictions --
 // used only in tests that need to reach a local httptest server (always
 // 127.0.0.1, which the real safeDialContext correctly blocks). Production
@@ -416,5 +435,159 @@ func TestResolve_PicksUpEditedConfig_NoStaleCache(t *testing.T) {
 	}
 	if !hitB {
 		t.Fatal("after edit: the dispatch should have reached the NEW server (srvB), it didn't -- stale routing")
+	}
+}
+
+// ─── Per-action path mapping (B-046) ────────────────────────────────────────
+
+// TestResolve_ParsesActionPaths proves Resolve reads action_paths back into
+// ToolRow.ActionPaths correctly (both a tool with mappings and one without).
+func TestResolve_ParsesActionPaths(t *testing.T) {
+	env := newToolrouterTestEnv(t)
+	r := New(env.pool, nil)
+
+	env.insertToolWithActionPaths(t, env.orgID, "mapped-tool", "rest_api", "api_key", strPtr("https://example.com"), nil,
+		map[string]ActionPathEntry{"list": {Path: "/v1/list", Method: "GET"}})
+	env.insertTool(t, env.orgID, "unmapped-tool", "rest_api", "api_key", strPtr("https://example.com"), nil)
+
+	mapped, err := r.Resolve(context.Background(), env.orgID.String(), "mapped-tool")
+	if err != nil {
+		t.Fatalf("Resolve mapped-tool: %v", err)
+	}
+	if len(mapped.ActionPaths) != 1 || mapped.ActionPaths["list"].Path != "/v1/list" || mapped.ActionPaths["list"].Method != "GET" {
+		t.Errorf("ActionPaths = %+v, want {list: {/v1/list GET}}", mapped.ActionPaths)
+	}
+
+	unmapped, err := r.Resolve(context.Background(), env.orgID.String(), "unmapped-tool")
+	if err != nil {
+		t.Fatalf("Resolve unmapped-tool: %v", err)
+	}
+	if len(unmapped.ActionPaths) != 0 {
+		t.Errorf("ActionPaths = %+v, want empty/nil for a tool with no mappings", unmapped.ActionPaths)
+	}
+}
+
+// TestForward_ActionPathMapping_RoutesCorrectly proves AC1: a tool with
+// mappings for two different actions dispatches each to its own path and
+// method, joined onto base_url, instead of always POSTing to base_url.
+func TestForward_ActionPathMapping_RoutesCorrectly(t *testing.T) {
+	env := newToolrouterTestEnv(t)
+
+	var gotPath, gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		gotPath, gotMethod = req.URL.Path, req.Method
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	env.insertToolWithActionPaths(t, env.orgID, "multi-endpoint", "rest_api", "api_key", strPtr(srv.URL), nil,
+		map[string]ActionPathEntry{
+			"list_contacts":  {Path: "/contacts", Method: "GET"},
+			"create_contact": {Path: "/contacts/new", Method: "PUT"},
+		})
+
+	r := newWithDialer(env.pool, nil, unrestrictedDialer)
+	row, err := r.Resolve(context.Background(), env.orgID.String(), "multi-endpoint")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	if _, err := r.Forward(context.Background(), row, toolRequestFor("multi-endpoint", "list_contacts", nil)); err != nil {
+		t.Fatalf("Forward(list_contacts): %v", err)
+	}
+	if gotPath != "/contacts" || gotMethod != http.MethodGet {
+		t.Errorf("list_contacts routed to %s %s, want GET /contacts", gotMethod, gotPath)
+	}
+
+	if _, err := r.Forward(context.Background(), row, toolRequestFor("multi-endpoint", "create_contact", nil)); err != nil {
+		t.Fatalf("Forward(create_contact): %v", err)
+	}
+	if gotPath != "/contacts/new" || gotMethod != http.MethodPut {
+		t.Errorf("create_contact routed to %s %s, want PUT /contacts/new", gotMethod, gotPath)
+	}
+}
+
+// TestForward_UnmappedActionOnMappedTool_CleanRejection proves AC3's
+// user-confirmed choice: a tool that HAS other action mappings defined,
+// called with an action that isn't among them, must be cleanly rejected --
+// never silently fall back to base_url (which the admin never authorized
+// for this specific, unmapped action).
+func TestForward_UnmappedActionOnMappedTool_CleanRejection(t *testing.T) {
+	env := newToolrouterTestEnv(t)
+
+	var hit bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	env.insertToolWithActionPaths(t, env.orgID, "partially-mapped", "rest_api", "api_key", strPtr(srv.URL), nil,
+		map[string]ActionPathEntry{"list": {Path: "/list", Method: "GET"}})
+
+	r := newWithDialer(env.pool, nil, unrestrictedDialer)
+	row, err := r.Resolve(context.Background(), env.orgID.String(), "partially-mapped")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	_, fwdErr := r.Forward(context.Background(), row, toolRequestFor("partially-mapped", "delete_everything", nil))
+	if fwdErr == nil {
+		t.Fatal("expected Forward to reject an action with no mapping on a tool that has other mappings, got nil error")
+	}
+	if hit {
+		t.Fatal("Forward must not have dispatched anything to base_url for an unmapped action, but the server was hit")
+	}
+}
+
+// TestForward_NoActionPathsAtAll_FlatBaseURLBehaviorUnchanged proves AC2: a
+// tool with NO action_paths defined at all keeps working exactly like
+// B-044 shipped it -- every action POSTs straight to base_url, unaffected
+// by B-046 shipping.
+func TestForward_NoActionPathsAtAll_FlatBaseURLBehaviorUnchanged(t *testing.T) {
+	env := newToolrouterTestEnv(t)
+
+	var gotPath, gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		gotPath, gotMethod = req.URL.Path, req.Method
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	env.insertTool(t, env.orgID, "flat-tool", "rest_api", "api_key", strPtr(srv.URL), nil) // no action_paths
+
+	r := newWithDialer(env.pool, nil, unrestrictedDialer)
+	row, err := r.Resolve(context.Background(), env.orgID.String(), "flat-tool")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	for _, action := range []string{"anything", "literally_any_action_name"} {
+		if _, err := r.Forward(context.Background(), row, toolRequestFor("flat-tool", action, nil)); err != nil {
+			t.Fatalf("Forward(%s): %v", action, err)
+		}
+		if gotPath != "/" || gotMethod != http.MethodPost {
+			t.Errorf("action %q routed to %s %q, want POST directly to base_url (root path)", action, gotMethod, gotPath)
+		}
+	}
+}
+
+// TestForward_SSRFStillBlocked_WithActionMapping proves the SSRF guard
+// still applies on the mapped-path dispatch path, not just the flat one:
+// joining a mapped path onto a base_url pointing at a private/link-local
+// address must still be rejected before any connection is attempted.
+func TestForward_SSRFStillBlocked_WithActionMapping(t *testing.T) {
+	env := newToolrouterTestEnv(t)
+	r := New(env.pool, nil) // real guarded dialer
+
+	env.insertToolWithActionPaths(t, env.orgID, "ssrf-mapped-tool", "rest_api", "api_key", strPtr("http://169.254.169.254/"), nil,
+		map[string]ActionPathEntry{"list": {Path: "/latest/meta-data", Method: "GET"}})
+
+	row, err := r.Resolve(context.Background(), env.orgID.String(), "ssrf-mapped-tool")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	_, fwdErr := r.Forward(context.Background(), row, toolRequestFor("ssrf-mapped-tool", "list", nil))
+	if fwdErr == nil {
+		t.Fatal("expected Forward to reject a mapped-path request to a link-local base_url, got nil error")
 	}
 }

@@ -167,8 +167,8 @@ type AlertRule struct {
 	OrgID           uuid.UUID
 	Name            string
 	Description     pgtype.Text
-	Condition       string   // human-readable, e.g. "denied_actions_count > 10 in 15m"
-	ConditionConfig []byte   // JSONB: {metric, condition, threshold, window_minutes}
+	Condition       string // human-readable, e.g. "denied_actions_count > 10 in 15m"
+	ConditionConfig []byte // JSONB: {metric, condition, threshold, window_minutes}
 	Severity        string
 	Channels        []string
 	Enabled         bool
@@ -196,32 +196,35 @@ type Alert struct {
 
 // GatewayTool mirrors the gateway_tools table.
 type GatewayTool struct {
-	ID          uuid.UUID
-	OrgID       uuid.UUID
-	Name        string
-	Type        string // mcp | rest_api | database
-	AuthType    string // oauth2 | api_key | basic | db_connection_string
-	MCPCommand  pgtype.Text
-	BaseURL     pgtype.Text
-	Status      string // connected | degraded | disconnected
-	LastUsed    pgtype.Timestamptz
-	LastTested  pgtype.Timestamptz
-	CreatedAt   time.Time
+	ID         uuid.UUID
+	OrgID      uuid.UUID
+	Name       string
+	Type       string // mcp | rest_api | database
+	AuthType   string // oauth2 | api_key | basic | db_connection_string
+	MCPCommand pgtype.Text
+	BaseURL    pgtype.Text
+	Status     string // connected | degraded | disconnected
+	LastUsed   pgtype.Timestamptz
+	LastTested pgtype.Timestamptz
+	CreatedAt  time.Time
+	// ActionPaths is the raw JSONB bytes of gateway_tools.action_paths
+	// (B-046): {"<action>": {"path": "...", "method": "..."}}, or nil when
+	// unset. Same raw-passthrough convention as alert_rules.ConditionConfig.
+	ActionPaths []byte
 }
 
 // GatewayNode mirrors the gateway_nodes table (joined with latest metrics).
 type GatewayNode struct {
-	ID             uuid.UUID
-	OrgID          uuid.UUID
-	Name           string
-	Role           string // primary | edge | dr_standby
-	Status         string // healthy | degraded | standby | offline
-	Address        string
-	Hostname       pgtype.Text
-	Version        pgtype.Text
-	LastHeartbeat  pgtype.Timestamptz
+	ID            uuid.UUID
+	OrgID         uuid.UUID
+	Name          string
+	Role          string // primary | edge | dr_standby
+	Status        string // healthy | degraded | standby | offline
+	Address       string
+	Hostname      pgtype.Text
+	Version       pgtype.Text
+	LastHeartbeat pgtype.Timestamptz
 	// Latest metrics (LEFT JOIN gateway_node_metrics)
-	CPUPct          pgtype.Float8
-	RequestsPerMin  pgtype.Int4
+	CPUPct         pgtype.Float8
+	RequestsPerMin pgtype.Int4
 }
-

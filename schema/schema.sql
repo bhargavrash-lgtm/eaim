@@ -226,6 +226,11 @@ CREATE TABLE gateway_tools (
     last_tested  TIMESTAMPTZ,
     test_latency_ms INTEGER,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Per-action path/method mappings for rest_api tools (B-046):
+    -- {"<action>": {"path": "/contacts", "method": "POST"}}. NULL = no
+    -- mappings, every action routes to the flat base_url (B-044's
+    -- original behavior, unchanged for any tool that doesn't define this).
+    action_paths JSONB,
     UNIQUE (org_id, name)
 );
 CREATE INDEX idx_gateway_tools_org ON gateway_tools(org_id);

@@ -10,7 +10,7 @@ import (
 func (q *Queries) ListTools(ctx context.Context, orgID uuid.UUID) ([]GatewayTool, error) {
 	const sql = `
 SELECT id, org_id, name, type, auth_type, mcp_command, base_url,
-       status, last_used, last_tested, created_at
+       status, last_used, last_tested, created_at, action_paths
 FROM gateway_tools
 WHERE org_id = $1
 ORDER BY name ASC`
@@ -27,7 +27,7 @@ ORDER BY name ASC`
 		if err := rows.Scan(
 			&t.ID, &t.OrgID, &t.Name, &t.Type, &t.AuthType,
 			&t.MCPCommand, &t.BaseURL, &t.Status,
-			&t.LastUsed, &t.LastTested, &t.CreatedAt,
+			&t.LastUsed, &t.LastTested, &t.CreatedAt, &t.ActionPaths,
 		); err != nil {
 			return nil, err
 		}
@@ -50,25 +50,28 @@ type CreateToolParams struct {
 	// read back by any query in this file -- GatewayTool has no field for
 	// it, so it cannot leak through ListTools/CreateTool's own RETURNING.
 	CredentialsEncrypted []byte
+	// ActionPaths is the raw JSONB bytes for gateway_tools.action_paths
+	// (B-046), or nil for a tool with no per-action mappings.
+	ActionPaths []byte
 }
 
 // CreateTool inserts a new gateway tool and returns it.
 func (q *Queries) CreateTool(ctx context.Context, p CreateToolParams) (GatewayTool, error) {
 	const sql = `
-INSERT INTO gateway_tools (org_id, name, type, auth_type, mcp_command, mcp_args, base_url, credentials_encrypted)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO gateway_tools (org_id, name, type, auth_type, mcp_command, mcp_args, base_url, credentials_encrypted, action_paths)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING id, org_id, name, type, auth_type, mcp_command, base_url,
-          status, last_used, last_tested, created_at`
+          status, last_used, last_tested, created_at, action_paths`
 
 	var t GatewayTool
 	err := q.db.QueryRow(ctx, sql,
 		toPgtypeUUID(p.OrgID), p.Name, p.Type, p.AuthType,
 		toPgtypeText(p.MCPCommand), p.MCPArgs, toPgtypeText(p.BaseURL),
-		p.CredentialsEncrypted,
+		p.CredentialsEncrypted, p.ActionPaths,
 	).Scan(
 		&t.ID, &t.OrgID, &t.Name, &t.Type, &t.AuthType,
 		&t.MCPCommand, &t.BaseURL, &t.Status,
-		&t.LastUsed, &t.LastTested, &t.CreatedAt,
+		&t.LastUsed, &t.LastTested, &t.CreatedAt, &t.ActionPaths,
 	)
 	return t, err
 }
@@ -88,6 +91,10 @@ type UpdateToolParams struct {
 	MCPArgs              []string
 	BaseURL              *string
 	CredentialsEncrypted []byte
+	// ActionPaths, like MCPArgs, is nil to leave action_paths unchanged
+	// (COALESCE) and non-nil -- including []byte("{}") to explicitly clear
+	// all mappings -- to overwrite it.
+	ActionPaths []byte
 }
 
 // UpdateTool applies a partial update to an existing tool and returns the
@@ -102,20 +109,21 @@ UPDATE gateway_tools SET
     mcp_command           = COALESCE($4, mcp_command),
     mcp_args              = COALESCE($5, mcp_args),
     base_url              = COALESCE($6, base_url),
-    credentials_encrypted = COALESCE($7, credentials_encrypted)
+    credentials_encrypted = COALESCE($7, credentials_encrypted),
+    action_paths          = COALESCE($8, action_paths)
 WHERE id = $1 AND org_id = $2
 RETURNING id, org_id, name, type, auth_type, mcp_command, base_url,
-          status, last_used, last_tested, created_at`
+          status, last_used, last_tested, created_at, action_paths`
 
 	var t GatewayTool
 	err := q.db.QueryRow(ctx, sql,
 		toPgtypeUUID(p.ID), toPgtypeUUID(p.OrgID),
 		toPgtypeText(p.Name), toPgtypeText(p.MCPCommand), p.MCPArgs, toPgtypeText(p.BaseURL),
-		p.CredentialsEncrypted,
+		p.CredentialsEncrypted, p.ActionPaths,
 	).Scan(
 		&t.ID, &t.OrgID, &t.Name, &t.Type, &t.AuthType,
 		&t.MCPCommand, &t.BaseURL, &t.Status,
-		&t.LastUsed, &t.LastTested, &t.CreatedAt,
+		&t.LastUsed, &t.LastTested, &t.CreatedAt, &t.ActionPaths,
 	)
 	return t, err
 }
