@@ -174,6 +174,20 @@ _(one line each; full detail in `BUILT.md` / `CHANGELOG.md`)_
 
 ## QUEUED (added this session)
 
+### EPIC — Approval routing, auto-rules, and in-session confirmation — **identified, not investigated, no B-ID assigned**
+**Objective:** three related but distinct capabilities around how escalations reach and get resolved by a human, surfaced during B-047's own manual Approvals-page testing (2026-08-06/07), not scoped or sized yet.
+**Status:** identified only. Needs the same investigate-first treatment as every other epic before any brief gets written — do NOT jump straight to implementation. Before scoping size/priority, confirm: (1) whether anything resembling tool ownership already exists (repo-wide grep, not assumed); (2) what `policy_conditions`' current schema could realistically support for auto-resolve rules without a redesign; (3) whether any existing channel already runs from an AI session back to its originating human user, or whether #3 needs entirely new infrastructure (this one is architecturally novel — treat the answer as genuinely unknown, not "probably no").
+**Three capabilities:**
+1. **Approval routing by tool ownership** — tools/policies need an "owner" concept so escalations route to the right person/team's notification channel, not one flat global admin queue. Today, any `admin`/`operator` role sees and can act on every pending approval regardless of which tool/business app it relates to — not viable for a real multi-app enterprise deployment with multiple tool owners.
+2. **Auto-approve/auto-deny rules** — conditions under which an escalation resolves automatically without a human click (e.g. low-risk actions, trusted agents, time-of-day, spend thresholds). A policy-engine extension, not just an Approvals-UI change.
+3. **In-session user confirmation** — a mechanism to prompt the human actually driving the AI conversation directly (not an admin) for certain escalations, in the moment. Nothing in the current architecture does this today, as far as is known — needs real investigation, not assumption.
+**Acceptance criteria (investigation phase only):**
+- [ ] Confirm/refute whether any tool-ownership concept exists anywhere in the schema or code today
+- [ ] Document what `policy_conditions`/the policy engine would need to change to support #2
+- [ ] Document what would need to exist (new infra, not just UI) to support #3, and whether it's even in scope for an on-prem gateway's trust model
+- [ ] Only after the above: size and split into individually scoped, numbered briefs
+**Dependencies:** none blocking the investigation. Implementation (once scoped) will likely touch `eami-api` (policies/tools/approvals), `eami-gateway` (approval router, policy evaluation), `eami-policy` (rule schema), and `eami-ui` (Approvals/Policies/Tools pages) — cross-cutting, not a single-module task.
+
 ### B-021 — Every `.sh` file in the repo has CRLF line endings except the now-fixed collector entrypoint
 **Objective:** Prevent the same shebang-resolution crash (B-020) from recurring in any other script, and stop silent `\r`-in-heredoc corruption in scripts that build SQL/config strings.
 **Context:** Discovered 2026-07-22 while fixing B-020. `file` on every `.sh` in the repo (`scripts/setup.sh`, `scripts/seed-db.sh`, `scripts/create-audit-partition.sh`, `scripts/generate-api-client.sh`, `eami-collector/scripts/create_api_key.sh`, all of `eami-agent/installer/{linux,macos}/*.sh`) reports CRLF terminators. No `.gitattributes` exists to pin LF for shell scripts, so a Windows checkout (`core.autocrlf=true` or similar) rewrites them on clone. These haven't crash-looped yet only because they're invoked as `bash script.sh` rather than exec'd via shebang — same landmine as B-020 for anything that changes to direct exec, and CRLF inside heredocs (`setup.sh`'s inline `psql` blocks) is a latent correctness risk even without a crash.

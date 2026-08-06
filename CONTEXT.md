@@ -443,6 +443,23 @@ or prior context suggests otherwise, it is wrong; trust this line.
   available to obtain a login token) — the user may want to reset it
   again. Full writeup in `BUILT.md`'s `eami-gateway`/`eami-api`/`eami-ui`
   sections and `BACKLOG.md`'s B-046 entry.
+- **New epic identified, not investigated (2026-08-06/07), during B-047's
+  own manual Approvals-page testing — no B-ID assigned yet, see
+  `BACKLOG.md`'s QUEUED section:** approval routing/auto-rules/in-session
+  confirmation. Three distinct capabilities: (1) tools/policies need an
+  "owner" concept so escalations route to the right person/team, not one
+  flat global admin queue — today any `admin`/`operator` sees every
+  pending approval regardless of which tool it's for, not viable for a
+  real multi-app deployment; (2) auto-approve/auto-deny rules (a
+  policy-engine extension, not just a UI change — needs investigation
+  into what `policy_conditions`' current schema could support); (3)
+  in-session confirmation, prompting the human actually driving the AI
+  conversation directly rather than an admin — architecturally novel,
+  nothing today has a channel back to an AI session's originating user as
+  far as is known, genuinely needs investigating rather than assumed
+  either way. **Explicitly needs the same investigate-first treatment as
+  every other epic before any brief gets written or scoped/sized** — do
+  not start implementation from this bullet alone.
 
 ## Last updated
 2026-08-06 by Claude Code — B-047: security dependency updates + container
