@@ -544,6 +544,24 @@ synthetic test tool name, not a regression). All throwaway fixtures
 cleaned up afterward — confirmed only the original `dev@example.com`
 seed user remains, zero leftover policies/approvals.
 
+**CI status, honestly incomplete as of this write-up — not yet confirmed
+green, per the user's own explicit "confirm it actually passes, not just
+that it should in theory" instruction.** Pushed as `bb2663e`. Run
+`31118536388`: `Docker — eami-gateway`/`Docker — eami-ui` both passed
+clean (the go1.25 builder bump and digest pins build fine in real CI, not
+just locally). `Go — eami-agent (darwin/arm64)` failed twice, both times
+before any of this task's code ever ran (`Error: Service Unavailable`
+during `actions/setup-go`'s own action-resolution step). Ruled out the
+go-version bump as the cause by comparing against the immediately prior
+run (`839e8ae`, pre-B-047 baseline) — the identical job/step succeeded
+there. Confirmed via `githubstatus.com`: a platform-wide GitHub Actions
+major outage (`qcvjkzcs7j74`, started 15:22 UTC, before this push) was
+the actual cause, still unresolved after a second retry. **Per explicit
+user instruction, stopped polling once this was confirmed external
+rather than keep spending CI cycles against a declared incident — this
+run should be rechecked once GitHub's status page shows the incident
+resolved, not assumed green from here.**
+
 Full writeup in `BUILT.md`'s `Cross-cutting / shared` section and
 `BACKLOG.md`'s B-047/B-048/B-049/B-050 entries.
 
