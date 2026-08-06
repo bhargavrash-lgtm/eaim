@@ -16,7 +16,7 @@
 # =============================================================================
 # Stage 1: builder
 # =============================================================================
-FROM golang:1.24-alpine AS builder
+FROM golang:1.24-alpine@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191 AS builder
 
 # Install build tools needed by some Go packages (git for VCS stamp, gcc not
 # needed because CGO_ENABLED=0, but ca-certificates is needed for go mod download
@@ -42,7 +42,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 # =============================================================================
 # Stage 2: runtime
 # =============================================================================
-FROM alpine:3.19
+FROM alpine:3.19@sha256:6baf43584bcb78f2e5847d1de515f23499913ac9f12bdf834811a3145eb11ca1
 
 # ca-certificates: needed for outbound TLS to eami-api (HTTPS)
 # tzdata:          needed if the service formats timestamps with a local timezone

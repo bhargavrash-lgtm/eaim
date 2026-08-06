@@ -27,7 +27,7 @@
 # Target: development
 # Used by: docker-compose.yml (local dev; hot reload via volume mount)
 # =============================================================================
-FROM node:20-alpine AS development
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS development
 
 WORKDIR /app
 
@@ -50,7 +50,7 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
 # Target: builder  (intermediate — not used directly by docker-compose)
 # Produces /app/dist for the production target.
 # =============================================================================
-FROM node:20-alpine AS builder
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS builder
 
 WORKDIR /app
 
@@ -71,7 +71,7 @@ RUN npm run generate-client && npm run build
 # Target: production
 # Used by: docker-compose.prod.yml (nginx:alpine serves the compiled SPA)
 # =============================================================================
-FROM nginx:alpine AS production
+FROM nginx:alpine@sha256:4a73073bd557c65b759505da037898b61f1be6cbcc3c2c3aeac22d2a470c1752 AS production
 
 # Copy the Vite production build from the builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
@@ -82,5 +82,11 @@ COPY eami-ui/nginx.conf /etc/nginx/conf.d/default.conf
 # 80 — nginx HTTP port
 EXPOSE 80
 
-# nginx runs as the default nginx user (not root) in the official nginx:alpine
-# image via the `USER nginx` directive in the base image configuration.
+# The official nginx:alpine image does NOT set a USER directive -- the master
+# process starts and stays root by design, since binding port 80 requires
+# root privilege. It never serves requests itself: the master's own
+# nginx.conf (baked into the base image, not overwritten by default.conf
+# above) sets `user nginx;`, so every worker process -- the ones that
+# actually accept connections and serve files -- drops to the unprivileged
+# `nginx` user immediately after fork. Root exposure is confined to the
+# master's own startup/reload/signal-handling code, not request handling.

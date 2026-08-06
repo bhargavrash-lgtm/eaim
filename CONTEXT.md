@@ -445,7 +445,109 @@ or prior context suggests otherwise, it is wrong; trust this line.
   sections and `BACKLOG.md`'s B-046 entry.
 
 ## Last updated
-2026-08-06 by Claude Code — B-046: per-endpoint action-to-path mapping for
+2026-08-06 by Claude Code — B-047: security dependency updates + container
+hardening. 5 confirmed-reachable Go CVEs fixed: `pgx` v5.6.0/5.7.2→v5.9.2
+(SQL injection + memory-safety, GO-2026-5004/CVE-2026-33815/33816),
+`golang-jwt/jwt` v5.2.1→v5.2.2 (unbounded-allocation DoS, GO-2025-3553),
+`golang.org/x/text`→v0.39.0 in both `eami-api`/`eami-gateway` (infinite
+loop, GO-2026-5970 — required an explicit `go get`, since `go mod tidy`
+alone only floors it at pgx's own v0.29.0 requirement), `go-chi/chi`
+v5.1.0→v5.3.0 (RealIP's header-spoofing-class CVEs), `golang.org/x/sys`
+v0.21.0→v0.44.0 in `eami-agent` (Windows integer overflow,
+GO-2026-5024/CVE-2026-39824, confirmed present-but-unimported, bumped
+anyway per the brief's own reasoning). `govulncheck` clean (0 reachable)
+across all 5 modules post-bump.
+
+**Two real discrepancies found and resolved with the user before
+building, not silently worked around:** (1) `react-router-dom`/`vite`
+were assumed patchable by the task brief's own contracts, but neither has
+a non-major-version fix available — `react-router-dom`'s own advisory
+lists its patched version as literally "None" in the 6.x line (only
+`react-router` v7.13.0 fixes it), and `vite`'s two CVEs fix starting at
+6.4.2/6.4.3, both a major bump beyond the already-latest-in-its-line
+5.4.21 installed. Both left unfixed, logged to `BACKLOG.md` (B-048,
+B-049) rather than force-fitting an unscoped major migration into a
+dependency-bump session. (2) pgx v5.9.2 and x/text v0.39.0 both declare
+`go 1.25.0` in their own `go.mod` (confirmed via the module proxy, not
+assumed) — this cascaded into `go.work` and the two affected modules'
+`go` directives, `eami-api`/`eami-gateway`'s Dockerfile builder images
+(`golang:1.24-alpine`→`golang:1.25-alpine`, empirically required:
+`eami-gateway`'s Dockerfile sets `GOTOOLCHAIN=local`, so an unbumped
+builder would have hard-failed rather than auto-downloading), and CI's 4
+`go-version: '1.24'` pins in `.github/workflows/build.yml`. The CI pin
+change was a deliberate, user-confirmed exception to `CLAUDE.md`'s
+"never touch CI config" hard rule, not silently done.
+
+chi's deprecated `RealIP` replaced with `ClientIPFromRemoteAddr` in
+`eami-api/internal/api/router.go` — **verified functionally inert before
+touching it**: a repo-wide grep found zero consumers of the resolved
+client IP anywhere in `eami-api` production code, so this closes the
+spoofable/deprecated path with zero behavior change today. Chose
+`ClientIPFromRemoteAddr` (trust only the raw TCP source) over a
+header-trust variant because `eami-api` is reachable both via
+`eami-ui`'s nginx proxy (which does set `X-Forwarded-For`/`X-Real-IP`)
+and directly on its own published port — no single trusted ingress
+exists. 2 new tests (`router_realip_test.go`) proving a forged
+`X-Forwarded-For`/`X-Real-IP` doesn't override the resolved IP.
+
+`eami-api`/`eami-gateway` containers now run as non-root (`USER
+65532:65532`, distroless's own nonroot UID, numeric — required for
+`eami-gateway`'s `FROM scratch` stage, which has no `/etc/passwd`).
+**A real HIGH-severity gap, caught by the mandatory code-review pass and
+fixed before commit, not by the task's own live-verification run**: both
+services self-generate and persist an RSA JWT signing key to disk on
+first boot; a brand-new Docker volume mounted over a path with no
+pre-existing content in the image defaults to root:root ownership, which
+the new non-root user can't write to. Fixed for `eami-api`'s `/certs`,
+`eami-gateway`'s `/certs`, AND `eami-gateway`'s hardcoded fallback
+`/var/lib/eami-gateway` (used only when `GATEWAY_JWT_KEY_PATH` is unset
+— neither shipped compose file unsets it today, which is exactly why the
+live-verification pass didn't catch this half and only the code-review
+pass, reasoning through the config fallback chain, did) by pre-creating
+and `--chown=65532:65532`-ing empty directories in each Dockerfile's
+builder stage. Re-verified live against the actual failure scenario
+(a throwaway `docker run` with `GATEWAY_JWT_KEY_PATH` unset and a fresh
+anonymous volume), not just re-read. This machine's pre-existing dev
+`api_certs`/`gateway_certs` volumes (already containing root-owned keys
+from prior sessions) needed a one-time manual `chown` — documented as
+the same step a real production upgrade to this image would need.
+
+All 4 service Dockerfiles now pin their base images by sha256 digest
+(real digests fetched via `docker pull`+`docker inspect`, not
+hand-typed); `eami-collector` pinned with no version bump (not exposed
+to any in-scope CVE). `eami-ui/Dockerfile`'s comment falsely claiming
+nginx's base image sets a non-root `USER` corrected — **verified
+empirically wrong** (`docker inspect`/`docker run id` show no `USER`,
+root by default; the base image's own `nginx.conf` sets `user nginx;`,
+which only worker processes read) — no runtime behavior change, comment
+accuracy only. `postcss` patch-bumped 8.5.15→8.5.18. `x/crypto`'s 17
+advisories logged as B-050, confirmed unreachable via `govulncheck`
+(only `bcrypt` is imported).
+
+Reviewer + security subagent passes both ran as real independent
+sub-tasks against the actual diff. Security pass: zero findings ≥7
+confidence. Code-review pass: the one real HIGH finding above (fixed),
+plus one LOW informational note (the RealIP swap has zero consumers
+today — not a defect).
+
+**Live-verified end-to-end against the real `docker-compose` stack,
+rebuilt fresh (`--no-cache`, all 4 changed images):** `docker top`
+confirmed `eami-api`/`eami-gateway` run as UID 65532. Full E2E flow
+through the rebuilt stack: login (throwaway admin, direct SQL insert —
+no signup route exists) → created a real `escalate` policy via the real
+API → issued a real agent JWT → opened a real MCP SSE session → posted a
+real `tool_call` → confirmed a genuine `approval_requests` row landed
+pending → approved it via the real decide API → confirmed the gateway
+resumed and attempted the downstream dispatch (expected
+"unsupported protocol scheme" — no real downstream configured for the
+synthetic test tool name, not a regression). All throwaway fixtures
+cleaned up afterward — confirmed only the original `dev@example.com`
+seed user remains, zero leftover policies/approvals.
+
+Full writeup in `BUILT.md`'s `Cross-cutting / shared` section and
+`BACKLOG.md`'s B-047/B-048/B-049/B-050 entries.
+
+Prior entry, still accurate: 2026-08-06 by Claude Code — B-046: per-endpoint action-to-path mapping for
 `rest_api`-type `gateway_tools`, closing the gap B-044's own manual testing
 surfaced live that same night (`"Test/query"` 404'd because every action
 for a tool POSTed to the identical flat `base_url`, regardless of name).

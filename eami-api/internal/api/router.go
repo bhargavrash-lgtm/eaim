@@ -113,7 +113,13 @@ func (s *Server) Router() http.Handler { return s.Handler() }
 //   viewer   -- GET requests only
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RealIP)
+	// eami-api is reachable both via eami-ui's nginx proxy (which sets
+	// X-Forwarded-For/X-Real-IP) and directly on its published port -- there
+	// is no single trusted ingress, so we don't trust caller-supplied IP
+	// headers. ClientIPFromRemoteAddr reads only the TCP connection's actual
+	// source address; read it back with middleware.GetClientIP. Replaces the
+	// deprecated middleware.RealIP (CVE-class header-spoofing risk).
+	r.Use(middleware.ClientIPFromRemoteAddr)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 
