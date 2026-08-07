@@ -460,6 +460,23 @@ or prior context suggests otherwise, it is wrong; trust this line.
   either way. **Explicitly needs the same investigate-first treatment as
   every other epic before any brief gets written or scoped/sized** — do
   not start implementation from this bullet alone.
+- **`ARCHITECTURE.md` §8 (Deployment Topology) is now stale — flagged
+  here for whoever owns that file next, not silently edited.** ADR-020
+  (2026-08-07, `DECISIONS.md`) resolved a real inconsistency a VM
+  appliance investigation surfaced: §8 describes `eami-api`/`eami-ui` as
+  already-separate, EAMI-hosted cloud SaaS, distinct from an on-prem
+  `eami-gateway`/`eami-collector` — but `docker-compose.prod.yml`, what
+  actually ships today, bundles all five services into one self-contained
+  on-prem stack. ADR-020 resolves this as **two sequenced deployment
+  models**: Model A (v1, build first) = the fully self-contained
+  appliance already implemented by `docker-compose.prod.yml`, matching
+  current reality, no architectural change needed. Model B (future, not
+  yet scheduled) = the hybrid model §8 currently describes as already
+  true — real, not abandoned, just sequenced after Model A ships.
+  `ARCHITECTURE.md` §8 needs a correction pass to reflect Model A as
+  current and Model B as a labeled future tier, not present reality.
+  `ARCHITECTURE.md` is Architect-EAMI-owned per `BOUNDARIES.md` — this
+  bullet is the flag, not the fix.
 
 ## Last updated
 2026-08-06 by Claude Code — B-047: security dependency updates + container

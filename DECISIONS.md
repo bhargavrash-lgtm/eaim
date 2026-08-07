@@ -388,6 +388,30 @@ Episode/memory full content stays on-prem and is never served by `eami-api`. `ea
 
 ---
 
+## ADR-020 — Two sequenced deployment models: self-contained appliance first, hybrid SaaS later
+
+**Date:** 2026-08-07  
+**Status:** Accepted  
+**Deciders:** PM-EAMI
+
+**Context:**  
+A VM appliance packaging investigation (2026-08-06/07, no code changed) found a real inconsistency: `ARCHITECTURE.md` §8 documents a hybrid model where `eami-api`/`eami-ui` are EAMI-hosted cloud SaaS, separate from an on-prem `eami-gateway`/`eami-collector` — but `docker-compose.prod.yml`, what's actually shipping today, already bundles all five services (`postgres`, `eami-collector`, `eami-gateway`, `eami-api`, `eami-ui`) into one self-contained on-prem stack. These two descriptions of the product no longer agree, and the appliance-packaging question (bootable VM image, first-boot wizard, update mechanism) can't be scoped without first knowing which one is the real target.
+
+**Decision:**  
+EAMI ships as two deployment models, sequenced rather than simultaneous:
+- **Model A (v1, build first):** fully self-contained appliance. Every service — gateway, collector, api, ui, database — runs on the customer's own infrastructure. One appliance per customer. Zero data ever reaches EAMI-operated infrastructure. This is exactly what `docker-compose.prod.yml` already implements today — no architectural change required to reach this state, it already exists.
+- **Model B (future, not yet scheduled):** hybrid. `eami-gateway`/`eami-collector` — the data-sovereignty-critical pieces per ADR-010 — stay on-prem. `eami-api`/`eami-ui` become a centrally-hosted service operated by EAMI. A real future tier, not abandoned by this decision, just explicitly sequenced after Model A ships and proves out.
+
+**Rationale:**  
+Model A matches the target customer experience (a Device42-style pre-built appliance, no SaaS dependency, no data leaving customer premises) and requires zero new architectural work — it's already what `docker-compose.prod.yml` runs, so appliance packaging builds directly on existing reality instead of inventing a new topology. Model B remains valuable as a future lower-friction tier for customers who'd accept a centrally-hosted control plane in exchange for not operating `eami-api`/`eami-ui` themselves, but nothing about it is needed to ship a first appliance, and building it prematurely would mean solving multi-tenant SaaS concerns (cross-customer isolation at `eami-api` scale, which today only has to isolate orgs *within* one customer's own appliance) before there's a customer asking for it.
+
+**Consequences:**
+- `ARCHITECTURE.md` §8 (and any other section describing `eami-api`/`eami-ui` as already-separate hosted SaaS) is now inaccurate for Model A and needs a correction pass — flagged in `CONTEXT.md`'s standing facts for whoever owns that file next (`ARCHITECTURE.md` is Architect-EAMI-owned per `BOUNDARIES.md`; not edited directly by this decision)
+- The VM appliance investigation's Part A (packaging)/B (first-boot wizard)/C (update mechanism) findings apply directly to Model A with no rework — the appliance packages exactly the `docker-compose.prod.yml` stack already running today, not a hypothetical reduced subset
+- Model B, when picked up, needs its own scoping pass — multi-tenant isolation at `eami-api`'s new hosted scale, migration path for a Model-A customer who later wants to move to Model B, and org-boundary enforcement between `eami-api` (now serving multiple customers) and each customer's own on-prem `eami-gateway` are all open questions not addressed by this ADR
+
+---
+
 ## Pending Decisions
 
 | ID | Question | Owner | Due |
