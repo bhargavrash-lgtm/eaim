@@ -3,8 +3,12 @@
 #   1. cp .env.example .env  (edit passwords/keys as needed)
 #   2. docker-compose up
 #
-# On first start, schema/schema.sql is applied automatically by the
-# postgres init script. All services will be healthy within ~60 seconds.
+# Schema is applied by the `migrate` service (golang-migrate, B-051) before
+# any other service starts -- not by postgres's own init-script mechanism
+# (which only ever ran schema.sql once, on a genuinely fresh data
+# directory, and had no path to apply a later change to an already-seeded
+# database). Fresh installs and existing installs go through the identical
+# `migrate up` invocation. All services will be healthy within ~60 seconds.
 #
 # Ports exposed:
 #   5432  — PostgreSQL
@@ -38,7 +42,6 @@ services:
       - "cron.database_name=eami"
     volumes:
       - postgres_data:/home/postgres/pgdata/data
-      - ./schema/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       # Read-only: lets `docker compose exec postgres pg_restore ... /backups/<file>`
       # run directly against a backup without copying files between containers
       # first. eami-backup below is the only writer of this volume.
@@ -51,6 +54,41 @@ services:
       timeout: 3s
       retries: 10
       start_period: 30s
+
+  # ──────────────────────────────────────────────────────────────
+  # migrate — applies schema/migrations-v2/*.sql via golang-migrate (B-051)
+  # Runs once to completion, then exits 0. eami-api/eami-gateway depend on
+  # that success before they're allowed to start, so no service ever runs
+  # against a not-yet-migrated schema. Same invocation for a fresh empty
+  # database (all migrations apply) and an existing one (only pending
+  # migrations apply, tracked in migrate's own schema_migrations table) --
+  # deliberately one mechanism, not a fresh-install/upgrade fork.
+  # ──────────────────────────────────────────────────────────────
+  # SECURITY NOTE (found during this brief's own review): POSTGRES_PASSWORD
+  # is interpolated into this URL unescaped -- a password containing
+  # postgres:// URL-reserved characters (+, /, =, %) could misparse or, on
+  # some golang-migrate versions, echo into error output. Root cause fixed
+  # at the source: .env.example now documents hex-only generation
+  # (openssl rand -hex 32, matching every other secret in this file and
+  # setup.sh's own already-filtered generator). scripts/migrate.sh
+  # (the manual invocation path) additionally URL-encodes defensively.
+  # This automatic-at-boot path does not, since migrate/migrate's minimal
+  # Alpine image has no reliable way to do so from pure compose YAML
+  # without a fragile inline shell one-liner -- accepted as a documented
+  # residual, same risk class already present (unfixed, out of this
+  # brief's scope) in eami-api/eami-gateway's own DSN construction.
+  migrate:
+    image: migrate/migrate:v4.19.1@sha256:cc4ad8e19d66791e3689405d9a028ce6e9614f32032db14acda1469f7201d6e4
+    volumes:
+      - ./schema/migrations-v2:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://eami_app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set — see .env.example}@postgres:5432/eami?sslmode=disable"
+      - "up"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   # ──────────────────────────────────────────────────────────────
   # eami-backup — scheduled Postgres backups (B-029)
@@ -138,6 +176,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   # ──────────────────────────────────────────────────────────────
@@ -179,6 +219,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   # ──────────────────────────────────────────────────────────────

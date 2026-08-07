@@ -479,7 +479,97 @@ or prior context suggests otherwise, it is wrong; trust this line.
   bullet is the flag, not the fix.
 
 ## Last updated
-2026-08-06 by Claude Code — B-047: security dependency updates + container
+2026-08-07 by Claude Code — B-051: real database migration runner, closing
+the VM-appliance investigation's own C7 finding — no mechanism existed to
+apply a schema change to an already-running, already-seeded database
+(`schema.sql` only ever ran once, via Postgres's own
+`docker-entrypoint-initdb.d`, on a genuinely empty data directory).
+
+**Tool: golang-migrate via its official `migrate/migrate` Docker image**
+(digest-pinned), not embedded as a Go library in any of the 5 existing
+service modules — zero new Go dependency added anywhere, matches this
+repo's established pattern of using official upstream images directly.
+
+**Reconciliation of the old `schema/migrations/001-010`, investigated not
+assumed:** read all 10 before deciding. Only `005`, `007`, and `008` are
+actually idempotency-guarded — `001`, `002`, `003`, `004`, `009`, and
+`010` all use bare `CREATE TABLE`/`ALTER TABLE ADD COLUMN`/`CREATE INDEX`/
+`CREATE TRIGGER` that error on any re-run (the task brief itself assumed
+007/010 were the safe examples — 010 is actually one of the unguarded
+ones). Chose a fresh baseline over retrofitting: new
+`schema/migrations-v2/000001_baseline.up.sql` captures `schema.sql`'s
+current, verified-accurate cumulative content, hand-rewritten with
+idempotency guards throughout — a code-review pass mechanically diffed it
+against `schema.sql` afterward and confirmed zero content discrepancies,
+not just eyeballed. `000001_baseline.down.sql` is a deliberate no-op
+(pairs with B-029's existing backup/restore mechanism as the real
+rollback story, not true reversible down-migrations, per the brief's own
+contract). `000002_add_orgs_table_comment` — a deliberately trivial,
+genuinely harmless (`COMMENT ON TABLE`, pure metadata) second migration
+proving the mechanism end-to-end without an actual schema change, flagged
+explicitly to the user as the chosen approach before building, per their
+own instruction. Old `schema/migrations/001-010` left in place with a new
+`schema/migrations/README.md` marking them historical/non-runnable.
+
+`docker-compose.yml`/`.prod.yml`: removed the old
+`docker-entrypoint-initdb.d` schema.sql mount entirely — the new
+`migrate` service (runs once, applies pending migrations, exits) is now
+the *only* path, fresh installs and upgrades identical, no fork. New
+`depends_on: migrate: condition: service_completed_successfully` on
+`eami-api`/`eami-gateway`. New `scripts/migrate.sh` wrapper for manual
+runs against an already-up stack (`up`/`version`/`force VERSION`).
+
+**A real MEDIUM security finding, found and fixed before commit:**
+`POSTGRES_PASSWORD` interpolated unescaped into a `postgres://` URL can
+misparse or leak on some golang-migrate versions if it contains
+base64-reserved characters — not theoretical, this session's own real dev
+password already contains a `+`. Fixed at the root (`.env.example` now
+generates hex-only passwords, matching `setup.sh`'s own already-safe
+generator) plus defense-in-depth (`scripts/migrate.sh` URL-encodes,
+re-verified live against the real `+`-containing password). The
+automatic-at-boot compose-service path left as a documented residual —
+same risk class already pre-existing, unfixed, in `eami-api`/
+`eami-gateway`'s own DSN construction, out of this brief's scope.
+
+New standalone Go module `schema/migrationtest/` — deliberately **not**
+added to `go.work`: doing so broke `eami-gateway`'s Docker build (caught
+live, not just reasoned about — that Dockerfile copies each workspace
+member's `go.mod` individually, and `go.work` requires every listed
+member to exist on disk inside the container). Run via `GOWORK=off`. 4
+real-Postgres integration tests, each creating/dropping its own throwaway
+database (`eami_app`'s `CREATEDB` confirmed, not assumed).
+
+Reviewer + security passes both ran for real (security's first attempt
+hit a transient API error mid-run, retried cleanly). Security found the
+MEDIUM password-encoding issue above (fixed). Code review found and this
+session fixed 3 more: a stale `x/text` CVE reintroduced in the new test
+module's own `go.mod` (bumped, re-verified via `govulncheck`); zero CI
+wiring for the new test module — investigated and found this is actually
+a repo-wide gap (no Go module's tests run in CI at all), logged honestly
+as its own item (**B-052**) rather than narrowly patched; a test cleanup
+path that swallowed its own failure via `t.Logf` instead of `t.Errorf`
+(fixed, so a leaked throwaway database now fails the test that leaked it).
+
+**Live-verified beyond the automated tests:** this session's real,
+already-seeded dev database (real `dev@example.com` user, real prior
+B-04x data) was stamped at baseline version 1 — only after confirming via
+direct SQL that its actual schema genuinely matched the baseline first —
+then had migration 2 applied for real: the comment landed, all existing
+data confirmed untouched, a second run correctly reported `no change`.
+Separately, a fully isolated fresh `docker compose -p eami-b051-test`
+project (genuinely empty Postgres volume) confirmed via real container
+state transitions that `migrate` completes and exits 0 strictly before
+`eami-gateway`/`eami-api` ever begin starting — proving the startup-gating
+acceptance criterion holds for real, not just in compose-config theory.
+Fully torn down afterward; the real dev stack's `postgres` (briefly
+stopped to free port 5432 for the isolated test) restarted with all data
+confirmed intact, `eami-api`/`eami-gateway` health endpoints re-confirmed
+`200`.
+
+Full writeup in `BUILT.md`'s `Cross-cutting / shared` section and
+`BACKLOG.md`'s B-051/B-052 entries.
+
+Prior entry, still accurate: 2026-08-06 by Claude Code — B-047: security dependency updates + container
 hardening. 5 confirmed-reachable Go CVEs fixed: `pgx` v5.6.0/5.7.2→v5.9.2
 (SQL injection + memory-safety, GO-2026-5004/CVE-2026-33815/33816),
 `golang-jwt/jwt` v5.2.1→v5.2.2 (unbounded-allocation DoS, GO-2025-3553),

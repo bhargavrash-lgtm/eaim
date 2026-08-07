@@ -7,3 +7,12 @@ use (
 	./eami-gateway
 	./eami-policy
 )
+
+// schema/migrationtest is deliberately NOT a workspace member -- it imports
+// nothing from the other 5 modules (only golang-migrate + pgx, both
+// external), so it doesn't need workspace-local module resolution. Adding
+// it here broke eami-gateway's Docker build: that Dockerfile copies each
+// workspace member's go.mod/go.sum individually into the builder stage,
+// and `go mod download` fails if go.work references a path that isn't
+// present on disk inside the container. Run it standalone instead:
+// `cd schema/migrationtest && go test ./...`.

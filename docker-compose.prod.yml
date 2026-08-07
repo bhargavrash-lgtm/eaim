@@ -34,7 +34,6 @@ services:
       - "cron.database_name=eami"
     volumes:
       - postgres_data:/home/postgres/pgdata/data
-      - ./schema/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       # Read-only: lets `docker compose exec postgres pg_restore ... /backups/<file>`
       # run directly against a backup without copying files between containers
       # first. eami-backup below is the only writer of this volume.
@@ -46,6 +45,34 @@ services:
       timeout: 3s
       retries: 10
       start_period: 30s
+
+  # ──────────────────────────────────────────────────────────────
+  # migrate — applies schema/migrations-v2/*.sql via golang-migrate (B-051)
+  # Same mechanism as docker-compose.yml (dev) -- fresh installs and
+  # existing installs being updated both go through this identical
+  # invocation, no separate code path. See RECOVERY.md/scripts/backup-db.sh
+  # for the pre-update backup this pairs with as the actual rollback story.
+  # ──────────────────────────────────────────────────────────────
+  # SECURITY NOTE (found during this brief's own review): POSTGRES_PASSWORD
+  # is interpolated into the -database URL below unescaped -- a password
+  # containing postgres:// URL-reserved characters (+, /, =, %) could
+  # misparse or, on some golang-migrate versions, echo into error output.
+  # Root cause fixed at the source: .env.example now documents hex-only
+  # generation. scripts/migrate.sh (the manual invocation path) additionally
+  # URL-encodes defensively. This automatic-at-boot path does not -- same
+  # residual, same reasoning as docker-compose.yml's identical note.
+  migrate:
+    image: migrate/migrate:v4.19.1@sha256:cc4ad8e19d66791e3689405d9a028ce6e9614f32032db14acda1469f7201d6e4
+    volumes:
+      - ./schema/migrations-v2:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://eami_app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set — see .env.example}@postgres:5432/eami?sslmode=disable"
+      - "up"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   # ──────────────────────────────────────────────────────────────
   # eami-backup — scheduled Postgres backups (B-029)
@@ -123,6 +150,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   # ──────────────────────────────────────────────────────────────
@@ -158,6 +187,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   # ──────────────────────────────────────────────────────────────
