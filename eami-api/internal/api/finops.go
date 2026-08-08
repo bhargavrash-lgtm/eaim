@@ -45,6 +45,11 @@ func (s *Server) FinOpsSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.queries == nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "finops store is not configured")
+		return
+	}
+
 	orgID := pgtype.UUID{Bytes: uc.OrgID, Valid: true}
 	fromTS := pgtype.Timestamptz{Time: from, Valid: true}
 	toTS := pgtype.Timestamptz{Time: to, Valid: true}
@@ -261,6 +266,11 @@ func (s *Server) FinOpsTimeSeries(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		agentFilter = pgtype.UUID{Bytes: agID, Valid: true}
+	}
+
+	if s.queries == nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "finops store is not configured")
+		return
 	}
 
 	orgID := pgtype.UUID{Bytes: uc.OrgID, Valid: true}
