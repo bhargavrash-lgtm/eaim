@@ -19,13 +19,119 @@ concurrency:
 jobs:
 
   # ════════════════════════════════════════════════════════════════════════
+  # Go tests — one job per go.work module (matrix), each against its own
+  # real Postgres service container (timescale/timescaledb-ha:pg16 -- the
+  # same image docker-compose.yml uses, since the schema requires the
+  # pgvector/timescaledb extensions the stock `postgres` image lacks).
+  # schema/migrations-v2 is applied via the real golang-migrate CLI before
+  # tests run, mirroring B-051's actual production migration mechanism.
+  #
+  # This is a real gate, not informational: build-images below requires
+  # this job (and test-migrationtest) to pass first, so a broken test
+  # blocks the image from ever reaching GHCR.
+  # ════════════════════════════════════════════════════════════════════════
+  test:
+    name: Test — ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [eami-agent, eami-collector, eami-policy, eami-api, eami-gateway]
+    services:
+      postgres:
+        image: timescale/timescaledb-ha:pg16
+        env:
+          POSTGRES_DB: eami
+          POSTGRES_USER: eami_app
+          POSTGRES_PASSWORD: ci_test_pg_password_not_a_real_secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U eami_app -d eami"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Install golang-migrate CLI
+        run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1
+
+      - name: Apply schema migrations
+        run: |
+          migrate -path=schema/migrations-v2 \
+            -database "postgresql://eami_app:ci_test_pg_password_not_a_real_secret@127.0.0.1:5432/eami?sslmode=disable" \
+            up
+
+      - name: go build
+        run: cd ${{ matrix.module }} && go build ./...
+
+      - name: go vet
+        run: cd ${{ matrix.module }} && go vet ./...
+
+      - name: go test
+        env:
+          TEST_DATABASE_URL: postgresql://eami_app:ci_test_pg_password_not_a_real_secret@127.0.0.1:5432/eami
+        run: cd ${{ matrix.module }} && go test ./... -v
+
+  # ════════════════════════════════════════════════════════════════════════
+  # schema/migrationtest -- deliberately standalone, outside go.work (see
+  # go.work's own comment). Its tests create/drop their own throwaway
+  # per-test databases, so no migration pre-apply step is needed here --
+  # just a reachable, CREATEDB-capable Postgres (eami_app is the image's
+  # bootstrap superuser, confirmed by B-051).
+  # ════════════════════════════════════════════════════════════════════════
+  test-migrationtest:
+    name: Test — schema/migrationtest
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: timescale/timescaledb-ha:pg16
+        env:
+          POSTGRES_DB: eami
+          POSTGRES_USER: eami_app
+          POSTGRES_PASSWORD: ci_test_pg_password_not_a_real_secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U eami_app -d eami"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: schema/migrationtest/go.sum
+
+      - name: go test (GOWORK=off)
+        env:
+          # migrationtest's own testPgConn() hardcodes host 127.0.0.1:5432
+          # and reads the password from POSTGRES_PASSWORD specifically (only
+          # checks TEST_DATABASE_URL is *set* to avoid skipping) -- both
+          # must be provided, matching this service's actual port/password.
+          TEST_DATABASE_URL: postgresql://eami_app:ci_test_pg_password_not_a_real_secret@127.0.0.1:5432/eami
+          POSTGRES_PASSWORD: ci_test_pg_password_not_a_real_secret
+          GOWORK: "off"
+        run: cd schema/migrationtest && go test ./... -v
+
+  # ════════════════════════════════════════════════════════════════════════
   # Docker images — one job per service (matrix)
   # Builds on every push to main and on every tag.
   # Images are pushed to GHCR only on main/tags (not on PRs).
+  # Gated on `test`/`test-migrationtest` passing first (B-052) -- a broken
+  # test must never let a broken image reach the registry.
   # ════════════════════════════════════════════════════════════════════════
   build-images:
     name: Docker — ${{ matrix.service }}
     runs-on: ubuntu-latest
+    needs: [test, test-migrationtest]
     strategy:
       fail-fast: false
       matrix:
