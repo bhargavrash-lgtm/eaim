@@ -76,7 +76,11 @@ jobs:
       - name: go test
         env:
           TEST_DATABASE_URL: postgresql://eami_app:ci_test_pg_password_not_a_real_secret@127.0.0.1:5432/eami
-        run: cd ${{ matrix.module }} && go test ./... -v
+        # -count=1 disables Go's test-result cache: without it, a build/
+        # source-unchanged rerun can silently reuse a stale cached result
+        # instead of actually re-executing (bit this session for real --
+        # see B-016/finops.go's commit message).
+        run: cd ${{ matrix.module }} && go test ./... -count=1 -v
 
   # ════════════════════════════════════════════════════════════════════════
   # schema/migrationtest -- deliberately standalone, outside go.work (see
@@ -119,7 +123,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://eami_app:ci_test_pg_password_not_a_real_secret@127.0.0.1:5432/eami
           POSTGRES_PASSWORD: ci_test_pg_password_not_a_real_secret
           GOWORK: "off"
-        run: cd schema/migrationtest && go test ./... -v
+        run: cd schema/migrationtest && go test ./... -count=1 -v
 
   # ════════════════════════════════════════════════════════════════════════
   # Docker images — one job per service (matrix)

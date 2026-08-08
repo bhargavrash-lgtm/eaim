@@ -16,8 +16,8 @@
 //   handler in this package's own "if s.queries != nil" convention (see
 //   tools.go's toolQueries()) -- a real, clean 500 now, never a panic.
 //   TestFinOps*_NoStoreConfigured_ReturnsCleanError below proves this
-//   directly, mirroring tools_test.go's TestToolHandlers_NoStoreConfigured_
-//   ReturnsCleanError.
+//   directly (asserts the exact status code), mirroring tools_test.go's
+//   TestToolHandlers_NoStoreConfigured_ReturnsCleanError.
 //
 // Run:
 //   go test -count=1 -run TestParseDateParam ./internal/api/...

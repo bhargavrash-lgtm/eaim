@@ -308,6 +308,11 @@ func (s *Server) PasteEventsTimeSeries(w http.ResponseWriter, r *http.Request) {
 		domainFilter = pgtype.Text{String: strings.ToLower(d), Valid: true}
 	}
 
+	if s.queries == nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "paste events store is not configured")
+		return
+	}
+
 	orgID := pgtype.UUID{Bytes: uc.OrgID, Valid: true}
 	fromTS := pgtype.Timestamptz{Time: from, Valid: true}
 	toTS := pgtype.Timestamptz{Time: to, Valid: true}

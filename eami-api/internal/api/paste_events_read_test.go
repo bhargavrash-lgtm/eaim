@@ -266,6 +266,45 @@ func TestPasteEventsRead_TimeSeries_RejectsBadGranularity(t *testing.T) {
 	}
 }
 
+// TestPasteEventsRead_TimeSeries_NoStoreConfigured_ReturnsCleanError proves
+// the B-016-class fix applied to PasteEventsTimeSeries: a request that
+// passes validation but hits a Server with s.queries == nil must return a
+// clean 500, not nil-pointer-panic inside s.queries.DB() (recovered into an
+// opaque 500 by chi's Recoverer). Mirrors finops_test.go's
+// TestFinOpsTimeSeries_NoStoreConfigured_ReturnsCleanError and tools_test.go's
+// TestToolHandlers_NoStoreConfigured_ReturnsCleanError. Deliberately doesn't
+// use newReadEnv/newPasteEventsTestEnv (both require a real Postgres
+// connection) -- s.queries is nil by construction here, so no database is
+// needed to prove this guard.
+func TestPasteEventsRead_TimeSeries_NoStoreConfigured_ReturnsCleanError(t *testing.T) {
+	authSvc, err := auth.NewService("", time.Hour, 30*24*time.Hour)
+	if err != nil {
+		t.Fatalf("auth.NewService: %v", err)
+	}
+	s := api.NewServer(nil, authSvc, nil, nil) // s.queries is nil
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	tok, _, err := authSvc.IssueAccessToken(uuid.New(), uuid.New(), "viewer@test.example", "viewer")
+	if err != nil {
+		t.Fatalf("issue viewer token: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/v1/paste-events/timeseries?from=2025-01-01&to=2025-02-01&granularity=day", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("want a clean 500 when no store is configured, got %d", resp.StatusCode)
+	}
+}
+
 // ─── EXPLAIN ANALYZE evidence, at the volume B-032 already proved out ──────
 //
 // Reuses B-032's own seeded-volume convention (paste_events_test.go's
