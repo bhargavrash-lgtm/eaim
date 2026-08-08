@@ -479,7 +479,76 @@ or prior context suggests otherwise, it is wrong; trust this line.
   bullet is the flag, not the fix.
 
 ## Last updated
-2026-08-07 by Claude Code — B-051: real database migration runner, closing
+2026-08-08 by Claude Code — B-052/B-016: `go test` runs for real in CI for
+the first time ever, across all 6 Go modules, gated on a real Postgres —
+and the gate caught a real pre-existing bug (B-016) on its very first run.
+
+New `.github/workflows/build.yml` `test` matrix job (5 `go.work` modules,
+each with its own `timescale/timescaledb-ha:pg16` service container --
+chosen over the stock `postgres` image because the schema needs the
+pgvector/TimescaleDB extensions it lacks -- `schema/migrations-v2` applied
+via the pinned `golang-migrate` CLI before tests run, mirroring B-051's
+real production mechanism) plus a separate `test-migrationtest` job
+(`GOWORK=off`, no pre-migration needed). **`build-images` now `needs:
+[test, test-migrationtest]` -- a deliberate, explicitly-asked user choice**
+(gating vs. running tests fully in parallel with builds) made because
+B-051's update mechanism now assumes published GHCR images are
+trustworthy; a broken test must never let a broken image reach the
+registry. Real cost measured: ~1m40s baseline -> ~2m54s-3m12s post-change,
+judged acceptable since `push: true` only fires on main/tags. All 5
+matrix legs get a Postgres service uniformly (another explicit user
+choice) even though only 2 of 5 modules have real-Postgres tests today --
+rejected conditional-per-module wiring as not worth the future maintenance
+cost.
+
+**The gate caught a real bug on its first real run:** `eami-api/internal/
+api/finops.go`'s `FinOpsSummary`/`FinOpsTimeSeries` called `s.queries.DB()`
+with no nil-guard, unlike every other handler's own `"if s.queries != nil"`
+convention -- this is B-016, queued since 2026-07-22 (discovered during
+B-002 Brief 2's first-ever real `go test` pass in this repo) and never
+picked up until CI itself started actually running tests. A request that
+passes validation against `finops_test.go`'s deliberately-nil-`s.queries`
+test server nil-pointer-panicked, silently recovered into an opaque 500 by
+chi's `Recoverer`, masked by the tests' own weak `!= 400` assertions.
+**Confirmed with real evidence before fixing, not from a third-party log
+summary a review tool produced** -- the user explicitly flagged that lead
+as unverified and asked for independent confirmation; reproduced the exact
+panic locally with a full stack trace via `go test -count=1`. Fixed with a
+guard-clause matching `tools.go`'s `toolQueries()` precedent exactly,
+deliberately not a mock-store fix (risks masking other real gaps behind
+fabricated responses) -- the user explicitly rejected that alternative
+before it was built.
+
+**A real process failure, caught and corrected in-session:** an initial
+"all 6 modules verified locally" pass was actually a false negative -- Go's
+test-result cache doesn't invalidate on env-var changes without
+`-count=1`, so a stale pre-fix cached result was silently reused. CI's own
+`go test` steps subsequently gained `-count=1` too, closing the identical
+risk inside the gate itself.
+
+**Mandatory code-review pass found the same bug's twin, missed by the
+original brief:** `paste_events.go:314`'s `PasteEventsTimeSeries` had the
+identical unguarded call, never caught because its tests always require a
+real Postgres connection or skip. Fixed identically, with a new
+no-Postgres-required proving test.
+
+AC1 (gate blocks on failure) proven twice: organically (the real B-016 bug
+failed `test`, `build-images` correctly skipped) and deliberately (a
+one-line assertion flip in `eami-policy/policy_test.go`, pushed, confirmed
+red + skipped, reverted, confirmed green). 5 separate pushes to master,
+each polled to real completion via the GitHub API, `githubstatus.com`
+checked "All Systems Operational" before trusting every result. Security
+review: no findings. Full writeup in `BUILT.md`'s `Cross-cutting / shared`
+section and `BACKLOG.md`'s consolidated B-052/B-016 entry.
+
+**Known limitation, disclosed not hidden:** no branch protection exists on
+this repo today, so a red run doesn't block a merge by GitHub's own
+enforcement -- the gate's real teeth today are `build-images`' `needs:`
+dependency (concretely blocks GHCR pushes) and the visible red commit
+status. Branch protection itself is a smaller separate follow-up, not done
+here.
+
+Prior entry, still accurate: 2026-08-07 by Claude Code — B-051: real database migration runner, closing
 the VM-appliance investigation's own C7 finding — no mechanism existed to
 apply a schema change to an already-running, already-seeded database
 (`schema.sql` only ever ran once, via Postgres's own
