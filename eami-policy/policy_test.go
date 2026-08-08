@@ -39,7 +39,7 @@ func TestMatchesRule_AgentNameGlob(t *testing.T) {
 		agentName string
 		want      bool
 	}{
-		{"exact match", "test-agent", "test-agent", true},
+		{"exact match", "test-agent", "test-agent", false}, // B-052 AC1: deliberate breakage to prove the CI gate, will be reverted
 		{"wildcard suffix", "test-*", "test-agent", true},
 		{"wildcard prefix", "*-agent", "test-agent", true},
 		{"full wildcard", "*", "anything", true},
