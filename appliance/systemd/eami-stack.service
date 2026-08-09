@@ -1,0 +1,24 @@
+[Unit]
+Description=EAMI appliance — bring up the docker-compose.prod.yml stack
+After=docker.service eami-data-disk.service network-online.target
+Requires=docker.service eami-data-disk.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/eami-stack.sh
+TimeoutStartSec=600
+# journal+console (not the systemd default of journal-only) is deliberate,
+# not build-time debug cruft: with SSH permanently disabled, the console
+# IS the documented emergency-access path (see README.md), so this bring-up
+# service's own progress/errors (including the real ones this unit's own
+# fixes were found from -- a udev-timing race, a missing `parted` package,
+# containerd's separate data root, and a data.mount race, none of which
+# would have been diagnosable blind) need to be visible there directly,
+# without requiring `journalctl` access via a shell that doesn't exist.
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

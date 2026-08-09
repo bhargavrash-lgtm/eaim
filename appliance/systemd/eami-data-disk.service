@@ -1,0 +1,26 @@
+[Unit]
+Description=EAMI appliance — provision and mount the data disk
+After=systemd-udevd.service local-fs.target
+Before=docker.service containerd.service
+Requires=systemd-udevd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# udevadm settle -- not just After=systemd-udevd.service -- because ordering
+# after the *daemon* only guarantees udevd is running, not that it has
+# finished processing the uevent for a just-attached virtio-blk device
+# (found live: the first real boot test raced /dev/vdb's own device-node
+# creation and failed with "device not found", DefaultDependencies=no had
+# made this unit start concurrently with systemd-udevd itself).
+ExecStartPre=/usr/bin/udevadm settle
+ExecStart=/usr/local/sbin/eami-data-disk.sh
+# journal+console deliberate, not debug cruft left behind -- see
+# eami-stack.service's own comment on why: SSH is permanently disabled, so
+# the console is the real emergency-diagnostics path for this unit's own
+# boot-critical work.
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

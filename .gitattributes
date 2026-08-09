@@ -8,3 +8,7 @@
 scripts/backup-db.sh text eol=lf
 scripts/backup-entrypoint.sh text eol=lf
 scripts/migrate.sh text eol=lf
+
+# Same class of fix, B-053: appliance provisioning/boot scripts, run inside
+# a Debian VM via Packer (upload) and systemd (boot) -- not Windows at all.
+appliance/scripts/*.sh text eol=lf

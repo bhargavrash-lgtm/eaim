@@ -479,7 +479,100 @@ or prior context suggests otherwise, it is wrong; trust this line.
   bullet is the flag, not the fix.
 
 ## Last updated
-2026-08-08 by Claude Code — B-052/B-016: `go test` runs for real in CI for
+2026-08-09 by Claude Code — B-053: VM appliance base image + first-boot
+detection (Model A per ADR-020), the first appliance-packaging deliverable.
+
+New `appliance/` directory: Packer template (Debian 12 generic cloud qcow2,
+`qemu` builder), `provision-base.sh` (installs Docker, wires in two
+systemd units, locks the image down before capture), `eami-data-disk.sh`
+(idempotently formats/mounts a second virtio disk as `/data`, redirects
+**both** Docker's `data-root` and containerd's separate `root` there --
+missing the containerd half caused a real bug found live: an OS-image
+update reset containerd's state while Docker's persisted container
+metadata still referenced old snapshots, `"RWLayer ... unexpectedly
+nil"`), `eami-stack.sh` (generates `/data/eami/.env` once via secrets
+ported from `scripts/setup.sh`, deliberately never runs `setup.sh`'s
+interactive org/admin seeding -- this is what makes "boots with zero orgs"
+true by construction, not accident -- runs `docker compose up -d`, writes
+the `/data/eami/state=unconfigured` first-boot marker once).
+
+**Secrets and the first-boot marker live on the data disk, not the OS
+disk** -- deliberate: an OS update replaces `/opt/eami/` (the static
+compose bundle) wholesale; if secrets lived there too, an update would
+silently regenerate `POSTGRES_PASSWORD` on next boot, and the already-
+initialized Postgres data would survive but become unusable (password
+mismatch). Keeping secrets on `/data` makes "survives an update" mean
+"still actually works."
+
+**First-boot detection contract for the future setup-wizard brief:**
+`/data/eami/state` = `unconfigured` (written by this brief) or
+`configured` (never written here -- the wizard's job, once built). No API
+endpoint exists for it yet, deliberately (`application code` out of this
+brief's scope) -- whatever serves the wizard reads the file directly.
+
+**Real KVM/QEMU boot testing, not just code review** -- this machine has
+genuine hardware-accelerated KVM inside WSL2 (confirmed via `kvm-ok` and a
+live SeaBIOS boot before relying on it). Real bugs found and fixed live: a
+`DefaultDependencies=no`-caused systemd race where the data-disk unit
+started concurrently with `systemd-udevd`, missing `/dev/vdb`'s device
+node; missing `parted` package; the containerd data-root bug above; a
+`mount -a`-vs-systemd's-own-auto-generated-`data.mount` race on any boot
+after the first.
+
+**Two mandatory review passes both found real, distinct issues, applied
+before shipping:** an SSH-backdoor gap (password-locking doesn't disable
+key auth -- fixed by stripping `authorized_keys`) whose first fix (fully
+deleting the `packer` build account) turned out to silently break Packer's
+own `shutdown_command`, which needs that account's `sudo` -- with
+`shutdown_command` unset, Packer's QEMU builder force-kills the VM
+immediately rather than waiting for a graceful shutdown, risking a
+corrupted captured disk on every build. **Reverted to a considered
+trade-off**: keep the account structurally present but unreachable
+(password locked, key stripped, ssh disabled) rather than fully deleted,
+so `shutdown_command` keeps working and every build gets a real clean
+shutdown. Also fixed: `blkid --label` searching every block device
+system-wide instead of the specific data-disk partition (a stray label on
+an unrelated disk could silently mount the wrong device); file ownership
+after Packer's `mv` staging.
+
+**Verified via real boot testing, across multiple clean rebuild/reboot
+cycles:** AC1 (stack up, all health endpoints responding), AC2 (indirect
+via B-051's existing `migrate` gating, unmodified), AC3 (zero orgs, no
+crash, by construction), AC4 (`state` file confirmed exactly
+`unconfigured` via host-side `debugfs` inspection, SSH being disabled by
+design), AC5 (SSH confirmed disabled two ways: absent from
+`multi-user.target.wants`, `/etc/shadow` showing locked passwords). **AC6's
+core requirement -- rebuild OS disk, reboot with existing data disk, stack
+comes back up healthy -- verified successfully** (clean health-check pass
+following a real rebuild+reboot).
+
+**One thing explicitly not claimed verified, disclosed rather than
+glossed over:** a stricter secondary check (byte-for-byte comparing the
+generated `.env` secrets before/after an OS rebuild via `debugfs`) could
+not be completed reliably -- repeated attempts hit nested-virtualization
+instability in this environment (QEMU-inside-WSL2, on an already
+heavily-loaded host after an extended session), compounded by several
+self-inflicted tooling bugs found along the way (a `pgrep -f` wait-loop
+matching its own command line, causing a 20+-minute false-stuck wait;
+`pgrep -x` silently never matching a 19-character process name; impatient
+`kill -9`s corrupting host-side disk-extraction copies mid-read). Per the
+user's explicit direction, this specific extra check was stopped rather
+than pursued further once AC6's core requirement was already cleanly
+proven -- not claimed as verified, unlike everything else above.
+
+Known limitations: `.ova` conversion not attempted (fast-follow, per the
+brief's own allowance); Flatcar deferred (founder decision); a console-
+triggered temporary-SSH-enable script was considered and explicitly
+declined (founder decision -- smallest attack surface). First-boot
+auth-gap threat modeling done: not currently exploitable (no self-service
+signup route exists anywhere in `eami-api` yet, so no race to have) --
+flagged in `appliance/README.md` as something the next brief (setup
+wizard) must design against from the start.
+
+Full writeup in `BUILT.md`'s new `appliance` section and `BACKLOG.md`'s
+B-053 entry.
+
+Prior entry, still accurate: 2026-08-08 by Claude Code — B-052/B-016: `go test` runs for real in CI for
 the first time ever, across all 6 Go modules, gated on a real Postgres —
 and the gate caught a real pre-existing bug (B-016) on its very first run.
 
