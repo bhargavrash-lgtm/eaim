@@ -88,4 +88,75 @@ else
     log "Wrote ${STATE_FILE} = unconfigured (first boot -- no org/admin exists yet)"
 fi
 
+# =============================================================================
+# First-boot setup wizard token (setup-wizard brief, follows B-053)
+# =============================================================================
+# The setup wizard's eami-api endpoints are network-reachable but require
+# this token to create anything (see eami-api/internal/api/bootstrap.go) --
+# the token is only ever displayed here, on the VM console, the same trusted
+# channel README.md already documents (SSH is permanently disabled, so
+# journal+console -- see eami-stack.service's StandardOutput -- is this
+# appliance's one emergency/first-access surface). Reusing that boundary
+# rather than inventing a new one is deliberate, per this brief's own
+# requirement.
+#
+# The real "is this appliance configured" gate is the orgs table itself
+# (docker-compose.prod.yml is frozen, so eami-api has no way to be given a
+# bind-mount of /data/eami/state -- see README.md's first-boot contract
+# section for the full reasoning). This step re-derives that same signal by
+# querying Postgres directly, exactly like scripts/setup.sh's own
+# seed_database step already does via `docker compose exec postgres psql`.
+COMPOSE_CMD=(docker compose -f "${OPT_DIR}/docker-compose.prod.yml" --env-file "$ENV_FILE")
+
+ORG_COUNT="$("${COMPOSE_CMD[@]}" exec -T postgres \
+    psql -U eami_app -d eami -tAc 'SELECT count(*) FROM orgs;' | tr -d '[:space:]')"
+
+if [[ "$ORG_COUNT" =~ ^[0-9]+$ ]] && [[ "$ORG_COUNT" -gt 0 ]]; then
+    log "Appliance already configured (${ORG_COUNT} org(s) exist) -- no setup token needed"
+    # Best-effort reconciliation only -- the file is informational, the orgs
+    # table above is the real gate the API itself checks on every request.
+    if [[ -f "$STATE_FILE" ]] && [[ "$(cat "$STATE_FILE")" != "configured" ]]; then
+        echo "configured" > "$STATE_FILE"
+        log "Updated ${STATE_FILE} = configured"
+    fi
+else
+    log "Appliance not yet configured -- generating a one-time setup wizard token"
+
+    # Only one live (unconsumed) token at a time -- an old, still-valid token
+    # from a prior boot would otherwise keep working even after a fresh one
+    # is issued, and would linger unnoticed in console scrollback.
+    "${COMPOSE_CMD[@]}" exec -T postgres \
+        psql -U eami_app -d eami -v ON_ERROR_STOP=1 \
+        -c "DELETE FROM setup_tokens WHERE consumed_at IS NULL;" >/dev/null
+
+    SETUP_TOKEN="$(openssl rand -hex 32)"
+    SETUP_TOKEN_HASH="$(printf '%s' "$SETUP_TOKEN" | openssl dgst -sha256 | awk '{print $2}')"
+
+    "${COMPOSE_CMD[@]}" exec -T postgres \
+        psql -U eami_app -d eami -v ON_ERROR_STOP=1 \
+        -c "INSERT INTO setup_tokens (token_hash, expires_at) VALUES ('${SETUP_TOKEN_HASH}', now() + interval '30 minutes');" >/dev/null
+
+    SERVER_IP_DISPLAY="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    SERVER_IP_DISPLAY="${SERVER_IP_DISPLAY:-<this-VMs-IP>}"
+
+    echo ""
+    echo "=============================================================="
+    echo " EAMI first-boot setup"
+    echo "=============================================================="
+    echo " This appliance has no organization or admin account yet."
+    echo " Open the setup wizard in a browser:"
+    echo ""
+    echo "   http://${SERVER_IP_DISPLAY}/setup"
+    echo ""
+    echo " Setup token (single use, expires in 30 minutes):"
+    echo ""
+    echo "   ${SETUP_TOKEN}"
+    echo ""
+    echo " This token is shown ONLY here, on the console -- it is never sent"
+    echo " over the network by this appliance. Reboot the VM to get a fresh"
+    echo " token if this one is lost or expires."
+    echo "=============================================================="
+    echo ""
+fi
+
 log "eami-stack complete"

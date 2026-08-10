@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
 import { LoginPage } from '@/pages/auth/LoginPage'
+import { SetupWizardPage } from '@/pages/setup/SetupWizardPage'
 import { DashboardPage } from '@/pages/dashboard/DashboardPage'
 import { DiscoverPage } from '@/pages/discover/DiscoverPage'
 import { AgentsPage } from '@/pages/gateway/AgentsPage'
@@ -41,6 +42,10 @@ export const router = createBrowserRouter([
   {
     path: '/login',
     element: <LoginPage />,
+  },
+  {
+    path: '/setup',
+    element: <SetupWizardPage />,
   },
   {
     path: '*',

@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -32,6 +33,19 @@ func New(db DBTX) *Queries {
 // WithTx returns a new Queries scoped to the given transaction.
 func (q *Queries) WithTx(tx pgx.Tx) *Queries {
 	return &Queries{db: tx}
+}
+
+// Begin starts a real database transaction. Only works when Queries is
+// backed by a *pgxpool.Pool (production) -- callers that need multi-
+// statement atomicity (e.g. the setup wizard's token-consume + org/admin
+// creation in internal/api/bootstrap.go) use this instead of issuing
+// separate, non-atomic Exec/QueryRow calls.
+func (q *Queries) Begin(ctx context.Context) (pgx.Tx, error) {
+	pool, ok := q.db.(*pgxpool.Pool)
+	if !ok {
+		return nil, errors.New("store: queries not backed by a connection pool, cannot begin a transaction")
+	}
+	return pool.Begin(ctx)
 }
 
 // NotifyPolicyReload sends a NOTIFY on the policy_reload channel so that

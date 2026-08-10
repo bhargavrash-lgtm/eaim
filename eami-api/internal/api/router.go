@@ -3,6 +3,7 @@ package api
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -38,6 +39,11 @@ type Server struct {
 	// which safeDialContext's loopback/private-address block would
 	// otherwise reject exactly as it's designed to in production.
 	toolDialOverride dialContextFunc
+
+	// setupLimiter rate-limits the first-boot setup wizard's token-guessing
+	// surface (bootstrap.go). Defense-in-depth only -- the setup token's own
+	// 256-bit entropy is the primary defense against brute force.
+	setupLimiter *setupRateLimiter
 }
 
 // NewServer creates a Server with the given dependencies. cfg may be nil
@@ -48,6 +54,7 @@ type Server struct {
 func NewServer(queries *store.Queries, authSvc *auth.Service, engine *alerting.Engine, cfg *config.Config) *Server {
 	s := &Server{queries: queries, authSvc: authSvc, alertEngine: engine, cfg: cfg}
 	s.storeIface = &queriesAdapter{q: queries}
+	s.setupLimiter = newSetupRateLimiter(10, 15*time.Minute)
 	var gwURL, gwKey string
 	if cfg != nil {
 		gwURL, gwKey = cfg.Gateway.URL, cfg.Gateway.EpisodeReadServiceKey
@@ -77,7 +84,7 @@ func NewServer(queries *store.Queries, authSvc *auth.Service, engine *alerting.E
 // Handlers that reach s.queries will panic and return 500 until the Store
 // interface is fully wired -- see TASK-035.
 func NewHandler(s Store, authSvc *auth.Service) *Server {
-	return &Server{storeIface: s, authSvc: authSvc, cfg: &config.Config{}}
+	return &Server{storeIface: s, authSvc: authSvc, cfg: &config.Config{}, setupLimiter: newSetupRateLimiter(10, 15*time.Minute)}
 }
 
 // WithGatewayClient overrides the gateway episode proxy client -- a
@@ -128,6 +135,15 @@ func (s *Server) Handler() http.Handler {
 	})
 	r.Post("/v1/auth/login", s.Login)
 	r.Post("/v1/auth/refresh", s.Refresh)
+
+	// ── First-boot setup wizard (B-053 follow-up, bootstrap.go) ────────────────
+	// Deliberately pre-auth -- no user exists yet to authenticate as. The real
+	// gate is the console-only setup token Bootstrap validates internally, not
+	// route-level auth. See bootstrap.go's package doc comment for the full
+	// trust model.
+	r.Get("/v1/setup/status", s.SetupStatus)
+	r.Post("/v1/setup/token/validate", s.ValidateSetupToken)
+	r.Post("/v1/setup/bootstrap", s.Bootstrap)
 
 	// ── Collector write path (service key auth, no JWT) ───────────────────────
 	r.With(s.requireServiceKey).Post("/v1/reports", s.IngestReports)

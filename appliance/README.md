@@ -68,24 +68,51 @@ match the already-initialized database's own auth, and a fresh
 old one. Keeping secrets on `/data` makes "survives an update" mean
 "still actually works", not just "files still exist on disk".
 
-## First-boot detection contract (for the future setup wizard)
+## First-boot detection contract, and the setup wizard (implemented)
 
-`/data/eami/state` contains exactly one of:
+The setup wizard (`eami-ui`'s `/setup` route, `eami-api`'s `/v1/setup/*`
+routes in `internal/api/bootstrap.go`) is now built. **The real
+"is this appliance configured" gate is the `orgs` table itself, not the
+`/data/eami/state` file** — a deliberate deviation from this brief's
+original assumption ("whatever serves the wizard reads this file
+directly"), found and required to be surfaced during that later brief's own
+research rather than worked around silently: `docker-compose.prod.yml` is
+frozen for that brief too, and today only `api_certs`/`gateway_certs` named
+Docker volumes are mounted into `eami-api`/`eami-gateway` — nothing
+bind-mounts `/data/eami` into any container, so no running service process
+can actually read this host file. A DB-backed check (`SELECT count(*) FROM
+orgs`) is also strictly more correct regardless: it's always live and
+consistent, where a file can only be updated by whatever process happens to
+be running when state changes, and no such process exists inside a
+container without that mount.
 
-- `unconfigured` — written once, on the stack's first successful bring-up.
-  No org/admin exists in the database (this appliance deliberately never
-  runs `scripts/setup.sh`'s interactive seeding step — AC3).
-- `configured` — **not written by anything in this brief.** The future
-  setup-wizard brief is expected to write this value after it creates the
-  first org/admin, as the signal that setup is complete. This brief only
-  establishes the file and its `unconfigured` starting value — designed
-  now, per the task brief's own instruction, even though the wizard isn't
-  built yet.
+`/data/eami/state` still exists, still starts as `unconfigured`
+(`eami-stack.sh`, first successful bring-up), but is now **informational
+only** — a human-readable console artifact, not consumed by any API or UI
+code path. `eami-stack.sh` best-effort-reconciles it to `configured` on a
+later boot once it observes `orgs` is non-empty (querying Postgres directly
+via `docker compose exec postgres psql`, the same mechanism
+`scripts/setup.sh`'s `seed_database` already uses) — but nothing depends on
+that reconciliation actually having run; the API's own live `orgs` check is
+always authoritative.
 
-Whatever serves the wizard (an `eami-api` endpoint, most likely, added in
-that later brief) reads this file directly from the host filesystem. No
-API endpoint exists for it yet — deliberately: `application code` is out
-of this brief's `MUST NOT MODIFY` scope.
+**Setup token generation, also in `eami-stack.sh`, same boot step:** if
+`orgs` is empty, a fresh 256-bit (`openssl rand -hex 32`) single-use token
+is generated, its SHA-256 hash stored in the new `setup_tokens` table
+(`schema/migrations-v2/000003_add_setup_tokens.up.sql`, 30-minute expiry),
+and the **raw token is printed to stdout** — which `eami-stack.service`'s
+existing `StandardOutput=journal+console` already routes to the VM console,
+reusing this appliance's one documented emergency-access trust boundary
+(SSH is permanently disabled — see below) rather than inventing a new one.
+Any prior unconsumed token is deleted first, so only one token is ever live
+at a time. The wizard's `POST /v1/setup/bootstrap` endpoint requires this
+token, validates and consumes it inside a single DB transaction with a real
+row lock (`SELECT ... FOR UPDATE`) so a race between two near-simultaneous
+submissions has exactly one winner — see `bootstrap.go`'s package doc
+comment for the full design. Network reachability of the wizard's endpoints
+is never sufficient on its own: without the console-displayed token, no
+org/admin can be created, regardless of how well-formed the rest of the
+request is.
 
 ## SSH / emergency access
 
@@ -152,10 +179,9 @@ an intentionally-reused disk or attaching the correct empty one.
   complexity this narrow, single-purpose use doesn't need. Worth
   revisiting only if a future need arises to set other daemon/containerd
   options on this image.
-- No self-service org/admin signup path exists anywhere in `eami-api`
-  yet, so today's empty-`orgs`-table first-boot state has no race to
-  worry about (nothing can claim the first org over the network at all).
-  **The next brief (setup wizard) needs its own race-safety design** for
-  whatever mechanism lets the first visitor claim admin — flagged here
-  per this brief's own required first-boot auth-gap threat modeling, not
-  solved here (no such mechanism exists yet to make race-safe).
+- ~~No self-service org/admin signup path exists anywhere in `eami-api`
+  yet... The next brief (setup wizard) needs its own race-safety design~~
+  — **closed.** The setup wizard now exists (`eami-api/internal/api/
+  bootstrap.go`, `eami-ui`'s `/setup` route) — see the "First-boot
+  detection contract, and the setup wizard" section above for the token
+  gate and its DB-transaction-based race-safety design.

@@ -23,6 +23,20 @@ api.use({
   },
 })
 
+// ApiFetchError carries the HTTP status alongside the message so callers
+// that need to branch on it (e.g. the setup wizard distinguishing a dead
+// token from a fixable input-validation error) don't have to parse it back
+// out of the message string. Still `instanceof Error`, so every existing
+// `catch (err) { if (err instanceof Error) ... }` call site is unaffected.
+export class ApiFetchError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiFetchError'
+    this.status = status
+  }
+}
+
 // apiFetch — lightweight fetch helper for endpoints not yet in the OpenAPI schema.
 // Automatically injects the Bearer token from the auth store.
 //
@@ -44,7 +58,24 @@ export async function apiFetch<T = unknown>(
     headers,
     body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
   })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  if (!res.ok) {
+    // Best-effort: surface the server's {code, message} body (ErrorResponse,
+    // eami-api/internal/api/types.go) when present, e.g. so the setup wizard
+    // can distinguish "token expired" from "token already used" instead of
+    // a generic failure. Falls back to the old `HTTP ${status}` message for
+    // any non-JSON or unexpected body shape -- existing callers that only
+    // check catch() truthiness are unaffected.
+    let message = `HTTP ${res.status}`
+    try {
+      const body: unknown = await res.json()
+      if (body && typeof body === 'object' && 'message' in body && typeof body.message === 'string') {
+        message = body.message
+      }
+    } catch {
+      // response body wasn't JSON -- keep the generic message above
+    }
+    throw new ApiFetchError(message, res.status)
+  }
   // PATCH/DELETE-style endpoints may return 204 No Content -- res.json()
   // would throw on an empty body, so only parse when there's content.
   if (res.status === 204) return undefined as T
