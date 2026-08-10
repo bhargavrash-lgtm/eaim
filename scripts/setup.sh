@@ -409,6 +409,9 @@ write_env() {
     local gateway_api_key="$5"
     local server_ip="$6"
     local service_key="$7"
+    local episode_read_service_key="$8"
+    local token_revoke_service_key="$9"
+    local tool_credentials_encryption_key="${10}"
 
     cat > "$ENV_FILE" <<EOF
 # EAMI — Environment Configuration
@@ -445,6 +448,22 @@ GATEWAY_ADMIN_API_KEY=${gateway_api_key}
 
 # Shared service key — must match API_SERVICE_KEY in eami-api
 GATEWAY_API_SERVICE_KEY=${service_key}
+
+# Dedicated secret for eami-api -> eami-gateway calls to the episode read
+# endpoint. Required on eami-gateway (refuses to start if empty); read by
+# both services from this one value.
+GATEWAY_EPISODE_READ_SERVICE_KEY=${episode_read_service_key}
+
+# Gates POST /v1/gateway/tokens/{jti}/revoke. Required on eami-gateway
+# (refuses to start if empty). Gateway-local only.
+GATEWAY_TOKEN_REVOKE_SERVICE_KEY=${token_revoke_service_key}
+
+# AES-256 key (hex-encoded, 32 bytes), shared by eami-api (encrypts gateway
+# tool credentials) and eami-gateway (decrypts them for dynamic tool
+# dispatch). Both sides work fine without it if no tool ever has
+# credentials, but losing it makes any already-stored credentials
+# unrecoverable — treat it like POSTGRES_PASSWORD, not a rotatable API key.
+TOOL_CREDENTIALS_ENCRYPTION_KEY=${tool_credentials_encryption_key}
 
 # Slack webhook for approval notifications (optional — leave blank to disable)
 # Create at: https://api.slack.com/apps → Incoming Webhooks
@@ -687,6 +706,18 @@ main() {
     COLLECTOR_API_KEY="$(generate_secret)"
     ok "COLLECTOR_API_KEY: ${COLLECTOR_API_KEY}"
 
+    log "Generating episode-read service key (hex-32)..."
+    GATEWAY_EPISODE_READ_SERVICE_KEY="$(generate_secret)"
+    ok "GATEWAY_EPISODE_READ_SERVICE_KEY generated."
+
+    log "Generating token-revoke service key (hex-32)..."
+    GATEWAY_TOKEN_REVOKE_SERVICE_KEY="$(generate_secret)"
+    ok "GATEWAY_TOKEN_REVOKE_SERVICE_KEY generated."
+
+    log "Generating tool-credentials encryption key (hex-32)..."
+    TOOL_CREDENTIALS_ENCRYPTION_KEY="$(generate_secret)"
+    ok "TOOL_CREDENTIALS_ENCRYPTION_KEY generated."
+
     log "Generating gateway admin API key (UUID)..."
     GATEWAY_API_KEY="$(gen_uuid)"
     ok "GATEWAY_API_KEY: ${GATEWAY_API_KEY}"
@@ -727,7 +758,10 @@ main() {
         "$COLLECTOR_API_KEY" \
         "$GATEWAY_API_KEY" \
         "$SERVER_IP" \
-        "$SERVICE_KEY"
+        "$SERVICE_KEY" \
+        "$GATEWAY_EPISODE_READ_SERVICE_KEY" \
+        "$GATEWAY_TOKEN_REVOKE_SERVICE_KEY" \
+        "$TOOL_CREDENTIALS_ENCRYPTION_KEY"
 
     # Step 10: Start the stack
     start_stack

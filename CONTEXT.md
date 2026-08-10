@@ -479,7 +479,69 @@ or prior context suggests otherwise, it is wrong; trust this line.
   bullet is the flag, not the fix.
 
 ## Last updated
-2026-08-10 by Claude Code — B-055: first-boot web setup wizard (console-token
+2026-08-11 by Claude Code — B-054: `scripts/setup.sh`'s `write_env()` now
+generates and writes `GATEWAY_EPISODE_READ_SERVICE_KEY`,
+`GATEWAY_TOKEN_REVOKE_SERVICE_KEY`, and `TOOL_CREDENTIALS_ENCRYPTION_KEY` —
+all three referenced by both compose files (added by B-002 Brief 1, B-042,
+B-022/B-044 respectively) but never written by `setup.sh`, which predates
+them. Gap was found and logged during B-053 (2026-08-08); re-confirmed still
+present by reading `write_env()` directly before this task started.
+
+All 3 generated via the pre-existing `generate_secret` (`openssl rand -hex
+32`), identical entropy/method to `SERVICE_KEY`/`COLLECTOR_API_KEY` — no new
+generator logic. `write_env()` gained 3 new positional params, written once
+each into the `.env` (both compose files reference the same var names from
+both `eami-gateway`'s and `eami-api`'s env blocks, so — unlike `SERVICE_KEY`,
+which needs two differently-named variables — one `.env` entry each is
+correct and sufficient). **Deliberately not extracted into shared logic with
+`appliance/scripts/eami-stack.sh`** (B-053's own independent duplicate
+secret generator, which already has this fix): editing `eami-stack.sh` was
+outside this task's `MAY MODIFY` scope, and duplicating small
+security-relevant generation helpers across the two scripts matches this
+repo's own established B-025 precedent over building shared infrastructure
+for it. `eami-stack.sh`, both compose files, and application code all
+untouched — `scripts/setup.sh` is the only file changed.
+
+**Live-verified beyond config-presence, proving the features actually work,
+not just that the vars are non-empty:** extracted `write_env()` into an
+isolated harness and confirmed a fresh `.env` has all 3 new keys at exactly
+64 hex characters (32 bytes) each, matching `eami-api/internal/toolcreds`'s
+required key format. Booted a fully isolated throwaway stack (`docker
+compose -p eami-b054-test`, fresh Postgres volume, real rebuilt images) with
+that `.env`: `eami-gateway`/`eami-api` both started clean, no restart loop,
+logs grepped clean for any fail-closed/fatal error tied to the three keys.
+Then exercised the gated endpoints directly: `GET /v1/gateway/episodes`
+returned `200` with the real generated episode-read key, `401` with a wrong
+one; `POST /v1/gateway/tokens/{jti}/revoke` returned `400` (past
+auth, into normal business-logic rejection of a fake `jti`) with the real
+revoke key, `401` with a wrong one; gateway's startup log showed `"tool
+router ready","credentials_configured":true` for the encryption key.
+Throwaway stack and volumes fully torn down afterward, confirmed via
+`docker volume ls`/`docker ps -a`.
+
+**Incidental discovery during live verification, not caused by this task's
+own changes, disclosed and resolved rather than left broken:** Docker
+Desktop was not running at the start of this session; starting it (required
+to run the live verification above) surfaced that the real local dev
+stack's `eaim-postgres-1` had been left in a stale/crashed state from an
+earlier session — its `FinishedAt` timestamp and exit code 255 line up
+exactly with the daemon restart, not with anything in this task.
+`eami-ui` auto-restarted cleanly via its own `restart: unless-stopped`
+policy (no DB dependency); `eami-api`/`eami-gateway` did not, because
+Docker's own container restart mechanism doesn't respect
+`docker-compose.yml`'s `depends_on`/`service_healthy` ordering the way
+`docker compose up` does. Restored via `docker compose up -d` (proper
+dependency ordering) plus `--force-recreate` on `eami-api`/`eami-gateway`
+(their auto-restarted containers had a stale/unreachable embedded-DNS
+network attachment even after Postgres came back healthy) — confirmed the
+real dev stack fully healthy again afterward; `dev@example.com`'s data and
+the `postgres_data` volume were never touched, only the already-dead
+process was restarted.
+
+Full writeup in `BUILT.md`'s `Cross-cutting / shared` section and
+`BACKLOG.md`'s B-054 entry.
+
+Prior entry, still accurate: 2026-08-10 by Claude Code — B-055: first-boot web setup wizard (console-token
 gated), closing the exact gap B-053's own README flagged as needing "its own
 race-safety design" for whatever mechanism lets the first visitor claim admin.
 
