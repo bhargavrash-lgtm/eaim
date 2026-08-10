@@ -220,8 +220,8 @@ func TestMigrate_ExistingSeededDatabase_AppliesNewMigrationWithoutDataLoss(t *te
 	if dirty {
 		t.Fatal("database left dirty after migration")
 	}
-	if version != 2 {
-		t.Fatalf("version = %d, want 2", version)
+	if version != 3 {
+		t.Fatalf("version = %d, want 3", version)
 	}
 
 	// Existing data survived untouched.
@@ -265,6 +265,9 @@ func TestMigrate_FreshPathAndIncrementalPath_ProduceIdenticalFinalSchema(t *test
 	}
 	if err := incrementalMigrator.Steps(1); err != nil {
 		t.Fatalf("incremental path: apply migration 2: %v", err)
+	}
+	if err := incrementalMigrator.Steps(1); err != nil {
+		t.Fatalf("incremental path: apply migration 3: %v", err)
 	}
 
 	freshTables := tableNames(t, c, freshDB)
@@ -330,8 +333,8 @@ func TestMigrate_RunTwice_NoErrorNoDuplication(t *testing.T) {
 	if dirty {
 		t.Fatal("database left dirty after re-running Up()")
 	}
-	if version != 2 {
-		t.Fatalf("version = %d, want 2", version)
+	if version != 3 {
+		t.Fatalf("version = %d, want 3", version)
 	}
 }
 
@@ -350,18 +353,20 @@ func TestMigrate_FreshDatabase_MatchesExpectedSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if dirty || version != 2 {
-		t.Fatalf("version=%d dirty=%v, want version=2 dirty=false", version, dirty)
+	if dirty || version != 3 {
+		t.Fatalf("version=%d dirty=%v, want version=3 dirty=false", version, dirty)
 	}
 
 	// Spot-check a handful of tables spanning the whole schema, not just
 	// the baseline's early tables -- proves the entire 640-line baseline
 	// applied, not just its first few statements before a silent partial
-	// failure.
+	// failure. setup_tokens (B-055, migration 000003) included so this
+	// check keeps pace with the latest migration, not just the baseline.
 	for _, table := range []string{
 		"orgs", "users", "gateway_agents", "policies", "gateway_tools",
 		"approval_requests", "audit_log", "token_usage", "episodes",
 		"alert_rules", "discovered_endpoints", "agent_configs", "paste_events",
+		"setup_tokens",
 	} {
 		exists := scalar[bool](t, c, dbName,
 			`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=$1)`,

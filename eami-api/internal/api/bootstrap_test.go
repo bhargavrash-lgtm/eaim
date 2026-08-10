@@ -52,10 +52,39 @@ type bootstrapPgConn struct {
 	host, user, pass string
 }
 
+// bootstrapTestPgConn resolves real-Postgres connection details for this
+// test file's own admin-connection needs (CREATE/DROP DATABASE), which
+// need host/user/pass split out rather than one connection string.
+//
+// TEST_DATABASE_URL, when set, is parsed as a full DSN -- this matches
+// every other eami-api real-Postgres test file's convention
+// (paste_events_test.go, tools_update_pg_test.go, etc., which return it
+// directly as the DSN) and, concretely, matches what CI's matrix `test`
+// job actually provides for eami-api: only TEST_DATABASE_URL, not
+// POSTGRES_PASSWORD (see .github/workflows/build.yml -- POSTGRES_PASSWORD
+// is only additionally set for the separate, standalone
+// test-migrationtest job, whose own testPgConn() in
+// schema/migrationtest/migrate_test.go has a narrower, presence-only
+// check against TEST_DATABASE_URL; copying that narrower pattern here was
+// a real bug caught by a live CI failure -- this file runs under the
+// matrix job, not test-migrationtest, and has no dbname requirement of
+// its own to justify only checking TEST_DATABASE_URL's presence instead
+// of actually using it).
 func bootstrapTestPgConn(t *testing.T) bootstrapPgConn {
 	t.Helper()
+	if dsn := os.Getenv("TEST_DATABASE_URL"); dsn != "" {
+		cfg, err := pgx.ParseConfig(dsn)
+		if err != nil {
+			t.Fatalf("parse TEST_DATABASE_URL: %v", err)
+		}
+		return bootstrapPgConn{
+			host: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+			user: cfg.User,
+			pass: cfg.Password,
+		}
+	}
 	pw := os.Getenv("POSTGRES_PASSWORD")
-	if pw == "" && os.Getenv("TEST_DATABASE_URL") == "" {
+	if pw == "" {
 		t.Skip("skipping: set TEST_DATABASE_URL (or POSTGRES_PASSWORD, using the docker-compose eami_app/eami/localhost:5432 layout) to run setup-wizard integration tests against a real Postgres")
 	}
 	// 127.0.0.1, not localhost -- this machine resolves localhost to ::1
