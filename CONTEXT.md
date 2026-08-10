@@ -629,6 +629,32 @@ reserved elsewhere. B-056 (the incidental discovery above) was assigned
 from the same confirmed-free counter without a second round-trip, given
 its low stakes as a not-yet-built, purely informational QUEUED entry.
 
+**Post-push CI failure, confirmed real and fixed — two distinct bugs,
+diagnosed by reading the actual job logs, not assumed:** the first push
+(`95d26cf`) broke two CI jobs. `schema/migrationtest`'s `migrate_test.go`
+hardcoded expected schema version 2 in four places; B-055's new migration
+makes the real version 3 (a stale test expectation, not a migration-
+mechanism defect — every module's own "apply migrations" CI step,
+including `eami-api`'s, succeeded). A **second, separate bug** lived in
+the new `bootstrap_test.go` itself: its connection helper copied
+`migrate_test.go`'s own narrower env-var pattern (checks `TEST_DATABASE_URL`
+is *set*, reads the password from `POSTGRES_PASSWORD` separately) — but
+CI's matrix `test` job (running `eami-api`) only ever sets
+`TEST_DATABASE_URL`, never `POSTGRES_PASSWORD` (`build.yml` already has a
+comment, predating this session, explaining exactly why the standalone
+`test-migrationtest` job needs both and the matrix job doesn't — this
+exact pitfall was already documented, just not avoided the first time).
+Fixed both: version checks updated to 3 (plus a missing third `Steps(1)`
+call in the fresh-vs-incremental comparison test, and `setup_tokens` added
+to the schema spot-check list); `bootstrapTestPgConn` now parses
+`TEST_DATABASE_URL` as a full DSN, matching every other `eami-api`
+real-Postgres test file's existing convention. Both fixes verified locally
+by reproducing CI's exact env-var setup (`TEST_DATABASE_URL` only,
+`POSTGRES_PASSWORD` unset) before pushing again (`39ee334`). **Confirmed
+genuinely green afterward via the GitHub API** (run `31405643271`): zero
+failed jobs across the full matrix, Docker image builds (gated on both
+`test`/`test-migrationtest` passing) also succeeded.
+
 Full writeup in `BUILT.md`'s `eami-api`/`eami-ui`/`appliance` sections and
 `BACKLOG.md`'s B-055 entry.
 
