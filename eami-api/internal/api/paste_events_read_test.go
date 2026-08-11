@@ -359,16 +359,28 @@ func TestPasteEventsRead_TimeSeriesQuery_UsesIndex_AtRealisticVolume(t *testing.
 
 // ── shared perf-test helpers ────────────────────────────────────────────────
 
+// seedPasteEventsPerfData seeds its own throwaway database (mirroring
+// bootstrap_test.go's newThrowawayDB/applyMigrations pattern) rather than
+// the shared dev database -- this function itself never actually leaked
+// (its org cleanup was already correctly ordered via t.Cleanup(pool.Close),
+// confirmed empirically before this change), but the underlying pattern of
+// seeding 200,000 synthetic rows into the shared dev database at all -- the
+// exact class of gap B-056 named -- shouldn't exist regardless, per the
+// same reasoning applied to this file's sibling helper in
+// paste_events_test.go, which did leak.
 func seedPasteEventsPerfData(t *testing.T) (*pgxpool.Pool, uuid.UUID) {
 	t.Helper()
-	dsn := pasteEventsTestDSN(t)
+	c := bootstrapTestPgConn(t)
+	dbName := newThrowawayDB(t, c)
+	applyMigrations(t, c, dbName)
+
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := pgxpool.New(ctx, c.dbURL(dbName))
 	if err != nil {
-		t.Fatalf("connect: %v", err)
+		t.Fatalf("connect pool to throwaway db: %v", err)
 	}
 	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("skipping: could not reach test database: %v", err)
+		t.Skipf("skipping: could not reach throwaway database: %v", err)
 	}
 	t.Cleanup(pool.Close)
 
@@ -381,9 +393,9 @@ func seedPasteEventsPerfData(t *testing.T) (*pgxpool.Pool, uuid.UUID) {
 			orgID.String(), "paste-events-read-perf-"+label, "paste-events-read-perf-"+label+"-"+orgID.String()); err != nil {
 			t.Fatalf("seed org %s: %v", label, err)
 		}
-		t.Cleanup(func() {
-			_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1::uuid`, orgID.String())
-		})
+		// No per-org cleanup needed here -- newThrowawayDB's own t.Cleanup
+		// drops the entire throwaway database, taking every row seeded
+		// below with it.
 
 		if _, err := pool.Exec(ctx,
 			`INSERT INTO endpoints (org_id, agent_id, hostname)

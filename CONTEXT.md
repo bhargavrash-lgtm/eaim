@@ -479,7 +479,89 @@ or prior context suggests otherwise, it is wrong; trust this line.
   bullet is the flag, not the fix.
 
 ## Last updated
-2026-08-11 by Claude Code — B-054: `scripts/setup.sh`'s `write_env()` now
+2026-08-11 by Claude Code — B-056: `paste_events_test.go`/`paste_events_read_test.go`'s
+100,000-row perf-seed tests no longer touch the shared dev database at all —
+each now creates and drops its own throwaway database, reusing
+`bootstrap_test.go`'s already-established `bootstrapTestPgConn`/
+`newThrowawayDB`/`applyMigrations` helpers (same `api_test` package, zero
+duplication).
+
+**B-056 was filed (during B-055, 2026-08-10) against the wrong function.**
+It blamed `paste_events_read_test.go:362`'s `seedPasteEventsPerfData` — tested
+that function in total isolation and it does **not** leak, ever; it already
+correctly used `t.Cleanup(pool.Close)`. **The real, 100%-reproducible bug**
+was in `paste_events_test.go`'s `TestPasteEvents_ReportingQuery_UsesIndex_
+AtRealisticVolume` (B-032, 2026-07-25 — matching both the leaked orgs' exact
+naming, no `-read-` infix, and the leak's own dated history): `defer
+pool.Close()` (a plain Go defer, scoped to the test function) closes the
+pool when the function *returns* — but `t.Cleanup`-registered callbacks are
+a **separate, later** teardown phase that only runs after the function body
+(including its own defers) has already fully unwound. So the registered
+`DELETE FROM orgs` for each seeded org always ran against an already-closed
+pool, errored immediately, and that error was silently discarded (`_, _ =
+pool.Exec(...)`) — leaking the org and its 100,200 child rows (200
+`endpoints` + 100,000 `paste_events`) into the shared dev database on every
+single run.
+
+**Proven, not theorized, at every step:** ran the buggy test in total
+isolation (`-run`, single test, no other tests, no timeout, no
+interruption) — clean `PASS`, exit 0 — and it still leaked both orgs every
+time, ruling out timeout/impatient-kill flakiness as the explanation. Ran
+the identical `DELETE FROM orgs WHERE id = ...` manually via `psql` —
+succeeded instantly, cascaded cleanly to zero remaining `endpoints`/
+`paste_events` rows — ruling out an FK/cascade failure. Ran
+`seedPasteEventsPerfData`'s two tests in isolation — zero leak, confirming
+that function needed no bug fix. Grepped the rest of `eami-api`'s test
+suite for the same `defer pool.Close()` + `t.Cleanup`-row-delete mixing —
+found nowhere else; an isolated, one-function bug, not a systemic pattern.
+
+**Fix, scoped as a throwaway-database rewrite rather than a one-line
+ordering patch, per explicit user direction** (matching this codebase's own
+established pattern in `schema/migrationtest` and `bootstrap_test.go`, and
+correctly isolating a 100k-row synthetic dataset that shouldn't share the
+dev database at all, not just patching the one ordering bug in place): both
+the buggy test *and* its non-buggy sibling `seedPasteEventsPerfData`
+(converted too, since the underlying "200,000 synthetic rows in the shared
+dev DB" problem applied to it as well, even though it wasn't leaking) now
+create their own throwaway database per run. The whole database — and
+everything seeded into it — is dropped by `newThrowawayDB`'s own
+`t.Cleanup`; the per-org `t.Cleanup` DELETE calls are gone entirely,
+removing the whole class of future cleanup-ordering mistakes, not just this
+one instance.
+
+**Live-verified against 3 scenarios, including the two explicitly requested
+beyond a normal pass:**
+1. Normal run: all 3 affected tests pass, shared dev DB unchanged (still
+   only `Dev Org`), zero leftover throwaway databases.
+2. **Simulated failed run:** a `t.Fatal` temporarily injected right after
+   seeding (reverted immediately after use) — test fails as expected, but
+   cleanup still fires: zero leak in either the shared DB or a leftover
+   throwaway database. Confirms Go's `t.Fatal`→`runtime.Goexit` semantics
+   still run registered cleanups, the same guarantee `bootstrap_test.go`'s
+   pattern already relies on.
+3. **Simulated interrupted run:** compiled the test binary directly and
+   hard-killed it via `taskkill /F` mid-flight, twice — once during
+   migration setup, once with one org's full 100,200 rows already inserted.
+   In both cases the shared dev database's `orgs` table stayed untouched.
+   **The one remaining, disclosed residual:** the throwaway database itself
+   is left behind in this scenario — no cleanup mechanism in any language
+   can survive a hard kill. This is the same already-accepted residual
+   `bootstrap_test.go`'s own throwaway-DB pattern has always carried, not a
+   new gap introduced here. Both leaked throwaway databases were uniquely
+   named (`bootstraptest_<pid>_<rand>`), trivially identifiable, inspected,
+   and manually dropped afterward.
+
+`go build`/`go vet ./...` clean; `go test ./... -count=1` clean across the
+full `eami-api` module (full pre-existing suite, not just the 3 affected
+tests) — no regressions, comparable runtime to the pre-fix version. Real
+dev database confirmed to contain only `Dev Org` throughout and after this
+session's work. Only `eami-api/internal/api/paste_events_test.go` and
+`paste_events_read_test.go` changed — no application code touched.
+
+Full writeup in `BUILT.md`'s `Cross-cutting / shared` section and
+`BACKLOG.md`'s B-056 entry.
+
+Prior entry, still accurate: 2026-08-11 by Claude Code — B-054: `scripts/setup.sh`'s `write_env()` now
 generates and writes `GATEWAY_EPISODE_READ_SERVICE_KEY`,
 `GATEWAY_TOKEN_REVOKE_SERVICE_KEY`, and `TOOL_CREDENTIALS_ENCRYPTION_KEY` —
 all three referenced by both compose files (added by B-002 Brief 1, B-042,

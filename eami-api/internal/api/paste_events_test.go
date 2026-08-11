@@ -534,20 +534,39 @@ func TestPasteEvents_DoesNotAffectDiscoveredEndpoints(t *testing.T) {
 // (not a sequential scan). Skipped under -short, since seeding 200k rows
 // takes real time.
 
+// TestPasteEvents_ReportingQuery_UsesIndex_AtRealisticVolume seeds its own
+// throwaway database (mirroring bootstrap_test.go's newThrowawayDB/
+// applyMigrations pattern) rather than the shared dev database -- closing
+// B-056. The original version seeded 2 orgs x 100,000 rows directly into
+// the shared dev DB and relied on a per-org `t.Cleanup` DELETE to remove
+// them; that DELETE ran against a pool this function's own
+// `defer pool.Close()` had *already closed* by the time t.Cleanup's later
+// teardown phase ran (defer unwinds when the test function returns,
+// strictly before any t.Cleanup callback fires), so it errored and the
+// error was silently discarded (`_, _ = pool.Exec(...)`) -- leaking the org
+// and its 100,200 child rows into the shared dev database on every single
+// run, confirmed 100% reproducible even on a clean, uninterrupted PASS.
+// Seeding into a disposable per-test database removes the whole class of
+// risk: even a future cleanup-ordering mistake can only leak a throwaway
+// database, never pollute the shared dev DB other sessions rely on for
+// real org counts.
 func TestPasteEvents_ReportingQuery_UsesIndex_AtRealisticVolume(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping seeded performance test in -short mode")
 	}
-	dsn := pasteEventsTestDSN(t)
+	c := bootstrapTestPgConn(t)
+	dbName := newThrowawayDB(t, c)
+	applyMigrations(t, c, dbName)
+
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := pgxpool.New(ctx, c.dbURL(dbName))
 	if err != nil {
-		t.Fatalf("connect: %v", err)
+		t.Fatalf("connect pool to throwaway db: %v", err)
 	}
 	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("skipping: could not reach test database: %v", err)
+		t.Skipf("skipping: could not reach throwaway database: %v", err)
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 
 	const rowsPerOrg = 100_000
 	const endpointsPerOrg = 200
@@ -558,9 +577,9 @@ func TestPasteEvents_ReportingQuery_UsesIndex_AtRealisticVolume(t *testing.T) {
 			orgID.String(), "paste-events-perf-"+label, "paste-events-perf-"+label+"-"+orgID.String()); err != nil {
 			t.Fatalf("seed org %s: %v", label, err)
 		}
-		t.Cleanup(func() {
-			_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1::uuid`, orgID.String())
-		})
+		// No per-org cleanup needed here -- newThrowawayDB's own t.Cleanup
+		// drops the entire throwaway database, taking every row seeded
+		// below with it.
 
 		if _, err := pool.Exec(ctx,
 			`INSERT INTO endpoints (org_id, agent_id, hostname)
