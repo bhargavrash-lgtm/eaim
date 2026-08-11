@@ -210,6 +210,18 @@ func testToolConnectivityWithDialer(ctx context.Context, toolType, authType stri
 		// rather than fabricate a "connected" this function has no way to
 		// verify.
 		return finish(toolTestOutcome{Reason: reasonMisconfigured, Detail: "MCP tools run as a local subprocess on the gateway host; connectivity cannot be tested from the SaaS API"})
+	case "ai_provider":
+		// Unlike "mcp" above, this genuinely could be tested from eami-api
+		// (Claude's endpoint is a real public host, no SSRF/wrong-host
+		// concern) -- but doing so would spend real provider API credits
+		// on every "Test connection" click and requires this file to know
+		// each provider's own wire shape, duplicating eami-gateway/
+		// internal/aiprovider's adapters. Out of this brief's scope
+		// (AC1's real proof is a real dispatched call, not this button);
+		// report honestly rather than fabricate a "connected" this
+		// function doesn't actually verify, matching the "mcp" case's own
+		// precedent above.
+		return finish(toolTestOutcome{Reason: reasonMisconfigured, Detail: "connectivity testing for ai_provider connectors is not implemented; use a real dispatched call to verify"})
 	default:
 		return finish(toolTestOutcome{Reason: reasonMisconfigured, Detail: fmt.Sprintf("unknown tool type %q", toolType)})
 	}

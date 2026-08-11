@@ -35,7 +35,7 @@ func TestEscapeSlackText(t *testing.T) {
 // a future bug stores the wrong type — so storing a bogus value there is a
 // real panic path, not a synthetic one.
 func TestHandleNotification_PanicResolvingOneApproval_DoesNotCrash(t *testing.T) {
-	r := New(nil, nil, 5*time.Second, "", "")
+	r := New(nil, nil, 5*time.Second, "", "", nil, nil)
 	r.pending.Store("approval-1", "not a *pendingEntry")
 
 	payload := `{"approval_id":"approval-1"}`
@@ -57,7 +57,7 @@ func TestHandleNotification_PanicResolvingOneApproval_DoesNotCrash(t *testing.T)
 // loop's next iteration still runs normally after a prior notification
 // panicked — the router isn't left in a broken state.
 func TestHandleNotification_NextNotification_StillProcessesNormally(t *testing.T) {
-	r := New(nil, nil, 5*time.Second, "", "")
+	r := New(nil, nil, 5*time.Second, "", "", nil, nil)
 	r.pending.Store("approval-1", "not a *pendingEntry")
 
 	// First notification panics inside resolve(), recovered by handleNotification.
@@ -83,7 +83,7 @@ func TestHandleNotification_NextNotification_StillProcessesNormally(t *testing.T
 // regression guard: confirms the pre-existing malformed-payload/missing-id
 // handling (not a panic path) is unchanged by the recovery wrapper.
 func TestHandleNotification_MalformedPayload_StillHandledCleanly(t *testing.T) {
-	r := New(nil, nil, 5*time.Second, "", "")
+	r := New(nil, nil, 5*time.Second, "", "", nil, nil)
 
 	done := make(chan struct{})
 	go func() {

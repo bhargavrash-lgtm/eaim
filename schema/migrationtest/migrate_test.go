@@ -220,8 +220,8 @@ func TestMigrate_ExistingSeededDatabase_AppliesNewMigrationWithoutDataLoss(t *te
 	if dirty {
 		t.Fatal("database left dirty after migration")
 	}
-	if version != 3 {
-		t.Fatalf("version = %d, want 3", version)
+	if version != 5 {
+		t.Fatalf("version = %d, want 5", version)
 	}
 
 	// Existing data survived untouched.
@@ -268,6 +268,12 @@ func TestMigrate_FreshPathAndIncrementalPath_ProduceIdenticalFinalSchema(t *test
 	}
 	if err := incrementalMigrator.Steps(1); err != nil {
 		t.Fatalf("incremental path: apply migration 3: %v", err)
+	}
+	if err := incrementalMigrator.Steps(1); err != nil {
+		t.Fatalf("incremental path: apply migration 4: %v", err)
+	}
+	if err := incrementalMigrator.Steps(1); err != nil {
+		t.Fatalf("incremental path: apply migration 5: %v", err)
 	}
 
 	freshTables := tableNames(t, c, freshDB)
@@ -333,8 +339,8 @@ func TestMigrate_RunTwice_NoErrorNoDuplication(t *testing.T) {
 	if dirty {
 		t.Fatal("database left dirty after re-running Up()")
 	}
-	if version != 3 {
-		t.Fatalf("version = %d, want 3", version)
+	if version != 5 {
+		t.Fatalf("version = %d, want 5", version)
 	}
 }
 
@@ -353,8 +359,8 @@ func TestMigrate_FreshDatabase_MatchesExpectedSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if dirty || version != 3 {
-		t.Fatalf("version=%d dirty=%v, want version=3 dirty=false", version, dirty)
+	if dirty || version != 5 {
+		t.Fatalf("version=%d dirty=%v, want version=5 dirty=false", version, dirty)
 	}
 
 	// Spot-check a handful of tables spanning the whole schema, not just

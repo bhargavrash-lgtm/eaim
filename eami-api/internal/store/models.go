@@ -211,6 +211,16 @@ type GatewayTool struct {
 	// (B-046): {"<action>": {"path": "...", "method": "..."}}, or nil when
 	// unset. Same raw-passthrough convention as alert_rules.ConditionConfig.
 	ActionPaths []byte
+	// Provider is the AI provider identifier for type=ai_provider tools
+	// (AI Provider Connector, Thread A Model 1), e.g. "claude" -- nil for
+	// every other type.
+	Provider pgtype.Text
+	// AuditMode is "full" or "structural_metadata_only" (NOT NULL,
+	// defaults to the latter -- schema/migrations-v2/000004). Governs
+	// only whether eami-gateway's audit_log writes include this
+	// connector's call parameters; meaningful only for type=ai_provider
+	// but present (at its DB default) on every row.
+	AuditMode string
 }
 
 // GatewayNode mirrors the gateway_nodes table (joined with latest metrics).

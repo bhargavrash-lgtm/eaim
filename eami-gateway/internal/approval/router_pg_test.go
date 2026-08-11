@@ -104,7 +104,12 @@ func newApprovalTestEnv(t *testing.T, holdTimeout time.Duration) *approvalTestEn
 	t.Cleanup(downstream.Close)
 	fwd := proxy.New(proxy.Config{DownstreamURL: downstream.URL}, downstream.Client())
 
-	router := New(pool, fwd, holdTimeout, "", "")
+	// toolRouter/aiProviderRouter deliberately nil here -- this file's
+	// existing tests exercise Submit/Hold/resolve's own SQL correctness,
+	// not resume-time dynamic dispatch (see router_dispatch_test.go for
+	// that). A nil pair means dispatchApproved falls straight through to
+	// fwd, unchanged from this file's pre-existing behavior.
+	router := New(pool, fwd, holdTimeout, "", "", nil, nil)
 
 	return &approvalTestEnv{pool: pool, router: router, orgID: orgID, agentID: agentID}
 }

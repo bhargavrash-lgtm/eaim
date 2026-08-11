@@ -15,7 +15,20 @@ import {
   useDeleteTool,
   useTestTool,
 } from '@/hooks/useTools'
-import type { ActionPathMapping, ToolCreateWithActions, ToolUpdate, ToolWithActions } from '@/hooks/useTools'
+import type { ActionPathMapping, ToolAuditMode, ToolCreateWithActions, ToolProvider, ToolType, ToolUpdate, ToolWithActions } from '@/hooks/useTools'
+
+// AI provider connectors (Thread A Model 1): the full set of providers a
+// second connector could target. Only "claude" has a real gateway adapter
+// today -- listed here as a real dropdown (not a hardcoded single value)
+// specifically so a future provider is one more entry, not a form rework.
+const AI_PROVIDERS: { value: ToolProvider; label: string }[] = [
+  { value: 'claude', label: 'Claude (Anthropic)' },
+]
+
+const AUDIT_MODES: { value: ToolAuditMode; label: string; hint: string }[] = [
+  { value: 'structural_metadata_only', label: 'Structural metadata only (recommended)', hint: 'Audit log records tool/action/decision/timing -- never the prompt content.' },
+  { value: 'full', label: 'Full', hint: 'Audit log includes the full request, including prompt content. Use only if your compliance posture requires it.' },
+]
 
 // Status badge
 
@@ -64,9 +77,10 @@ function classifyTestError(message: string | null | undefined): Exclude<TestStat
 
 function TypeBadge({ type }: { type: string }) {
   const map: Record<string, string> = {
-    mcp:      'bg-purple-100 text-purple-800',
-    rest_api: 'bg-blue-100 text-blue-800',
-    database: 'bg-orange-100 text-orange-800',
+    mcp:          'bg-purple-100 text-purple-800',
+    rest_api:     'bg-blue-100 text-blue-800',
+    database:     'bg-orange-100 text-orange-800',
+    ai_provider:  'bg-teal-100 text-teal-800',
   }
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${map[type] ?? 'bg-gray-100 text-gray-600'}`}>
@@ -156,7 +170,7 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
   const [toast, setToast] = useState<string | null>(null)
 
   const [name, setName]         = useState('')
-  const [type, setType]         = useState<'mcp' | 'rest_api' | 'database'>('mcp')
+  const [type, setType]         = useState<ToolType>('mcp')
   const [authType, setAuthType] = useState<'oauth2' | 'api_key' | 'basic' | 'db_connection_string'>('api_key')
   const [mcpCommand, setMcpCommand] = useState('')
   const [mcpArgs, setMcpArgs]   = useState('')
@@ -164,6 +178,8 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
   const [credKey, setCredKey]   = useState('')
   const [connStr, setConnStr]   = useState('')
   const [actionRows, setActionRows] = useState<ActionPathRow[]>([])
+  const [provider, setProvider]   = useState<ToolProvider>('claude')
+  const [auditMode, setAuditMode] = useState<ToolAuditMode>('structural_metadata_only')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -179,6 +195,8 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
           connection_string: authType === 'db_connection_string' ? connStr || undefined : undefined,
         },
         action_paths: Object.keys(actionPaths).length > 0 ? actionPaths : undefined,
+        provider: type === 'ai_provider' ? provider : undefined,
+        audit_mode: type === 'ai_provider' ? auditMode : undefined,
       }
       await create.mutateAsync(body)
       setToast('Tool added')
@@ -215,22 +233,37 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-              <select value={type} onChange={e => setType(e.target.value as typeof type)}
+              <select value={type} onChange={e => {
+                  const next = e.target.value as typeof type
+                  setType(next)
+                  // ai_provider connectors only ever authenticate via
+                  // api_key (aiprovider.Credentials/ClaudeAdapter, backend-
+                  // enforced too) -- force it here so the API key field is
+                  // always visible for this type, instead of leaving a
+                  // stale unrelated auth type selected with no way to
+                  // notice before a confusing 400 on submit (code review
+                  // finding, this task).
+                  if (next === 'ai_provider') setAuthType('api_key')
+                }}
                 className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
                 <option value="mcp">MCP</option>
                 <option value="rest_api">REST API</option>
                 <option value="database">Database</option>
+                <option value="ai_provider">AI Provider</option>
               </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Auth type</label>
-              <select value={authType} onChange={e => setAuthType(e.target.value as typeof authType)}
-                className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <select value={authType} disabled={type === 'ai_provider'} onChange={e => setAuthType(e.target.value as typeof authType)}
+                className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-500">
                 <option value="api_key">API key</option>
                 <option value="oauth2">OAuth 2</option>
                 <option value="basic">Basic auth</option>
                 <option value="db_connection_string">Connection string</option>
               </select>
+              {type === 'ai_provider' && (
+                <p className="text-xs text-gray-400 mt-1">AI Provider connectors always authenticate via API key.</p>
+              )}
             </div>
           </div>
 
@@ -262,6 +295,26 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
 
           {type === 'rest_api' && (
             <ActionPathsEditor rows={actionRows} onChange={setActionRows} />
+          )}
+
+          {type === 'ai_provider' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
+                <select value={provider} onChange={e => setProvider(e.target.value as ToolProvider)}
+                  className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  {AI_PROVIDERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Audit logging mode</label>
+                <select value={auditMode} onChange={e => setAuditMode(e.target.value as ToolAuditMode)}
+                  className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  {AUDIT_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">{AUDIT_MODES.find(m => m.value === auditMode)?.hint}</p>
+              </div>
+            </>
           )}
 
           {authType === 'api_key' && (
@@ -314,6 +367,8 @@ function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () =
   const [actionRows, setActionRows] = useState<ActionPathRow[]>(() =>
     Object.entries(tool.action_paths ?? {}).map(([action, m]) => ({ action, path: m.path, method: m.method }))
   )
+  const [provider, setProvider]   = useState<ToolProvider>(tool.provider ?? 'claude')
+  const [auditMode, setAuditMode] = useState<ToolAuditMode>(tool.audit_mode ?? 'structural_metadata_only')
 
   const credLabel =
     tool.auth_type === 'api_key' ? 'API key' :
@@ -339,6 +394,8 @@ function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () =
         // admin explicitly clears all mappings (empty rows -> {} -> the
         // backend's documented "present-but-empty" clear semantics).
         action_paths: tool.type === 'rest_api' ? rowsToActionPaths(actionRows) : undefined,
+        provider: tool.type === 'ai_provider' ? provider : undefined,
+        audit_mode: tool.type === 'ai_provider' ? auditMode : undefined,
       }
       // Only include `credentials` at all if the admin actually typed
       // something -- an empty/omitted object here must never reach the
@@ -419,6 +476,26 @@ function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () =
 
           {tool.type === 'rest_api' && (
             <ActionPathsEditor rows={actionRows} onChange={setActionRows} />
+          )}
+
+          {tool.type === 'ai_provider' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
+                <select value={provider} onChange={e => setProvider(e.target.value as ToolProvider)}
+                  className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  {AI_PROVIDERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Audit logging mode</label>
+                <select value={auditMode} onChange={e => setAuditMode(e.target.value as ToolAuditMode)}
+                  className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  {AUDIT_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">{AUDIT_MODES.find(m => m.value === auditMode)?.hint}</p>
+              </div>
+            </>
           )}
 
           {credLabel && (
@@ -539,7 +616,7 @@ export function ToolsPage() {
                       <td className="px-4 py-3 text-xs text-gray-500 font-mono">{tool.auth_type ?? '--'}</td>
                       <td className="px-4 py-3"><StatusBadge status={tool.status} /></td>
                       <td className="px-4 py-3 text-xs font-mono text-gray-500 max-w-xs truncate">
-                        {tool.mcp_command ?? tool.base_url ?? '--'}
+                        {tool.mcp_command ?? tool.base_url ?? tool.provider ?? '--'}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-400">{formatLastUsed(tool.last_used)}</td>
                       <td className="px-4 py-3 text-right">

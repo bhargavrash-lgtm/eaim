@@ -16,8 +16,28 @@ export type ActionPathMapping = { path: string; method: string }
 // route situation as ToolUpdate below) -- Tool/ToolCreate are frozen
 // generated types, so the field is carried via these local intersection
 // types rather than editing the generated schema.
-export type ToolWithActions = Tool & { action_paths?: Record<string, ActionPathMapping> }
-export type ToolCreateWithActions = ToolCreate & { action_paths?: Record<string, ActionPathMapping> }
+//
+// provider/audit_mode (AI Provider Connector, Thread A Model 1) follow the
+// identical undocumented-field convention. "ai_provider" additionally
+// isn't a member of the generated type's literal `type` union (openapi.yaml
+// still only documents mcp/rest_api/database) -- Omit+redeclare widens
+// just that one field rather than editing the generated schema.
+export type ToolProvider = 'claude'
+export type ToolAuditMode = 'full' | 'structural_metadata_only'
+export type ToolType = 'mcp' | 'rest_api' | 'database' | 'ai_provider'
+
+export type ToolWithActions = Omit<Tool, 'type'> & {
+  type: ToolType
+  action_paths?: Record<string, ActionPathMapping>
+  provider?: ToolProvider
+  audit_mode?: ToolAuditMode
+}
+export type ToolCreateWithActions = Omit<ToolCreate, 'type'> & {
+  type: ToolType
+  action_paths?: Record<string, ActionPathMapping>
+  provider?: ToolProvider
+  audit_mode?: ToolAuditMode
+}
 
 // ToolUpdate (B-045) -- PATCH /v1/gateway/tools/{toolId} isn't in
 // api/openapi.yaml yet (Architect-EAMI-owned, out of this task's scope),
@@ -39,6 +59,8 @@ export type ToolUpdate = {
     connection_string?: string
   }
   action_paths?: Record<string, ActionPathMapping>
+  provider?: ToolProvider
+  audit_mode?: ToolAuditMode
 }
 
 export function useTools() {
@@ -57,11 +79,15 @@ export function useCreateTool() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (body: ToolCreateWithActions) => {
-      // action_paths isn't in the generated ToolCreate type (see
-      // ToolCreateWithActions' comment) -- api.POST's body param is typed
-      // from openapi.yaml, but a wider object is structurally assignable
-      // to it, and the extra field is still serialized and sent at runtime.
-      const { data, error } = await api.POST('/v1/gateway/tools', { body })
+      // action_paths/provider/audit_mode aren't in the generated ToolCreate
+      // type (see ToolCreateWithActions' comment) -- extra fields are
+      // structurally fine as-is and still serialized and sent at runtime.
+      // `type` needed an explicit cast though: ToolCreateWithActions widens
+      // it to include "ai_provider", which the generated (openapi.yaml)
+      // type doesn't know about -- a real type mismatch, not just an extra
+      // field, since `type` exists on both sides. The cast is type-only;
+      // the actual runtime request body is unchanged.
+      const { data, error } = await api.POST('/v1/gateway/tools', { body: body as unknown as ToolCreate })
       if (error) throw error
       return data
     },

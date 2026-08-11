@@ -10,7 +10,8 @@ import (
 func (q *Queries) ListTools(ctx context.Context, orgID uuid.UUID) ([]GatewayTool, error) {
 	const sql = `
 SELECT id, org_id, name, type, auth_type, mcp_command, base_url,
-       status, last_used, last_tested, created_at, action_paths
+       status, last_used, last_tested, created_at, action_paths,
+       provider, audit_mode
 FROM gateway_tools
 WHERE org_id = $1
 ORDER BY name ASC`
@@ -28,6 +29,7 @@ ORDER BY name ASC`
 			&t.ID, &t.OrgID, &t.Name, &t.Type, &t.AuthType,
 			&t.MCPCommand, &t.BaseURL, &t.Status,
 			&t.LastUsed, &t.LastTested, &t.CreatedAt, &t.ActionPaths,
+			&t.Provider, &t.AuditMode,
 		); err != nil {
 			return nil, err
 		}
@@ -53,25 +55,43 @@ type CreateToolParams struct {
 	// ActionPaths is the raw JSONB bytes for gateway_tools.action_paths
 	// (B-046), or nil for a tool with no per-action mappings.
 	ActionPaths []byte
+	// Provider is the AI provider identifier for type=ai_provider tools
+	// (e.g. "claude"), or nil for every other type.
+	Provider *string
+	// AuditMode is "full" or "structural_metadata_only" -- always set by
+	// the caller (tools.go's CreateTool handler defaults it explicitly
+	// rather than relying on the column's DB DEFAULT, since this INSERT
+	// always lists the column).
+	AuditMode string
 }
 
-// CreateTool inserts a new gateway tool and returns it.
+// CreateTool inserts a new gateway tool and returns it. AuditMode defaults
+// to "structural_metadata_only" here (not only in tools.go's handler) so
+// the fail-safe default holds for every caller of this function, not just
+// ones that remember to set it -- matching this column's own CHECK
+// constraint, which rejects an empty string.
 func (q *Queries) CreateTool(ctx context.Context, p CreateToolParams) (GatewayTool, error) {
+	if p.AuditMode == "" {
+		p.AuditMode = "structural_metadata_only"
+	}
 	const sql = `
-INSERT INTO gateway_tools (org_id, name, type, auth_type, mcp_command, mcp_args, base_url, credentials_encrypted, action_paths)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO gateway_tools (org_id, name, type, auth_type, mcp_command, mcp_args, base_url, credentials_encrypted, action_paths, provider, audit_mode)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING id, org_id, name, type, auth_type, mcp_command, base_url,
-          status, last_used, last_tested, created_at, action_paths`
+          status, last_used, last_tested, created_at, action_paths,
+          provider, audit_mode`
 
 	var t GatewayTool
 	err := q.db.QueryRow(ctx, sql,
 		toPgtypeUUID(p.OrgID), p.Name, p.Type, p.AuthType,
 		toPgtypeText(p.MCPCommand), p.MCPArgs, toPgtypeText(p.BaseURL),
 		p.CredentialsEncrypted, p.ActionPaths,
+		toPgtypeText(p.Provider), p.AuditMode,
 	).Scan(
 		&t.ID, &t.OrgID, &t.Name, &t.Type, &t.AuthType,
 		&t.MCPCommand, &t.BaseURL, &t.Status,
 		&t.LastUsed, &t.LastTested, &t.CreatedAt, &t.ActionPaths,
+		&t.Provider, &t.AuditMode,
 	)
 	return t, err
 }
@@ -95,6 +115,17 @@ type UpdateToolParams struct {
 	// (COALESCE) and non-nil -- including []byte("{}") to explicitly clear
 	// all mappings -- to overwrite it.
 	ActionPaths []byte
+	// Provider, like Name, is nil to leave provider unchanged (COALESCE).
+	// auth_type/type stay immutable per this function's existing
+	// precedent below, but provider is intentionally editable -- an admin
+	// correcting which provider a connector points at is an operational
+	// fix, not a fundamental type change.
+	Provider *string
+	// AuditMode, like Provider, is nil to leave audit_mode unchanged
+	// (COALESCE) -- lets an admin flip a connector between "full" and
+	// "structural_metadata_only" after creation without touching anything
+	// else.
+	AuditMode *string
 }
 
 // UpdateTool applies a partial update to an existing tool and returns the
@@ -110,20 +141,25 @@ UPDATE gateway_tools SET
     mcp_args              = COALESCE($5, mcp_args),
     base_url              = COALESCE($6, base_url),
     credentials_encrypted = COALESCE($7, credentials_encrypted),
-    action_paths          = COALESCE($8, action_paths)
+    action_paths          = COALESCE($8, action_paths),
+    provider              = COALESCE($9, provider),
+    audit_mode            = COALESCE($10, audit_mode)
 WHERE id = $1 AND org_id = $2
 RETURNING id, org_id, name, type, auth_type, mcp_command, base_url,
-          status, last_used, last_tested, created_at, action_paths`
+          status, last_used, last_tested, created_at, action_paths,
+          provider, audit_mode`
 
 	var t GatewayTool
 	err := q.db.QueryRow(ctx, sql,
 		toPgtypeUUID(p.ID), toPgtypeUUID(p.OrgID),
 		toPgtypeText(p.Name), toPgtypeText(p.MCPCommand), p.MCPArgs, toPgtypeText(p.BaseURL),
 		p.CredentialsEncrypted, p.ActionPaths,
+		toPgtypeText(p.Provider), toPgtypeText(p.AuditMode),
 	).Scan(
 		&t.ID, &t.OrgID, &t.Name, &t.Type, &t.AuthType,
 		&t.MCPCommand, &t.BaseURL, &t.Status,
 		&t.LastUsed, &t.LastTested, &t.CreatedAt, &t.ActionPaths,
+		&t.Provider, &t.AuditMode,
 	)
 	return t, err
 }

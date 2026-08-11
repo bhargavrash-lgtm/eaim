@@ -21,6 +21,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,8 +36,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/eami/gateway/internal/aiprovider"
 	"github.com/eami/gateway/internal/proxy"
 	"github.com/eami/gateway/internal/safego"
+	"github.com/eami/gateway/internal/toolrouter"
 )
 
 // Request is the normalised escalation payload passed from the dispatch pipeline.
@@ -48,6 +52,59 @@ type Request struct {
 	Action     string
 	Parameters map[string]any
 	SessionID  string
+
+	// ResolvedToolID/ResolvedConfigHash pin the exact dynamically-resolved
+	// connector (gateway_tools.id) and a fingerprint of its security-
+	// relevant config (base_url/provider + the encrypted credential
+	// bytes -- never plaintext), captured by the caller (cmd/gateway/
+	// main.go's dispatch closure) at the SAME moment it resolved the tool
+	// for policy evaluation -- i.e. what the human approver's review is
+	// actually based on. Submit() persists both; dispatchApproved
+	// re-verifies both are unchanged before resuming, failing closed
+	// (never falling back to a fresh by-name lookup or the static proxy)
+	// if the connector was edited or deleted during the hold window.
+	// Closes a real TOCTOU gap found live during this brief's own
+	// verification: a lower-privileged admin/operator role (which cannot
+	// itself approve/deny) could otherwise silently redirect an approved
+	// call to a different destination than what was reviewed. Both empty
+	// when Tool never resolved dynamically at escalation time (falls to
+	// the static proxy, unaffected by this check -- ResumeOutcome
+	// "static_fallback").
+	ResolvedToolID     string
+	ResolvedConfigHash string
+}
+
+// ComputeConfigHash fingerprints a connector's full security-relevant
+// config: baseURL (rest_api) XOR provider (ai_provider), the encrypted
+// credential bytes as stored (never the decrypted plaintext: this
+// function needs no cipher/key, and hashing the ciphertext still changes
+// on any credential rotation, since re-encryption always uses a fresh GCM
+// nonce), and actionPathsJSON -- a canonical (encoding/json.Marshal of the
+// map, which always sorts keys) serialization of a rest_api tool's
+// action_paths mappings. actionPathsJSON is security-relevant, not
+// cosmetic: it's what determines the actual sub-path/HTTP method a given
+// action dispatches to (toolrouter.Forward), so a mid-hold edit to it
+// alone -- with base_url/credentials untouched -- would otherwise redirect
+// a specific approved action to a different destination undetected. Found
+// live by this brief's own mandatory security review: the first version
+// of this function omitted it. Empty/nil for ai_provider rows (no such
+// concept) or a rest_api tool with no mappings.
+//
+// toolType is included so an ai_provider and a rest_api row can never
+// coincidentally hash equal. Exported so cmd/gateway/main.go's dispatch
+// closure -- which already resolves the tool before policy evaluation --
+// can compute this once, at escalation time, without this package needing
+// its own extra resolve call at Submit() time.
+func ComputeConfigHash(toolType, baseURLOrProvider string, credentialsEncrypted []byte, actionPathsJSON []byte) string {
+	h := sha256.New()
+	h.Write([]byte(toolType))
+	h.Write([]byte{0})
+	h.Write([]byte(baseURLOrProvider))
+	h.Write([]byte{0})
+	h.Write(credentialsEncrypted)
+	h.Write([]byte{0})
+	h.Write(actionPathsJSON)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // decisionResult carries the resolved outcome of an approval to a waiting Hold().
@@ -70,24 +127,47 @@ type Router struct {
 	slackWebhook string
 	uiBaseURL    string
 	pending      sync.Map // string(approvalID) → *pendingEntry
+
+	// toolRouter/aiProviderRouter let an approved call resume through the
+	// same dynamic-dispatch resolution the original (pre-escalation) call
+	// used, instead of always falling back to the static fwd proxy --
+	// closes a real gap found live during the AI Provider Connector
+	// brief's own verification: resolve()'s "approved" case previously
+	// called r.fwd.Forward unconditionally, so an approved escalation for
+	// ANY dynamically-routed tool (rest_api, B-044, and ai_provider) never
+	// actually reached the tool the approver reviewed -- it silently hit
+	// the static proxy instead. B-044's own session had already found and
+	// disclosed this exact gap for rest_api without fixing it; this closes
+	// it for both types at once, scoped to resolve()'s resume dispatch
+	// only. Either may be nil (tests that don't need dynamic resume can
+	// omit them) -- see dispatchApproved's nil-safe fallback chain.
+	toolRouter       *toolrouter.Router
+	aiProviderRouter *aiprovider.Router
 }
 
 // New creates a Router.
 //   - holdTimeout is the maximum time Hold() will wait before auto-denying.
 //   - slackWebhook may be empty to disable Slack notifications.
+//   - toolRouter/aiProviderRouter are optional (nil-safe): when set, an
+//     approved escalation resumes through them first, falling back to fwd
+//     exactly as before if neither resolves the tool. See dispatchApproved.
 func New(
 	pool *pgxpool.Pool,
 	fwd *proxy.Proxy,
 	holdTimeout time.Duration,
 	slackWebhook string,
 	uiBaseURL string,
+	toolRouter *toolrouter.Router,
+	aiProviderRouter *aiprovider.Router,
 ) *Router {
 	return &Router{
-		pool:         pool,
-		fwd:          fwd,
-		holdTimeout:  holdTimeout,
-		slackWebhook: slackWebhook,
-		uiBaseURL:    uiBaseURL,
+		pool:             pool,
+		fwd:              fwd,
+		holdTimeout:      holdTimeout,
+		slackWebhook:     slackWebhook,
+		uiBaseURL:        uiBaseURL,
+		toolRouter:       toolRouter,
+		aiProviderRouter: aiProviderRouter,
 	}
 }
 
@@ -156,12 +236,22 @@ func (r *Router) Submit(ctx context.Context, req Request) (string, error) {
 
 	expiresAt := time.Now().Add(r.holdTimeout)
 
+	// resolved_tool_id/resolved_config_hash pin the connector identity+
+	// config at escalation time (see Request's doc comment) -- nil (SQL
+	// NULL) when Tool never resolved dynamically, matching every other
+	// optional-FK column in this table.
+	var resolvedToolID, resolvedConfigHash any
+	if req.ResolvedToolID != "" {
+		resolvedToolID = req.ResolvedToolID
+		resolvedConfigHash = req.ResolvedConfigHash
+	}
+
 	_, err = r.pool.Exec(ctx, `
 		INSERT INTO approval_requests
 			(id, org_id, agent_id, agent_name, tool_name, action, parameters,
 			 justification, risk_level, expires_at, gateway_session_id,
-			 gateway_node_address, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
+			 gateway_node_address, resolved_tool_id, resolved_config_hash, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
 	`,
 		approvalID,
 		req.OrgID,
@@ -175,6 +265,8 @@ func (r *Router) Submit(ctx context.Context, req Request) (string, error) {
 		expiresAt,
 		req.SessionID,
 		nodeAddress,
+		resolvedToolID,
+		resolvedConfigHash,
 	)
 	if err != nil {
 		return "", fmt.Errorf("approval: insert request: %w", err)
@@ -391,13 +483,8 @@ func (r *Router) outcomeFromStatus(ctx context.Context, approvalID string, req R
 		// only "approved"/"denied" -- matching that vocabulary exactly is
 		// the whole point of this fix; the original code checked for
 		// "allowed", which eami-api never writes.
-		slog.Info("approval: approved — forwarding to proxy", "approval_id", approvalID)
-		tr, proxyErr := r.fwd.Forward(ctx, proxy.ToolRequest{
-			ToolName:  req.Tool,
-			Action:    req.Action,
-			Params:    req.Parameters,
-			SessionID: req.SessionID,
-		})
+		slog.Info("approval: approved — resuming original call", "approval_id", approvalID)
+		tr, proxyErr := r.dispatchApproved(ctx, approvalID, req)
 		return decisionResult{data: tr.Body, err: proxyErr}
 
 	case "pending":
@@ -420,6 +507,179 @@ func (r *Router) outcomeFromStatus(ctx context.Context, approvalID string, req R
 		}
 		slog.Info("approval: not approved", "approval_id", approvalID, "status", status, "reason", decisionReason)
 		return decisionResult{err: fmt.Errorf("%s", msg)}
+	}
+}
+
+// resolvedConnectorConfig is gateway_tools' security-relevant config for
+// one row, fetched fresh at resume time by ID (never by name -- see
+// dispatchApproved) so it can be compared against what was pinned at
+// escalation time.
+type resolvedConnectorConfig struct {
+	toolType             string
+	authType             string
+	baseURLOrProvider    string // base_url for rest_api, provider for ai_provider
+	credentialsEncrypted []byte
+	actionPaths          map[string]toolrouter.ActionPathEntry
+}
+
+// fetchResolvedConnector reads gateway_tools by (id, org_id) directly --
+// not through toolrouter.Resolve/aiprovider.Resolve, both of which
+// resolve by name, the exact thing dispatchApproved must NOT do for an
+// already-escalated request (see its doc comment). Org-scoped on orgID,
+// which traces back to the authenticated MCP session that originally made
+// the call (cmd/gateway/main.go), never anything resume-time-client-
+// supplied.
+func (r *Router) fetchResolvedConnector(ctx context.Context, orgID, toolID string) (resolvedConnectorConfig, bool, error) {
+	var cfg resolvedConnectorConfig
+	var baseURL, provider *string
+	var actionPathsRaw []byte
+	err := r.pool.QueryRow(ctx, `
+		SELECT type, auth_type, base_url, provider, credentials_encrypted, action_paths
+		FROM gateway_tools
+		WHERE id = $1 AND org_id = $2
+	`, toolID, orgID).Scan(&cfg.toolType, &cfg.authType, &baseURL, &provider, &cfg.credentialsEncrypted, &actionPathsRaw)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return cfg, false, nil
+		}
+		return cfg, false, err
+	}
+	switch cfg.toolType {
+	case "rest_api":
+		if baseURL != nil {
+			cfg.baseURLOrProvider = *baseURL
+		}
+	case "ai_provider":
+		if provider != nil {
+			cfg.baseURLOrProvider = *provider
+		}
+	}
+	if len(actionPathsRaw) > 0 {
+		_ = json.Unmarshal(actionPathsRaw, &cfg.actionPaths)
+	}
+	return cfg, true, nil
+}
+
+// recordResumeOutcome is a best-effort audit record of what actually
+// happened at resume time (see approval_requests.resume_outcome's own
+// migration comment) -- failures here are logged, not returned: the real
+// enforcement is dispatchApproved's own fail-closed return value, this is
+// forensic record-keeping on top of it, not the control itself.
+func (r *Router) recordResumeOutcome(ctx context.Context, approvalID, outcome string) {
+	if _, err := r.pool.Exec(ctx, `UPDATE approval_requests SET resume_outcome = $1 WHERE id = $2`, outcome, approvalID); err != nil {
+		slog.Warn("approval: failed to record resume_outcome", "approval_id", approvalID, "outcome", outcome, "err", err)
+	}
+}
+
+// dispatchApproved resumes req against the SAME connector -- identity and
+// security-relevant config both verified unchanged -- that was resolved
+// and pinned at escalation time (req.ResolvedToolID/ResolvedConfigHash,
+// set by cmd/gateway/main.go's dispatch closure before Submit()). Fails
+// closed, never falling back to a fresh by-name lookup or the static
+// proxy, if the pinned connector was deleted or its config (base_url/
+// provider/credentials) changed during the hold window.
+//
+// This closes a real TOCTOU gap found live during this brief's own
+// verification, more serious than the resume-routing gap dispatchApproved
+// originally fixed: re-resolving by NAME at resume time (this function's
+// first version) meant a lower-privileged admin/operator role -- which
+// cannot itself approve or deny an escalation, and which the approver has
+// no visibility into having acted -- could edit a pending escalation's
+// connector (base_url, credentials, or provider) while it waited for a
+// human decision, silently redirecting the approved call to a different
+// destination than the one actually reviewed. The approver-facing UI
+// shows only agent/tool/action/justification/risk -- never base_url,
+// provider, or a credential fingerprint -- so there was no way for a
+// human to detect this from the approval screen itself.
+//
+// req.ResolvedToolID empty means Tool never resolved dynamically at
+// escalation time -- unaffected by any of this, same static-proxy
+// fallback as before any of this brief's fixes.
+func (r *Router) dispatchApproved(ctx context.Context, approvalID string, req Request) (proxy.ToolResponse, error) {
+	if req.ResolvedToolID == "" {
+		r.recordResumeOutcome(ctx, approvalID, "static_fallback")
+		return r.fwd.Forward(ctx, proxy.ToolRequest{
+			ToolName:  req.Tool,
+			Action:    req.Action,
+			Params:    req.Parameters,
+			SessionID: req.SessionID,
+		})
+	}
+
+	cfg, found, err := r.fetchResolvedConnector(ctx, req.OrgID, req.ResolvedToolID)
+	if err != nil {
+		return proxy.ToolResponse{}, fmt.Errorf("approval: verify resolved connector %s: %w", req.ResolvedToolID, err)
+	}
+	if !found {
+		r.recordResumeOutcome(ctx, approvalID, "connector_deleted")
+		return proxy.ToolResponse{}, fmt.Errorf("approval: resolved connector %s no longer exists -- refusing to resume against an unknown destination", req.ResolvedToolID)
+	}
+	// Re-marshaled (not the raw stored JSONB bytes) so this matches
+	// main.go's own canonical-form computation regardless of the stored
+	// bytes' original formatting -- encoding/json.Marshal of a Go map is
+	// always deterministic (sorted keys), so an unchanged action_paths
+	// value hashes identically here and at escalation time either way.
+	var currentActionPathsJSON []byte
+	if len(cfg.actionPaths) > 0 {
+		currentActionPathsJSON, _ = json.Marshal(cfg.actionPaths)
+	}
+	currentHash := ComputeConfigHash(cfg.toolType, cfg.baseURLOrProvider, cfg.credentialsEncrypted, currentActionPathsJSON)
+	if currentHash != req.ResolvedConfigHash {
+		r.recordResumeOutcome(ctx, approvalID, "config_changed")
+		return proxy.ToolResponse{}, fmt.Errorf("approval: resolved connector %s configuration changed since this request was approved -- refusing to resume against a different destination than the approver reviewed", req.ResolvedToolID)
+	}
+
+	// Identity+config verified unchanged -- dispatch via the pinned
+	// connector's own current row, reconstructed directly from cfg (not
+	// re-resolved by name, closing the identity-substitution variant of
+	// this gap too: a delete-then-recreate-under-the-same-name row would
+	// have a different id, so fetchResolvedConnector above would already
+	// have returned found=false for the original ResolvedToolID).
+	switch cfg.toolType {
+	case "ai_provider":
+		if r.aiProviderRouter == nil {
+			return proxy.ToolResponse{}, fmt.Errorf("approval: resolved connector %s is an ai_provider connector but no aiProviderRouter is configured", req.ResolvedToolID)
+		}
+		row := &aiprovider.ToolRow{
+			ID:                   req.ResolvedToolID,
+			Provider:             cfg.baseURLOrProvider,
+			AuthType:             cfg.authType,
+			CredentialsEncrypted: cfg.credentialsEncrypted,
+		}
+		resp, dispatchErr := r.aiProviderRouter.Dispatch(ctx, row, req.Action, req.Parameters)
+		r.recordResumeOutcome(ctx, approvalID, "dispatched")
+		return proxy.ToolResponse{Status: resp.StatusCode, Body: resp.Body}, dispatchErr
+
+	case "rest_api":
+		if r.toolRouter == nil {
+			return proxy.ToolResponse{}, fmt.Errorf("approval: resolved connector %s is a rest_api tool but no toolRouter is configured", req.ResolvedToolID)
+		}
+		baseURL := cfg.baseURLOrProvider
+		row := &toolrouter.ToolRow{
+			ID:                   req.ResolvedToolID,
+			Type:                 "rest_api",
+			AuthType:             cfg.authType,
+			BaseURL:              &baseURL,
+			CredentialsEncrypted: cfg.credentialsEncrypted,
+			ActionPaths:          cfg.actionPaths,
+		}
+		resp, dispatchErr := r.toolRouter.Forward(ctx, row, proxy.ToolRequest{
+			ToolName:  req.Tool,
+			Action:    req.Action,
+			Params:    req.Parameters,
+			SessionID: req.SessionID,
+		})
+		r.recordResumeOutcome(ctx, approvalID, "dispatched")
+		return resp, dispatchErr
+
+	default:
+		// The pinned row's type itself changed since escalation (e.g.
+		// rest_api -> mcp) -- ComputeConfigHash includes toolType, so this
+		// should already have been caught as a hash mismatch above; kept
+		// as an explicit defensive case rather than assuming that
+		// invariant can never be violated.
+		r.recordResumeOutcome(ctx, approvalID, "config_changed")
+		return proxy.ToolResponse{}, fmt.Errorf("approval: resolved connector %s is no longer a dynamically-dispatchable type (%q)", req.ResolvedToolID, cfg.toolType)
 	}
 }
 

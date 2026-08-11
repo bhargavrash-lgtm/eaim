@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"gopkg.in/yaml.v3"
 
+	"github.com/eami/gateway/internal/aiprovider"
 	"github.com/eami/gateway/internal/approval"
 	"github.com/eami/gateway/internal/audit"
 	"github.com/eami/gateway/internal/config"
@@ -148,6 +149,17 @@ func run() error {
 	toolRouter := toolrouter.New(pool, toolCipher)
 	slog.Info("tool router ready", "credentials_configured", toolCipher != nil)
 
+	// AI Provider Connector (Thread A Model 1): ai_provider tool routing.
+	// Reuses the exact same toolCipher instance above -- same key, same
+	// B-022 decryption pattern, no new credential handling. The registry
+	// is a plain map so a future provider is one new adapter file plus
+	// one entry here, not a rework of resolution or dispatch wiring.
+	aiProviderRegistry := map[string]aiprovider.Adapter{
+		"claude": aiprovider.NewClaudeAdapter(),
+	}
+	aiProviderRouter := aiprovider.New(pool, toolCipher, aiProviderRegistry)
+	slog.Info("ai provider router ready", "providers", len(aiProviderRegistry), "credentials_configured", toolCipher != nil)
+
 	holdTimeout := time.Duration(cfg.Approval.ExpirySeconds) * time.Second
 	approvalRouter := approval.New(
 		pool,
@@ -155,6 +167,12 @@ func run() error {
 		holdTimeout,
 		cfg.Approval.SlackWebhookURL,
 		cfg.Approval.UIBaseURL,
+		// An approved escalation resumes through the same dynamic
+		// dispatch the original call would have used, instead of always
+		// falling back to the static fwdProxy -- closes a real gap this
+		// brief found live (see approval.Router.toolRouter's doc comment).
+		toolRouter,
+		aiProviderRouter,
 	)
 	slog.Info("approval router ready",
 		"hold_timeout", holdTimeout,
@@ -187,10 +205,27 @@ func run() error {
 		// gateway_tools.id via ToolServerID, and so the ActionAllow branch
 		// below already knows whether to dynamically dispatch.
 		resolvedTool := resolveDynamicTool(reqCtx, toolRouter, ac.OrgID, ac.Tool)
+		// AI Provider Connector: identical resolution, a separate lookup
+		// against gateway_tools' type='ai_provider' rows (Thread A Model 1).
+		// A tool name resolves to at most one of resolvedTool/resolvedProvider
+		// -- gateway_tools' UNIQUE(org_id, name) means at most one row can
+		// ever match ac.Tool for a given org, regardless of type. Only
+		// queried when the first lookup didn't already find a match (code
+		// review finding, this task): the common case -- an already-
+		// registered rest_api tool, the vast majority of real traffic --
+		// pays exactly one DB round trip on the hot dispatch path, exactly
+		// as it did before this brief.
+		var resolvedProvider *aiprovider.ToolRow
+		if resolvedTool == nil {
+			resolvedProvider = resolveAIProviderTool(reqCtx, aiProviderRouter, ac.OrgID, ac.Tool)
+		}
 
 		pc := ac.ToPolicyContext()
-		if resolvedTool != nil {
+		switch {
+		case resolvedTool != nil:
 			pc.ToolServerID = resolvedTool.ID
+		case resolvedProvider != nil:
+			pc.ToolServerID = resolvedProvider.ID
 		}
 		decision, evalErr := pLoader.Evaluator().Evaluate(reqCtx, pc)
 		if evalErr != nil {
@@ -218,6 +253,20 @@ func run() error {
 			LatencyMS:  latencyMS,
 			PolicyID:   policyID,
 			Timestamp:  ac.ReceivedAt,
+		}
+		// AI Provider Connector: per-connector audit logging mode
+		// (schema/migrations-v2/000004). Applied once, here, so it covers
+		// every branch below uniformly (denied/escalated/allowed) --
+		// scoped strictly to the audit_log write; approval_requests
+		// (B-039, frozen) and episodes keep showing full parameters,
+		// unchanged, since a human reviewer needs full visibility to make
+		// a real approve/deny decision (Thread A investigation, Part 0 §6
+		// and §7). Default for a newly created connector is
+		// "structural_metadata_only" (DB DEFAULT, schema/migrations-v2/
+		// 000004) -- a new ai_provider connector never logs raw prompt
+		// content into audit_log until an admin explicitly opts into "full".
+		if resolvedProvider != nil && resolvedProvider.AuditMode != "full" {
+			auditEntry.Parameters = nil
 		}
 
 		switch decision.Action {
@@ -253,6 +302,38 @@ func run() error {
 				Action:     ac.Action,
 				Parameters: ac.Parameters,
 				SessionID:  ac.SessionID,
+			}
+			// Pin the resolved connector's identity + config fingerprint at
+			// the exact moment it was resolved for policy evaluation -- what
+			// the human approver's review is actually based on. Submit()
+			// persists both; dispatchApproved re-verifies neither changed
+			// before resuming, closing a real TOCTOU gap found live during
+			// this brief's own verification (see approval.Request's doc
+			// comment): without this, a lower-privileged admin/operator role
+			// could edit the connector while the escalation was pending and
+			// silently redirect the approved call to a different destination
+			// than the approver reviewed.
+			switch {
+			case resolvedProvider != nil:
+				approvalReq.ResolvedToolID = resolvedProvider.ID
+				approvalReq.ResolvedConfigHash = approval.ComputeConfigHash("ai_provider", resolvedProvider.Provider, resolvedProvider.CredentialsEncrypted, nil)
+			case resolvedTool != nil:
+				baseURL := ""
+				if resolvedTool.BaseURL != nil {
+					baseURL = *resolvedTool.BaseURL
+				}
+				// action_paths is security-relevant, not cosmetic: it
+				// determines which sub-path/method a given action actually
+				// dispatches to (toolrouter.Forward), so it must be part of
+				// the pinned fingerprint too -- found live by this brief's
+				// own mandatory security review (see ComputeConfigHash's
+				// doc comment for the exact gap this closes).
+				var actionPathsJSON []byte
+				if len(resolvedTool.ActionPaths) > 0 {
+					actionPathsJSON, _ = json.Marshal(resolvedTool.ActionPaths)
+				}
+				approvalReq.ResolvedToolID = resolvedTool.ID
+				approvalReq.ResolvedConfigHash = approval.ComputeConfigHash("rest_api", baseURL, resolvedTool.CredentialsEncrypted, actionPathsJSON)
 			}
 			approvalID, submitErr := approvalRouter.Submit(reqCtx, approvalReq)
 			if submitErr != nil {
@@ -290,13 +371,24 @@ func run() error {
 			}
 			var tr proxy.ToolResponse
 			var proxyErr error
-			if resolvedTool != nil {
+			switch {
+			case resolvedProvider != nil:
+				// AI Provider Connector: dispatch to the resolved ai_provider
+				// connector's real provider adapter (Claude first). Converted
+				// into proxy.ToolResponse's shape so every line below this
+				// switch (token-usage extraction, episode recording, the
+				// final return) handles an ai_provider call exactly like any
+				// other tool call, unchanged.
+				var presp aiprovider.Response
+				presp, proxyErr = aiProviderRouter.Dispatch(reqCtx, resolvedProvider, ac.Action, ac.Parameters)
+				tr = proxy.ToolResponse{Status: presp.StatusCode, Body: presp.Body}
+			case resolvedTool != nil:
 				// B-044: dynamically dispatch to this org's registered
 				// rest_api tool's real base_url/credentials, instead of the
 				// static fwdProxy every other call below still uses
 				// unchanged.
 				tr, proxyErr = toolRouter.Forward(reqCtx, resolvedTool, toolReq)
-			} else {
+			default:
 				tr, proxyErr = fwdProxy.Forward(reqCtx, toolReq)
 			}
 			if proxyErr != nil {
@@ -422,6 +514,27 @@ func resolveDynamicTool(ctx context.Context, tr *toolrouter.Router, orgID, tool 
 		return nil
 	}
 	if row.Type != "rest_api" {
+		return nil
+	}
+	return row
+}
+
+// resolveAIProviderTool looks up tool within org's gateway_tools,
+// restricted to type='ai_provider' (AI Provider Connector, Thread A Model
+// 1). Mirrors resolveDynamicTool's exact shape and fail-open contract: nil
+// on empty org/tool, no matching row, or a genuine DB error (logged, not
+// fatal) -- a call that doesn't resolve to a real ai_provider connector
+// falls through to the existing rest_api/static-proxy resolution
+// unaffected, never a new way for an existing call to break.
+func resolveAIProviderTool(ctx context.Context, apr *aiprovider.Router, orgID, tool string) *aiprovider.ToolRow {
+	if orgID == "" || tool == "" {
+		return nil
+	}
+	row, err := apr.Resolve(ctx, orgID, tool)
+	if err != nil {
+		if !errors.Is(err, aiprovider.ErrNotFound) {
+			slog.Warn("aiprovider: resolve failed -- falling back to existing tool resolution", "tool", tool, "err", err)
+		}
 		return nil
 	}
 	return row

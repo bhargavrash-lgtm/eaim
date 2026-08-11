@@ -479,7 +479,98 @@ or prior context suggests otherwise, it is wrong; trust this line.
   bullet is the flag, not the fix.
 
 ## Last updated
-2026-08-11 by Claude Code — B-056: `paste_events_test.go`/`paste_events_read_test.go`'s
+2026-08-11 by Claude Code — B-057: AI Provider Connector (Thread A Model
+1). A new `ai_provider` `gateway_tools` type dispatches to an external AI
+provider (Claude first, via a real `Adapter` interface — the first
+complete implementation of it, not a special case) as a named tool
+(`claude/messages`) through the real gateway dispatch path, reusing MCP's
+existing async 202+SSE pattern unchanged, non-streaming. Also
+architecturally unblocks prompt redaction/tokenization — the gateway had
+no visibility into an agent's outbound LLM call before this — though that
+subsystem itself is not built here.
+
+**Two scope expansions during live verification, both explicitly
+authorized, both matching B-039's own `internal/mcp/handler.go` precedent
+("a real gap found during this task's own investigation that makes an
+acceptance criterion unsatisfiable without the fix"):**
+
+1. **Resume-routing fix.** Live verification found `approval.Router`'s
+   resume logic (`resolve()`'s "approved" case) was hardcoded to the
+   static proxy, with zero awareness of `toolRouter`/`aiProviderRouter` —
+   meaning an approved escalation for *any* dynamically-routed tool,
+   `rest_api` (B-044) included, never actually reached the destination it
+   was escalated for. **Not a new bug** — B-044's own session had already
+   found and explicitly disclosed this exact gap for `rest_api` without
+   fixing it (see this file's own B-044 entry: "`internal/approval/
+   router.go` are completely untouched, so approved escalations keep
+   using the static proxy exactly as before"). A new `dispatchApproved`
+   method resolves via `aiProviderRouter` then `toolRouter` (mirroring
+   `main.go`'s own order), falling back to the static proxy only if
+   neither matches — closing it for both types at once, scoped to the
+   resume dispatch path only.
+2. **TOCTOU/destination-integrity fix — judged more serious than the
+   routing bug: a bypassable safety guarantee, not a broken feature.**
+   The resume-routing fix's own re-resolve-by-name design meant a
+   lower-privileged `admin`/`operator` role — invisible to the human
+   approver, who sees only agent/tool/action/justification/risk, never
+   `base_url`/`provider`/a credential fingerprint — could edit the
+   escalated connector's config during the hold window and silently
+   redirect the approved call to a different destination than the one
+   actually reviewed. Fixed by pinning the resolved connector's ID plus a
+   config hash (type + base_url-or-provider + the **encrypted** credential
+   bytes, never plaintext + a canonical serialization of `action_paths`)
+   at escalation time (`main.go`, which already resolves the tool before
+   policy evaluation), persisting both into two new `approval_requests`
+   columns (`schema/migrations-v2/000005`), and **failing closed** at
+   resume — refusing to dispatch, recording a new `resume_outcome`
+   (`dispatched`/`config_changed`/`connector_deleted`/`static_fallback`,
+   closing the audit gap too: what actually executed at resume is now
+   recorded, not just the original escalation entry) — if the pinned
+   connector is gone or its config changed. `resolved_tool_id`'s FK uses
+   `ON DELETE SET NULL`, deliberately different from this table's other FK
+   columns — found live by this fix's own test suite, which tried to
+   delete a referenced tool and got blocked by a naive FK; a historical
+   approval record must never prevent an admin from deleting a tool.
+   **The `action_paths` component of the hash was itself found live**, not
+   assumed complete on the first attempt: this fix's own two mandatory
+   security-review rounds and an independent code-review pass all
+   independently converged on the identical finding that the first version
+   of the hash covered only `base_url`/credentials, missing that
+   `action_paths` alone (both left untouched) fully determines a
+   `rest_api` tool's real per-action destination/method.
+
+**Reviewer + security passes: three full mandatory rounds**, each finding
+real, distinct issues before the next came back clean (base feature: 4
+code-review findings, 2 fixed/1 disclosed/1 investigated-and-found-
+overstated, security clean; resume-routing fix: the TOCTOU gap found by a
+security review explicitly mandated to check destination-integrity, plus 3
+more code-review findings, all fixed; TOCTOU fix itself: the `action_paths`
+gap found by both passes, fixed in the same pass, both passes otherwise
+clean against their respective mandates).
+
+**Live-verified end-to-end** against an isolated `docker-compose` stack
+with a real Anthropic API key (a real mid-verification operational mistake
+— an early rebuild missing the `-p` project flag silently left the
+throwaway stack's image stale for several steps — caught, diagnosed from
+first principles, and corrected, disclosed not glossed over): a real
+Claude response through direct dispatch (AC1); a full real
+escalate→approve→resume cycle genuinely returning a real Claude response
+after the fix (AC4, the actual resume working, not partial); the
+fail-closed behavior proven **live**, not just via Go tests — a real
+`PATCH` swapping the connector's credentials while an approval sat
+pending, then approval, then a genuinely refused resume
+(`resume_outcome='config_changed'`); `audit_log.parameters` confirmed
+`null`/populated correctly for the default vs. explicit-`full` connector
+(AC5); zero credential leakage across every real log for the whole
+session (AC6). Every throwaway resource — stack, org, agent, connectors,
+policy, approvals, the helper container, the on-disk API key file —
+confirmed torn down afterward; the real dev stack confirmed untouched
+throughout.
+
+Full writeup in `BUILT.md`'s `Cross-cutting / shared` section and
+`BACKLOG.md`'s B-057 entry.
+
+Prior entry, still accurate: 2026-08-11 by Claude Code — B-056: `paste_events_test.go`/`paste_events_read_test.go`'s
 100,000-row perf-seed tests no longer touch the shared dev database at all —
 each now creates and drops its own throwaway database, reusing
 `bootstrap_test.go`'s already-established `bootstrapTestPgConn`/

@@ -143,6 +143,21 @@ type ActionPathMapping struct {
 	Method string `json:"method"`
 }
 
+// ── AI provider connectors (Thread A Model 1) ───────────────────────────────────
+
+// validAIProviders is the allowlist of provider identifiers eami-gateway
+// has a real Adapter registered for (see eami-gateway/internal/aiprovider).
+// Deliberately a Go-level allowlist, not a DB CHECK constraint on
+// gateway_tools.provider -- adding a provider is one entry here plus one
+// gateway adapter, not another migration (AC2: "ready for a second
+// provider... without UI rework" extends to not needing a schema change
+// either).
+var validAIProviders = map[string]bool{"claude": true}
+
+var validAuditModes = map[string]bool{"full": true, "structural_metadata_only": true}
+
+const defaultAuditMode = "structural_metadata_only"
+
 var allowedActionPathMethods = map[string]bool{
 	http.MethodGet: true, http.MethodPost: true, http.MethodPut: true,
 	http.MethodPatch: true, http.MethodDelete: true,
@@ -202,18 +217,24 @@ type ToolResp struct {
 	LastUsed    *time.Time                   `json:"last_used,omitempty"`
 	CreatedAt   time.Time                    `json:"created_at"`
 	ActionPaths map[string]ActionPathMapping `json:"action_paths,omitempty"`
+	Provider    *string                      `json:"provider,omitempty"`
+	AuditMode   string                       `json:"audit_mode"`
 }
 
 func toolToResp(t store.GatewayTool) ToolResp {
 	r := ToolResp{
 		ID: t.ID, Name: t.Name, Type: t.Type,
 		AuthType: t.AuthType, Status: t.Status, CreatedAt: t.CreatedAt,
+		AuditMode: t.AuditMode,
 	}
 	if t.MCPCommand.Valid {
 		r.MCPCommand = &t.MCPCommand.String
 	}
 	if t.BaseURL.Valid {
 		r.BaseURL = &t.BaseURL.String
+	}
+	if t.Provider.Valid {
+		r.Provider = &t.Provider.String
 	}
 	if t.LastUsed.Valid {
 		ts := t.LastUsed.Time
@@ -263,6 +284,8 @@ func (s *Server) CreateTool(w http.ResponseWriter, r *http.Request) {
 		BaseURL     *string                      `json:"base_url"`
 		Credentials json.RawMessage              `json:"credentials"`
 		ActionPaths map[string]ActionPathMapping `json:"action_paths"`
+		Provider    *string                      `json:"provider"`
+		AuditMode   *string                      `json:"audit_mode"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
@@ -271,6 +294,37 @@ func (s *Server) CreateTool(w http.ResponseWriter, r *http.Request) {
 	if body.Name == "" || body.Type == "" || body.AuthType == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "name, type, and auth_type are required")
 		return
+	}
+	if body.Type == "ai_provider" {
+		if body.Provider == nil || !validAIProviders[*body.Provider] {
+			writeError(w, http.StatusBadRequest, "bad_request", "type ai_provider requires a supported provider")
+			return
+		}
+		// api_key is the only credential shape aiprovider.Credentials/
+		// ClaudeAdapter understand -- catching a wrong auth_type here,
+		// not at dispatch time, means a misconfigured connector fails
+		// loudly at creation (easy to fix) instead of on every real call
+		// with a confusing "no api_key configured" error (code review
+		// finding, this task).
+		if body.AuthType != "api_key" {
+			writeError(w, http.StatusBadRequest, "bad_request", "type ai_provider requires auth_type \"api_key\"")
+			return
+		}
+	} else if body.Provider != nil {
+		// provider is only meaningful for type=ai_provider -- reject it
+		// outright for every other type rather than silently persisting
+		// it unused (code review finding, this task; mirrors UpdateTool's
+		// identical guard for the same reason).
+		writeError(w, http.StatusBadRequest, "bad_request", "provider can only be set on an ai_provider-type tool")
+		return
+	}
+	auditMode := defaultAuditMode
+	if body.AuditMode != nil {
+		if !validAuditModes[*body.AuditMode] {
+			writeError(w, http.StatusBadRequest, "bad_request", "audit_mode must be \"full\" or \"structural_metadata_only\"")
+			return
+		}
+		auditMode = *body.AuditMode
 	}
 	ts, ok := s.toolQueries()
 	if !ok {
@@ -327,6 +381,8 @@ func (s *Server) CreateTool(w http.ResponseWriter, r *http.Request) {
 		BaseURL:              body.BaseURL,
 		CredentialsEncrypted: encrypted,
 		ActionPaths:          actionPathsJSON,
+		Provider:             body.Provider,
+		AuditMode:            auditMode,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -358,9 +414,19 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 		BaseURL     *string                      `json:"base_url"`
 		Credentials json.RawMessage              `json:"credentials"`
 		ActionPaths map[string]ActionPathMapping `json:"action_paths"`
+		Provider    *string                      `json:"provider"`
+		AuditMode   *string                      `json:"audit_mode"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
+		return
+	}
+	if body.Provider != nil && !validAIProviders[*body.Provider] {
+		writeError(w, http.StatusBadRequest, "bad_request", "provider is not a supported AI provider")
+		return
+	}
+	if body.AuditMode != nil && !validAuditModes[*body.AuditMode] {
+		writeError(w, http.StatusBadRequest, "bad_request", "audit_mode must be \"full\" or \"structural_metadata_only\"")
 		return
 	}
 	// A present-but-empty name would otherwise pass straight through
@@ -378,6 +444,29 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "internal_error", "tool store is not configured")
 		return
+	}
+
+	// provider/audit_mode are only meaningful for ai_provider-type
+	// connectors -- reusing GetToolForTest's existing read (already in the
+	// toolStore interface, no new query added) to check the row's actual
+	// current type before honoring either field. Without this, PATCH could
+	// silently set provider="claude" on e.g. a database-type tool -- no
+	// dispatch path ever reads it there, but it produces confusing,
+	// misleading state (code review finding, this task).
+	if body.Provider != nil || body.AuditMode != nil {
+		row, err := ts.GetToolForTest(r.Context(), uc.OrgID, toolID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "not_found", "tool not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		if row.Type != "ai_provider" {
+			writeError(w, http.StatusBadRequest, "bad_request", "provider/audit_mode can only be set on an ai_provider-type connector")
+			return
+		}
 	}
 
 	// credentialsProvided distinguishes "field omitted" (preserve the
@@ -439,6 +528,8 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 		ActionPaths:          actionPathsJSON,
 		BaseURL:              body.BaseURL,
 		CredentialsEncrypted: encrypted,
+		Provider:             body.Provider,
+		AuditMode:            body.AuditMode,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
