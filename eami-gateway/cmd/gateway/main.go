@@ -433,7 +433,9 @@ func run() error {
 		}
 	}
 
-	mcpHandler := mcp.NewHandler(idManager, agentRegistry, dispatch)
+	mcpHandler := mcp.NewHandler(idManager, agentRegistry, dispatch, func(ctx context.Context, orgID string) ([]mcp.ToolDefinition, error) {
+		return listGatewayTools(ctx, pool, orgID)
+	})
 	// agentRegistry (*registry.Registry) satisfies identity.AgentResolver structurally.
 	revokeHandler := identity.NewRevokeHandler(idManager, agentRegistry, cfg.API.TokenRevokeServiceKey)
 
@@ -530,6 +532,62 @@ func resolveDynamicTool(ctx context.Context, tr *toolrouter.Router, orgID, tool 
 		return nil
 	}
 	return row
+}
+
+// listGatewayTools builds the real tools/list result (B-061) for orgID:
+// one mcp.ToolDefinition per named action of every org-scoped rest_api
+// gateway_tools row, mirroring resolveDynamicTool's org-scoping discipline
+// exactly (orgID is always server-resolved from the JWT by the caller,
+// never client-supplied). Only type='rest_api' rows are considered --
+// ai_provider connectors dispatch via a completely different mechanism
+// with no action_paths concept, and mcp/database rows have no working
+// direct-dispatch path in this file today; representing either as
+// zero-action tool entries would be misleading, not honestly empty, so
+// they're excluded from the query itself rather than filtered after the
+// fact. A rest_api row with no action_paths set contributes zero entries
+// too: such a tool accepts any action name via B-044's flat-POST
+// fallback, so there is no fixed list to honestly enumerate.
+func listGatewayTools(ctx context.Context, pool *pgxpool.Pool, orgID string) ([]mcp.ToolDefinition, error) {
+	if orgID == "" {
+		return nil, nil
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT name, action_paths
+		FROM gateway_tools
+		WHERE org_id = $1 AND type = 'rest_api'
+	`, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("listGatewayTools: query: %w", err)
+	}
+	defer rows.Close()
+
+	var defs []mcp.ToolDefinition
+	for rows.Next() {
+		var name string
+		var actionPathsRaw []byte
+		if err := rows.Scan(&name, &actionPathsRaw); err != nil {
+			return nil, fmt.Errorf("listGatewayTools: scan: %w", err)
+		}
+		if len(actionPathsRaw) == 0 {
+			continue
+		}
+		var actionPaths map[string]toolrouter.ActionPathEntry
+		if err := json.Unmarshal(actionPathsRaw, &actionPaths); err != nil {
+			slog.Warn("listGatewayTools: malformed action_paths -- skipping tool", "tool", name, "err", err)
+			continue
+		}
+		for action, entry := range actionPaths {
+			defs = append(defs, mcp.ToolDefinition{
+				Name:        name + "/" + action,
+				Description: fmt.Sprintf("%s %s on connector %q", entry.Method, entry.Path, name),
+				InputSchema: map[string]any{"type": "object"},
+			})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("listGatewayTools: rows: %w", err)
+	}
+	return defs, nil
 }
 
 // resolveAIProviderTool looks up tool within org's gateway_tools,

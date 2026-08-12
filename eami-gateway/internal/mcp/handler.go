@@ -99,15 +99,47 @@ type toolCallParams struct {
 // Return *PolicyDeniedError to produce a structured -32600 response.
 type DecisionHandler func(ctx context.Context, ac ActionContext) (json.RawMessage, error)
 
+// ToolDefinition is one MCP tool as returned by tools/list, matching the
+// real spec's shape ({name, description, inputSchema}) so a real
+// MCP-aware client library can parse it without special-casing this
+// implementation (B-061). InputSchema is deliberately generic
+// ({"type":"object"}) -- gateway_tools.action_paths (B-046) has no
+// parameter schema (just path+method), so a richer schema would be
+// fabricated, not derived from real data. See cmd/gateway/main.go's
+// listGatewayTools for how these are built.
+type ToolDefinition struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"inputSchema"`
+}
+
+// ListToolsHandler resolves the real, live set of tools available to
+// orgID -- called with the session's server-resolved org (never client
+// input), mirroring DecisionHandler's identical callback-injection
+// pattern so internal/mcp stays DB-agnostic (all actual gateway_tools
+// access lives in cmd/gateway/main.go, same separation of concerns
+// DecisionHandler already established).
+type ListToolsHandler func(ctx context.Context, orgID string) ([]ToolDefinition, error)
+
+// toolsListResult is tools/list's JSON-RPC result payload. NextCursor is
+// deliberately never populated (omitempty) -- real pagination isn't
+// implemented at current scale; matching the spec's own optional-field
+// shape is honest, a fabricated cursor would not be.
+type toolsListResult struct {
+	Tools      []ToolDefinition `json:"tools"`
+	NextCursor string           `json:"nextCursor,omitempty"`
+}
+
 // Handler owns the SSE transport. Register its methods on the HTTP mux:
 //
 //	mux.HandleFunc("/v1/mcp/sse",      h.ServeSSE)
 //	mux.HandleFunc("/v1/mcp/messages", h.ServeMessages)
 type Handler struct {
-	identity *identity.Manager
-	reg      *registry.Registry
-	sessions *SessionManager
-	dispatch DecisionHandler
+	identity  *identity.Manager
+	reg       *registry.Registry
+	sessions  *SessionManager
+	dispatch  DecisionHandler
+	listTools ListToolsHandler
 }
 
 // NewHandler creates a Handler.
@@ -115,12 +147,14 @@ func NewHandler(
 	idm *identity.Manager,
 	reg *registry.Registry,
 	dispatch DecisionHandler,
+	listTools ListToolsHandler,
 ) *Handler {
 	return &Handler{
-		identity: idm,
-		reg:      reg,
-		sessions: NewSessionManager(),
-		dispatch: dispatch,
+		identity:  idm,
+		reg:       reg,
+		sessions:  NewSessionManager(),
+		dispatch:  dispatch,
+		listTools: listTools,
 	}
 }
 
@@ -214,6 +248,15 @@ func (h *Handler) ServeMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// tools/list (B-061) is handled as its own early branch, before the
+	// tool_call gate below -- everything from here down (the params
+	// parsing, buildActionContext, the dispatch goroutine) is completely
+	// unmodified tool_call logic, untouched by this brief.
+	if req.Method == "tools/list" {
+		h.serveToolsList(w, r, sess, req)
+		return
+	}
+
 	if req.Method != "tool_call" {
 		sessRPCError(sess, req.ID, -32601, "method not found: "+req.Method)
 		w.WriteHeader(http.StatusAccepted)
@@ -267,6 +310,51 @@ func (h *Handler) ServeMessages(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp := jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(result)}
+		data, _ := json.Marshal(resp)
+		_ = sess.Send(sseEvent{Event: "message", Data: string(data)})
+	}()
+}
+
+// serveToolsList handles the "tools/list" JSON-RPC method (B-061): writes
+// 202 immediately and sends the real result via the same SSE "message"
+// mechanism tool_call already uses, for full transport uniformity -- a
+// real client is already listening on one stream for everything,
+// regardless of which method it called. orgID is always resolved
+// server-side from the session's own registry-verified agent (never
+// client input), the identical source buildActionContext already trusts
+// for tool_call.
+func (h *Handler) serveToolsList(w http.ResponseWriter, r *http.Request, sess *Session, req jsonRPCRequest) {
+	w.WriteHeader(http.StatusAccepted)
+
+	orgID := ""
+	if sess.Agent != nil {
+		orgID = sess.Agent.OrgID
+	}
+
+	// Same context.WithoutCancel reasoning as tool_call immediately above
+	// (B-039): this handler has already returned (202 written) by the
+	// time this goroutine runs, and net/http cancels r.Context() the
+	// instant ServeHTTP returns -- using r.Context() directly (unwrapped)
+	// here would fail nearly every real DB query with "context canceled",
+	// not just long-held ones, since ServeMessages returns essentially
+	// immediately after this function starts the goroutine.
+	listCtx := context.WithoutCancel(r.Context())
+	go func() {
+		tools, err := h.listTools(listCtx, orgID)
+		if err != nil {
+			slog.Warn("mcp/messages: tools/list failed", "session", sess.ID, "org", orgID, "err", err)
+			sessRPCError(sess, req.ID, -32000, err.Error())
+			return
+		}
+		if tools == nil {
+			tools = []ToolDefinition{}
+		}
+		resultRaw, err := json.Marshal(toolsListResult{Tools: tools})
+		if err != nil {
+			sessRPCError(sess, req.ID, -32000, "failed to encode tools/list result")
+			return
+		}
+		resp := jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(resultRaw)}
 		data, _ := json.Marshal(resp)
 		_ = sess.Send(sseEvent{Event: "message", Data: string(data)})
 	}()

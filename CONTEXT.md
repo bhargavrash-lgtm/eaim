@@ -492,7 +492,34 @@ or prior context suggests otherwise, it is wrong; trust this line.
   building anything.
 
 ## Last updated
-2026-08-12 by Claude Code — B-060: Workflows UI, real action picker.
+2026-08-12 by Claude Code — B-061: MCP Discovery, real `tools/list`
+support. `internal/mcp`'s SSE transport previously implemented only the
+non-standard `tool_call` method — any other JSON-RPC method, including the
+real spec's `tools/list`, got `-32601 method not found`, so a connecting
+agent had to already know exact tool/action names in advance. Added a real
+`tools/list` (new `ListToolsHandler` callback-injection parameter on
+`mcp.NewHandler`, matching `DecisionHandler`'s existing DB-agnostic
+pattern; new `cmd/gateway/main.go` `listGatewayTools`, mirroring
+`resolveDynamicTool`'s exact org-scoping shape) so an agent can discover
+its own org's real `rest_api` connectors and their known actions. Only
+`type='rest_api'` gateway_tools rows are eligible — `ai_provider`
+connectors and `mcp`/`database` types are excluded by design, not
+filtered after the fact (see `BUILT.md`'s B-061 entry for the full
+reasoning). **Explicitly MCP-protocol-completeness work adjacent to
+Thread B, not part of its own multi-hop-workflow epic** — same category
+distinction B-060's entry already drew. `tool_call`'s existing code path
+is byte-for-byte unmodified, confirmed by direct diff review. Reviewer +
+security passes both clean, zero findings. `go build`/`go vet`/`go test
+./... -count=1` clean across the full `eami-gateway` module. Live-verified
+against the real `docker-compose` stack: a real agent JWT, a real SSE
+session, a real `tools/list` call correctly returned only the org's real
+`rest_api` connector's real actions (its `ai_provider` connector and
+zero-`action_paths` `rest_api` tools correctly absent); a follow-up real
+`tool_call` over the same session still dispatched correctly. Full
+writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s B-061
+entry.
+
+Prior entry, still accurate: 2026-08-12 by Claude Code — B-060: Workflows UI, real action picker.
 Replaced the step editor's free-text "action" field with a real dropdown
 of a connector's known `action_paths` (B-046) when it has any, falling
 back to free text unchanged otherwise — per the MCP Discovery
