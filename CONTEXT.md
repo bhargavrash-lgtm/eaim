@@ -492,7 +492,28 @@ or prior context suggests otherwise, it is wrong; trust this line.
   building anything.
 
 ## Last updated
-2026-08-12 by Claude Code — B-059: Multi-Hop Workflows, Brief 2 (execution
+2026-08-12 by Claude Code — B-060: Workflows UI, real action picker.
+Replaced the step editor's free-text "action" field with a real dropdown
+of a connector's known `action_paths` (B-046) when it has any, falling
+back to free text unchanged otherwise — per the MCP Discovery
+investigation's D8 finding, this needed zero backend work: `useTools()`
+already fetched `action_paths` to the frontend. Only `WorkflowsPage.tsx`
+changed. **Explicitly adjacent to Thread B, not part of its epic** — the
+investigation's own distinction between the workflow-chaining epic and
+MCP-protocol/connector-definition work that happens to feed it.
+Connector-switch now unconditionally resets the action field (one
+unbranched state update, verified by inspection) so a stale action from a
+previously selected connector can never survive a switch. `npm run
+type-check`/`build` clean. Live-verified against the real running stack
+via the exact save-and-reload data contract the UI itself uses (a
+dropdown-selected and a free-text action both round-tripped correctly on
+the real `b059-live-verify` workflow) — no interactive browser
+click-through, consistent with this environment's standing limitation and
+its documented Chrome/Edge automation incident risk. Full writeup in
+`BUILT.md`'s `eami-ui` section and `BACKLOG.md`'s B-060 entry.
+
+Prior entry, still accurate: 2026-08-12 by Claude Code — B-059: Multi-Hop
+Workflows, Brief 2 (execution
 engine, per-hop TOCTOU pinning, static per-step parameters). Makes a
 B-058-defined workflow actually run, for the first time — each step
 dispatched through the exact same, completely unmodified `dispatch()`/

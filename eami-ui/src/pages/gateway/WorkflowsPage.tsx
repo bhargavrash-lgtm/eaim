@@ -27,6 +27,7 @@ import {
 } from '@/hooks/useWorkflows'
 import type { Workflow, WorkflowStatus } from '@/hooks/useWorkflows'
 import { useTools } from '@/hooks/useTools'
+import type { ToolWithActions } from '@/hooks/useTools'
 
 const STATUS_OPTIONS: { value: WorkflowStatus; label: string }[] = [
   { value: 'draft', label: 'Draft' },
@@ -79,7 +80,10 @@ function validateAndConvertRows(rows: StepRow[]): { steps: { gateway_tool_id: st
 
 function StepsEditor({ rows, onChange }: { rows: StepRow[]; onChange: (rows: StepRow[]) => void }) {
   const { data: toolsData } = useTools()
-  const tools = (toolsData as any)?.data ?? []
+  // Typed properly (mirrors ToolsPage.tsx's own identical pattern) so
+  // action_paths -- B-046, already fetched here for free -- is usable
+  // below without a second `any` cast.
+  const tools: ToolWithActions[] = (toolsData as any)?.data ?? []
 
   function updateRow(i: number, patch: Partial<StepRow>) {
     onChange(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
@@ -131,16 +135,51 @@ function StepsEditor({ rows, onChange }: { rows: StepRow[]; onChange: (rows: Ste
                   <AlertTriangle className="h-4 w-4 text-red-500" />
                 </span>
               )}
-              <select value={row.gatewayToolId} onChange={e => updateRow(i, { gatewayToolId: e.target.value, toolDeleted: false })}
+              <select value={row.gatewayToolId}
+                // action is always reset on a connector change (B-060) --
+                // simplest rule that can never leave a stale action value
+                // behind, whether the old or new connector uses the
+                // dropdown or free-text path.
+                onChange={e => updateRow(i, { gatewayToolId: e.target.value, action: '', toolDeleted: false })}
                 className={`flex-1 border rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 ${row.toolDeleted ? 'border-red-300 text-red-600' : ''}`}>
                 <option value="">{row.toolDeleted ? 'connector removed -- select a new one' : 'Select a connector...'}</option>
-                {tools.map((t: any) => (
+                {tools.map(t => (
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
               </select>
-              <input value={row.action} onChange={e => updateRow(i, { action: e.target.value })}
-                placeholder="action"
-                className="w-1/3 border rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              {(() => {
+                // Real action picker (B-060): a rest_api connector with
+                // action_paths (B-046) defined gets a dropdown of its real,
+                // known actions instead of free text -- action_paths is
+                // already fetched by useTools() above, no new endpoint
+                // needed. A connector with none (ai_provider/mcp/database,
+                // or a rest_api tool that hasn't defined per-action
+                // mappings yet) falls back to free text unchanged, exactly
+                // matching action_paths' own existing "unmapped falls back
+                // to base_url" convention on the dispatch side.
+                const selectedTool = tools.find(t => t.id === row.gatewayToolId)
+                const actionKeys = selectedTool?.action_paths ? Object.keys(selectedTool.action_paths) : []
+                if (actionKeys.length === 0) {
+                  return (
+                    <input value={row.action} onChange={e => updateRow(i, { action: e.target.value })}
+                      placeholder="action"
+                      className="w-1/3 border rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  )
+                }
+                // A saved-but-now-unrecognized action (its mapping was
+                // removed from the connector after this workflow was
+                // saved) is appended as an extra option rather than
+                // dropped -- loading a workflow must never silently mutate
+                // its saved data, only an actual user edit should.
+                const options = row.action && !actionKeys.includes(row.action) ? [...actionKeys, row.action] : actionKeys
+                return (
+                  <select value={row.action} onChange={e => updateRow(i, { action: e.target.value })}
+                    className="w-1/3 border rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <option value="">Select an action...</option>
+                    {options.map(a => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                )
+              })()}
               <button type="button" onClick={() => removeRow(i)} className="text-gray-400 hover:text-red-600 shrink-0" title="Remove step">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
