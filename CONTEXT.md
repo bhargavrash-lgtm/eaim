@@ -187,6 +187,23 @@ or prior context suggests otherwise, it is wrong; trust this line.
   elevation problem exists and avoid blanket `taskkill` by image name —
   filter by command line/working directory first to confirm a process is
   actually one you spawned.
+- **`eami-ui`'s Vite dev server does not reliably see file changes made
+  from the Windows host through `docker-compose.yml`'s bind mount**
+  (`./eami-ui/src:/app/src`) — found live 2026-08-12 (B-062) when B-060's
+  already-committed, already-on-disk-and-in-container code kept being
+  served as its pre-B-060 self indefinitely, with no error anywhere.
+  Docker Desktop's Windows-host↔Linux-container filesystem bridge doesn't
+  propagate native FS change events (`chokidar`'s default) across that
+  boundary reliably, so the dev server's module cache never invalidated.
+  **Fixed** with `server.watch.usePolling: true` in `vite.config.ts` — but
+  if a future session ever again sees "my `eami-ui` edit isn't showing up
+  in the browser," the fast diagnosis is `curl
+  http://127.0.0.1:5173/src/<path-to-file>` and compare against the file
+  on disk directly, *before* assuming a stale Docker image (the more
+  usual cause, per B-035/B-055) — a stale *image* cannot be the cause for
+  `eami-ui` specifically, since `src/` is bind-mounted and always current;
+  only a stale dev-server process/cache can explain served code
+  disagreeing with on-disk code for this one container.
 - **A real .NET SDK (8.0.423) + WiX Toolset v4 (4.0.6, matching CI's
   pinned version) are now installed on this machine** (2026-07-26, via
   `winget`/`dotnet tool install`, to debug a CI MSI-build failure) —
@@ -492,7 +509,27 @@ or prior context suggests otherwise, it is wrong; trust this line.
   building anything.
 
 ## Last updated
-2026-08-12 by Claude Code — B-061: MCP Discovery, real `tools/list`
+2026-08-12 by Claude Code — B-062: fixed Vite dev server serving stale
+code after edits, reported live against B-060's dropdown not rendering.
+User asked to rule out a stale Docker image first (B-035/B-055 class)
+before assuming a code bug — the image genuinely was stale (rebuilt), but
+`docker-compose.yml` bind-mounts `eami-ui/src`, and a direct `md5sum`
+proved the container's file was already current before any rebuild, so
+image staleness wasn't the real cause. Real root cause, found by fetching
+the Vite dev server's actually-served module directly: `chokidar`'s
+native FS-event watcher doesn't reliably see writes from the Windows host
+across Docker Desktop's bind-mount boundary, so the dev server kept
+serving a stale in-memory module indefinitely after any edit, regardless
+of what was on disk. **New standing fact, added below:** any future
+"my eami-ui edit isn't showing up" report in this environment should
+start from this bug's diagnosis path (compare served module vs disk, not
+just image timestamp), not be re-investigated from scratch. Fixed with
+`server.watch.usePolling: true` in `vite.config.ts` — verified live with
+a real edit picked up in ~2s with zero container restart, closing the
+recurrence risk, not just this instance. Full writeup in `BUILT.md`'s
+`eami-ui` section and `BACKLOG.md`'s B-062 entry.
+
+Prior entry, still accurate: 2026-08-12 by Claude Code — B-061: MCP Discovery, real `tools/list`
 support. `internal/mcp`'s SSE transport previously implemented only the
 non-standard `tool_call` method — any other JSON-RPC method, including the
 real spec's `tools/list`, got `-32601 method not found`, so a connecting
