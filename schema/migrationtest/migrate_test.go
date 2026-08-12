@@ -26,6 +26,35 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// latestMigrationVersion derives the expected final schema_migrations
+// version from the actual *.up.sql files present in schema/migrations-v2,
+// instead of a hardcoded number. This test suite has now broken CI twice
+// for the identical preventable reason (B-055 added migration 3, B-058
+// added migration 6, both times a hardcoded "want" version went stale) --
+// deriving it from the same files golang-migrate itself reads means the
+// two can never drift: whatever's actually on disk IS what "correct"
+// means, by construction. Assumes sequential, gapless numbering (000001,
+// 000002, ...), which is this repo's own established convention for
+// migrations-v2 (confirmed by listing the directory, not assumed) -- a
+// real gap or duplicate would make golang-migrate itself fail to apply
+// migrations correctly, a different and more informative failure than a
+// silently-wrong expected version here.
+func latestMigrationVersion(t *testing.T) uint {
+	t.Helper()
+	abs, err := filepath.Abs("../migrations-v2")
+	if err != nil {
+		t.Fatalf("resolve migrations-v2 path: %v", err)
+	}
+	matches, err := filepath.Glob(filepath.Join(abs, "*.up.sql"))
+	if err != nil {
+		t.Fatalf("glob migrations-v2/*.up.sql: %v", err)
+	}
+	if len(matches) == 0 {
+		t.Fatal("no *.up.sql files found in schema/migrations-v2 -- migrationsSourceURL path likely wrong")
+	}
+	return uint(len(matches))
+}
+
 // adminConnString returns a plain postgres:// connection string to the
 // real server's "postgres" maintenance database (used only to CREATE/DROP
 // the throwaway per-test databases), and pgHost/pgUser/pgPass split out
@@ -220,8 +249,8 @@ func TestMigrate_ExistingSeededDatabase_AppliesNewMigrationWithoutDataLoss(t *te
 	if dirty {
 		t.Fatal("database left dirty after migration")
 	}
-	if version != 5 {
-		t.Fatalf("version = %d, want 5", version)
+	if want := latestMigrationVersion(t); version != want {
+		t.Fatalf("version = %d, want %d", version, want)
 	}
 
 	// Existing data survived untouched.
@@ -257,23 +286,19 @@ func TestMigrate_FreshPathAndIncrementalPath_ProduceIdenticalFinalSchema(t *test
 
 	// Incremental path: apply one migration at a time via separate Steps()
 	// calls -- what a real production upgrade looks like, one release at
-	// a time, not all at once.
+	// a time, not all at once. Loop count derived from the real migration
+	// file count (see latestMigrationVersion) instead of a fixed number of
+	// hand-written Steps(1) calls -- the previous hardcoded-5-calls version
+	// silently stopped one migration short the moment migration 6 (B-058)
+	// was added, since Go doesn't warn about a loop that just doesn't run
+	// enough iterations.
 	incrementalDB := newThrowawayDB(t, c)
 	incrementalMigrator := openMigrator(t, c, incrementalDB)
-	if err := incrementalMigrator.Steps(1); err != nil {
-		t.Fatalf("incremental path: apply migration 1: %v", err)
-	}
-	if err := incrementalMigrator.Steps(1); err != nil {
-		t.Fatalf("incremental path: apply migration 2: %v", err)
-	}
-	if err := incrementalMigrator.Steps(1); err != nil {
-		t.Fatalf("incremental path: apply migration 3: %v", err)
-	}
-	if err := incrementalMigrator.Steps(1); err != nil {
-		t.Fatalf("incremental path: apply migration 4: %v", err)
-	}
-	if err := incrementalMigrator.Steps(1); err != nil {
-		t.Fatalf("incremental path: apply migration 5: %v", err)
+	want := latestMigrationVersion(t)
+	for i := uint(1); i <= want; i++ {
+		if err := incrementalMigrator.Steps(1); err != nil {
+			t.Fatalf("incremental path: apply migration %d: %v", i, err)
+		}
 	}
 
 	freshTables := tableNames(t, c, freshDB)
@@ -339,8 +364,8 @@ func TestMigrate_RunTwice_NoErrorNoDuplication(t *testing.T) {
 	if dirty {
 		t.Fatal("database left dirty after re-running Up()")
 	}
-	if version != 5 {
-		t.Fatalf("version = %d, want 5", version)
+	if want := latestMigrationVersion(t); version != want {
+		t.Fatalf("version = %d, want %d", version, want)
 	}
 }
 
@@ -359,20 +384,21 @@ func TestMigrate_FreshDatabase_MatchesExpectedSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if dirty || version != 5 {
-		t.Fatalf("version=%d dirty=%v, want version=5 dirty=false", version, dirty)
+	if want := latestMigrationVersion(t); dirty || version != want {
+		t.Fatalf("version=%d dirty=%v, want version=%d dirty=false", version, dirty, want)
 	}
 
 	// Spot-check a handful of tables spanning the whole schema, not just
 	// the baseline's early tables -- proves the entire 640-line baseline
 	// applied, not just its first few statements before a silent partial
-	// failure. setup_tokens (B-055, migration 000003) included so this
-	// check keeps pace with the latest migration, not just the baseline.
+	// failure. setup_tokens (B-055, migration 000003) and workflows/
+	// workflow_steps (B-058, migration 000006) included so this check
+	// keeps pace with the latest migration, not just the baseline.
 	for _, table := range []string{
 		"orgs", "users", "gateway_agents", "policies", "gateway_tools",
 		"approval_requests", "audit_log", "token_usage", "episodes",
 		"alert_rules", "discovered_endpoints", "agent_configs", "paste_events",
-		"setup_tokens",
+		"setup_tokens", "workflows", "workflow_steps",
 	} {
 		exists := scalar[bool](t, c, dbName,
 			`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=$1)`,
