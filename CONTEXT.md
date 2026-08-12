@@ -477,6 +477,19 @@ or prior context suggests otherwise, it is wrong; trust this line.
   current and Model B as a labeled future tier, not present reality.
   `ARCHITECTURE.md` is Architect-EAMI-owned per `BOUNDARIES.md` — this
   bullet is the flag, not the fix.
+- **Thread B extensibility principle — a durable design convention, not
+  tied to any single B-ID, same category as `CLAUDE.md`'s `t.Cleanup`
+  pool-lifecycle rule.** Workflow data model and execution-engine
+  decisions must be evaluated for future extensibility toward (a)
+  branching/conditional logic and (b) a future visual canvas presentation
+  layer, even while v1 (B-058/B-059) stays a strictly linear list with a
+  form-based UI. Don't make schema or execution-engine choices that
+  assume "always exactly one next step" if a small, deliberate change now
+  avoids a costly rewrite later. **This applies to every future Thread B
+  brief, not just the ones already shipped — check against this principle
+  explicitly in each brief's plan**, the same way B-059's own plan
+  explicitly reasoned through per-hop vs. upfront TOCTOU pinning before
+  building anything.
 
 ## Last updated
 2026-08-12 by Claude Code — B-059: Multi-Hop Workflows, Brief 2 (execution
