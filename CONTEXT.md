@@ -479,7 +479,99 @@ or prior context suggests otherwise, it is wrong; trust this line.
   bullet is the flag, not the fix.
 
 ## Last updated
-2026-08-11 by Claude Code — B-057: AI Provider Connector (Thread A Model
+2026-08-12 by Claude Code — B-058: Multi-Hop Workflows, Brief 1 (schema +
+CRUD foundation), first real brief of the Thread B epic this session's own
+earlier investigation (below) identified. Schema-and-CRUD only, per the
+task brief's explicit scope: new `workflows`/`workflow_steps` tables
+(`schema/migrations-v2/000006`), new `eami-api` CRUD (`internal/api/
+workflows.go`, `internal/store/workflows.sql.go`), new `eami-ui`
+`WorkflowsPage.tsx`/`useWorkflows.ts`. Nothing executes a workflow —
+confirmed via direct grep that `eami-gateway`'s entire module has zero
+references to `workflow`/`workflows` anywhere.
+
+**Design choice for a deleted/edited connector reference**
+(`workflow_steps.gateway_tool_id`): `ON DELETE SET NULL`, mirroring
+`approval_requests.resolved_tool_id`'s migration-000005 precedent exactly
+— chosen specifically because `gateway_tools`/`tools.go`'s `DeleteTool`
+was out-of-scope to modify this brief (it deletes unconditionally today),
+so a default-`RESTRICT` FK would have turned that already-shipped,
+untouched delete flow into a raw constraint-violation the moment any
+workflow referenced the tool being deleted. A step with a deleted
+connector surfaces from `GetWorkflow`/`ListWorkflowSteps` with
+`gateway_tool_id`/`tool_name` both null — visibly flagged in the UI (red
+warning icon), not silently dropped. The cross-org guard
+(`ToolBelongsToOrg`, checked for every step on both Create and Update
+before any row is written) is the load-bearing security piece: the FK
+alone only proves a tool id exists *somewhere*, never that it belongs to
+the caller's own org.
+
+**A real test-authoring bug, found and fixed live, that reproduces a bug
+this file/`BACKLOG.md` already documents once (B-056):** the test file's
+first version used `defer pool.Close()` alongside `t.Cleanup`-registered
+org-delete callbacks — `t.Cleanup` runs strictly after a function's own
+`defer`s, so the pool closed before any cleanup DELETE could run. A full
+test run left 14 leaked `wf-*` orgs in the shared dev database (confirmed
+live), fixed by switching to `t.Cleanup(func() { pool.Close() })`
+registered before any org-seeding calls — re-verified clean afterward and
+for the remainder of the session.
+
+**Reviewer + security passes both ran.** Security: direct trace-through
+(org-scoping on every query, the cross-org guard, the pre-mutation
+ownership check, SQL parameterization, no `dangerouslySetInnerHTML`) —
+zero findings. Code review found 4 real issues + 1 real doc-consistency
+gap, all fixed: (1) the frontend step editor silently dropped an
+in-progress-repair row (a deleted connector's step) on an unrelated
+submit instead of blocking it — fixed to block with a clear per-step
+error; (2) this file's own prior entry / `BACKLOG.md`'s Thread B entry
+said "no B-ID assigned" in the same diff that shipped a fully-built
+B-058 — fixed, both now reflect Brief 1 DONE; (3) a misleading doc
+comment implied `{"steps": []}` could clear a workflow to zero steps
+(it's actually rejected) — comment corrected, no behavior change; (4) a
+narrow TOCTOU where a connector deleted between step-validation and the
+transactional INSERT surfaced as a raw 500 instead of a clean 400 — fixed
+with a new `isForeignKeyViolation` helper (SQLSTATE 23503), covered by 3
+new unit tests; (5) `UpdateWorkflow` discarded its own `RETURNING` row and
+redundantly re-fetched it after commit — fixed to reuse it directly.
+
+**Live-verified end-to-end against the real `docker-compose` stack,
+rebuilt fresh both before and after the code-review fixes:** a real
+workflow created with 2 real steps via a real admin JWT (`dev@example.com`
+password reset to a known value for this session, no other credential
+available, same disclosed precedent as prior briefs — may want resetting
+again); edited live (renamed, activated, reordered, a 3rd step added
+referencing the real `claude` `ai_provider` connector, proving both
+connector types work as steps); deleted, confirmed 404 + cascade at the
+DB level. Post-fix smoke test confirmed both new validation paths return
+clean 400s live, not 500s. Full writeup in `BUILT.md`'s `eami-api`/
+`eami-ui` sections and `BACKLOG.md`'s B-058 entry.
+
+**Remaining Thread B briefs (2-7: execution, output→input mapping,
+per-hop TOCTOU pinning, escalation integration, audit linkage) are still
+NOT YET SCOPED — no B-ID assigned for any of them, per this repo's B-ID
+assignment convention.** B-058 itself was explicitly pasted as a task
+brief by the founder, not self-assigned from the investigation's own
+QUEUED entry.
+
+Prior entry, still accurate: 2026-08-12 by Claude Code — Thread B investigation (admin-defined multi-hop
+AI workflows): investigation only, no code changes, no B-ID assigned. Full
+findings in `BACKLOG.md`'s "Thread B" QUEUED entry (now updated to reflect
+Brief 1/B-058 shipped, see above). Headline conclusions:
+v1 should be linear-list-only (branching needs connector output
+normalization, which doesn't exist and B-057's own `aiprovider` package
+explicitly scoped out as unrealistic); new `workflows`/`workflow_runs`
+tables are needed since neither `episodes` (write-once INSERT, no
+session_id) nor `approval_requests` (one pinned connector per row) provide
+a usable starting shape; B-057's TOCTOU connector-pinning pattern is the
+right shape to reuse per-hop but needs array cardinality, not the current
+singular-FK design; `approval.Router.Hold()`'s blocking-goroutine model
+can't represent a durable mid-chain pause, which is genuinely novel work;
+and the output-to-input mapping between heterogeneous connector responses
+has zero precedent anywhere in this codebase — the actual hard, unscoped
+problem. Honest size estimate: 6-8 briefs, larger than paste-detection's 5
+(that epic had a fully-specified wire format from day one; this doesn't).
+Needs founder scoping before any further brief starts.
+
+Prior entry, still accurate: 2026-08-11 by Claude Code — B-057: AI Provider Connector (Thread A Model
 1). A new `ai_provider` `gateway_tools` type dispatches to an external AI
 provider (Claude first, via a real `Adapter` interface — the first
 complete implementation of it, not a special case) as a named tool

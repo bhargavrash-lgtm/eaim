@@ -7,6 +7,7 @@ import { DiscoverPage } from '@/pages/discover/DiscoverPage'
 import { AgentsPage } from '@/pages/gateway/AgentsPage'
 import { PoliciesPage } from '@/pages/gateway/PoliciesPage'
 import { ToolsPage } from '@/pages/gateway/ToolsPage'
+import { WorkflowsPage } from '@/pages/gateway/WorkflowsPage'
 import { NodesPage } from '@/pages/gateway/NodesPage'
 import ApprovalsPage from '@/pages/ops/ApprovalsPage'
 import { FinOpsPage } from '@/pages/finops/FinOpsPage'
@@ -29,6 +30,7 @@ export const router = createBrowserRouter([
       { path: '/gateway/agents', element: <AgentsPage /> },
       { path: '/gateway/policies', element: <PoliciesPage /> },
       { path: '/gateway/tools', element: <ToolsPage /> },
+      { path: '/gateway/workflows', element: <WorkflowsPage /> },
       { path: '/gateway/nodes', element: <NodesPage /> },
       { path: '/approvals', element: <ApprovalsPage /> },
       { path: '/finops', element: <FinOpsPage /> },

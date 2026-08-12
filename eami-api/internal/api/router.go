@@ -187,6 +187,12 @@ func (s *Server) Handler() http.Handler {
 			r.Patch("/v1/gateway/tools/{toolId}", s.UpdateTool)
 			r.Delete("/v1/gateway/tools/{toolId}", s.DeleteTool)
 			r.Post("/v1/gateway/tools/{toolId}/test", s.TestTool)
+			// Multi-Hop Workflows (Thread B Brief 1, B-058): definition-only
+			// CRUD, no execution. Same role gating as gateway_tools -- an
+			// admin/operator can define a workflow, but nothing dispatches it.
+			r.Post("/v1/gateway/workflows", s.CreateWorkflow)
+			r.Patch("/v1/gateway/workflows/{workflowId}", s.UpdateWorkflow)
+			r.Delete("/v1/gateway/workflows/{workflowId}", s.DeleteWorkflow)
 			r.Delete("/v1/gateway/nodes/{nodeId}", s.DeleteNode)
 			r.Post("/v1/approvals", s.CreateApproval)
 			// Alert rules (write)
@@ -214,6 +220,8 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/v1/gateway/policies", s.ListPolicies)
 			r.Get("/v1/gateway/policies/{policyId}", s.GetPolicy)
 			r.Get("/v1/gateway/tools", s.ListTools)
+			r.Get("/v1/gateway/workflows", s.ListWorkflows)
+			r.Get("/v1/gateway/workflows/{workflowId}", s.GetWorkflow)
 			r.Get("/v1/gateway/nodes", s.ListNodes)
 			r.Get("/v1/audit", s.ListAudit)
 			r.Get("/v1/audit/export", s.ExportAudit)

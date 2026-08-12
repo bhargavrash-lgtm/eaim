@@ -238,3 +238,39 @@ type GatewayNode struct {
 	CPUPct         pgtype.Float8
 	RequestsPerMin pgtype.Int4
 }
+
+// Workflow mirrors the workflows table (Multi-Hop Workflows, Thread B
+// Brief 1, B-058). Definition-only: nothing in eami-gateway's dispatch
+// path reads this table yet.
+type Workflow struct {
+	ID        uuid.UUID
+	OrgID     uuid.UUID
+	Name      string
+	Status    string // active | draft | disabled
+	CreatedBy pgtype.UUID
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	// StepCount is populated only by ListWorkflows (a joined COUNT, not a
+	// real column) -- GetWorkflow returns the real Steps slice instead.
+	StepCount int64
+}
+
+// WorkflowStep mirrors the workflow_steps table, LEFT JOINed with
+// gateway_tools for display. GatewayToolID/ToolName are both invalid/nil
+// when the step's connector has been deleted (ON DELETE SET NULL, see
+// migration 000006) -- a deliberately visible, not-hidden dangling
+// reference; see workflows.go's GetWorkflow for how this surfaces in the
+// API response.
+type WorkflowStep struct {
+	ID            uuid.UUID
+	WorkflowID    uuid.UUID
+	StepOrder     int32
+	GatewayToolID pgtype.UUID
+	ToolName      pgtype.Text // joined from gateway_tools.name; invalid if tool deleted or (defensively) not yet joined
+	Action        string
+	// InputMapping is the raw JSONB bytes of workflow_steps.input_mapping --
+	// a genuinely inert placeholder for a later brief (output->input
+	// mapping between hops). Never read or written beyond NULL passthrough
+	// in this brief.
+	InputMapping []byte
+}
