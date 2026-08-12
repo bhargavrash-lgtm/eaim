@@ -37,6 +37,7 @@ import (
 	"github.com/eami/gateway/internal/registry"
 	"github.com/eami/gateway/internal/safego"
 	"github.com/eami/gateway/internal/toolrouter"
+	"github.com/eami/gateway/internal/workflow"
 	policy "github.com/eami/policy"
 )
 
@@ -436,6 +437,15 @@ func run() error {
 	// agentRegistry (*registry.Registry) satisfies identity.AgentResolver structurally.
 	revokeHandler := identity.NewRevokeHandler(idManager, agentRegistry, cfg.API.TokenRevokeServiceKey)
 
+	// Multi-Hop Workflows Brief 2 (B-059): executes a B-058-defined workflow
+	// by calling `dispatch` (the exact same closure above, unmodified) once
+	// per step, in order -- reusing policy/TOCTOU-pinning/audit/episode
+	// logic completely as-is. See internal/workflow's package doc.
+	workflowExecutor := workflow.New(pool, dispatch, pLoader.Evaluator())
+	// agentRegistry (*registry.Registry) satisfies workflow.AgentResolver structurally.
+	workflowHTTP := workflow.NewHTTPHandler(idManager, agentRegistry, workflowExecutor)
+	slog.Info("workflow executor ready")
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/gateway/tokens", idManager.HandleIssue)
 	mux.HandleFunc("POST /v1/gateway/tokens/{jti}/revoke", revokeHandler.HandleRevoke)
@@ -451,6 +461,9 @@ func run() error {
 	mux.HandleFunc("GET /v1/gateway/episodes", episodeHTTP.ListEpisodes)
 	mux.HandleFunc("GET /v1/gateway/episodes/search", episodeHTTP.SearchEpisodes)
 	mux.HandleFunc("GET /v1/gateway/episodes/{id}", episodeHTTP.GetEpisode)
+	// Workflow execution (B-059): synchronous, blocks until the run
+	// finishes (including any escalation Hold()) -- see workflow/http.go.
+	mux.HandleFunc("POST /v1/gateway/workflows/{workflowId}/run", workflowHTTP.HandleRun)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

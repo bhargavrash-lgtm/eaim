@@ -479,15 +479,107 @@ or prior context suggests otherwise, it is wrong; trust this line.
   bullet is the flag, not the fix.
 
 ## Last updated
-2026-08-12 by Claude Code — B-058: Multi-Hop Workflows, Brief 1 (schema +
-CRUD foundation), first real brief of the Thread B epic this session's own
-earlier investigation (below) identified. Schema-and-CRUD only, per the
-task brief's explicit scope: new `workflows`/`workflow_steps` tables
-(`schema/migrations-v2/000006`), new `eami-api` CRUD (`internal/api/
-workflows.go`, `internal/store/workflows.sql.go`), new `eami-ui`
-`WorkflowsPage.tsx`/`useWorkflows.ts`. Nothing executes a workflow —
-confirmed via direct grep that `eami-gateway`'s entire module has zero
-references to `workflow`/`workflows` anywhere.
+2026-08-12 by Claude Code — B-059: Multi-Hop Workflows, Brief 2 (execution
+engine, per-hop TOCTOU pinning, static per-step parameters). Makes a
+B-058-defined workflow actually run, for the first time — each step
+dispatched through the exact same, completely unmodified `dispatch()`/
+policy/audit path a standalone MCP call uses. New `eami-gateway/internal/
+workflow` package (`resolve.go`/`connector.go`/`executor.go`/`http.go`),
+new `POST /v1/gateway/workflows/{workflowId}/run` (agent-JWT
+authenticated, synchronous), new `eami-api/internal/api/
+workflow_step_params.go` (new file, `workflows.go` from B-058 untouched).
+Output→input mapping and durable escalation pause/resume both explicitly
+deferred to later, still-unscoped Thread B briefs.
+
+**Per-hop TOCTOU pinning — the brief's own central design question —
+resolved by inspection, not new mechanism:** calling the existing,
+unmodified `dispatch()` closure once per step already gives per-hop
+pinning for free, since each call independently re-resolves and re-pins
+its own step's connector immediately before its own policy evaluation.
+Upfront pinning (resolving every step at workflow start) was considered
+and rejected as strictly weaker — a later step's connector could still be
+edited during an earlier step's escalation hold without ever being
+re-verified, unless dispatch time re-checks anyway, which is just per-hop
+pinning again with a wasted snapshot. Escalation mid-chain reuses `Hold()`
+completely unmodified and automatically, as this brief's explicit,
+disclosed interim behavior (the whole run blocks on one hold; no durable
+persistence across a process restart — a real durable pause/resume
+mechanism is later-brief scope).
+
+**Static params live in a new `workflow_step_params` table, not a
+`workflow_steps` column** — B-058's `input_mapping` column stays
+untouched, reserved for the later output→input-mapping brief; conflating
+"admin-typed static constant" with "value derived from a prior step's
+response" would collide two concepts that will likely need to coexist per
+step once mapping ships.
+
+**Test dispatch harness — a real, disclosed simplification, not a mock:**
+`dispatch()` is an unexported closure local to `main.go`'s `run()`, not
+importable into the new package's tests, and refactoring it to be
+testable would itself be the kind of change to B-057's logic this brief
+must not make. The test harness reconstructs dispatch()'s real shape
+(real policy evaluator, audit writer, episode recorder, approval router
+with real `Submit`/`Hold`/`LISTEN`/`NOTIFY`, real aiprovider router) using
+only exported constructors. Test connectors are `ai_provider` (fake
+adapter) rather than `rest_api`, found live to be necessary: the first
+test version hit `toolrouter`'s real, correct SSRF guard rejecting any
+local `httptest.Server` as loopback — the same reason
+`approval/router_dispatch_test.go`'s own "genuinely dispatches" proofs
+already use `ai_provider` instead of `rest_api`.
+
+**A real test-authoring bug reproduced a THIRD time this session — the
+identical `t.Cleanup`-after-`defer pool.Close()` ordering bug (B-056-class,
+already found and fixed twice in B-058's own session) — found and fixed
+again in the new `eami-api` params test file**, confirmed via a real
+leaked-org check, fixed identically, re-verified clean.
+
+**Reviewer + security passes: the automated code-review subagent failed
+on a platform session-limit outage (not a finding, matches B-046's own
+precedent for this exact tooling-failure class) — substituted with a
+direct manual review.** That pass found and fixed one real bug, a direct
+analog of the exact issue B-039 already fixed for the MCP async path:
+`workflow/http.go`'s synchronous handler passed `r.Context()` straight
+into `Executor.Run`, so a client disconnect mid-`Hold()` (reproduced live,
+organically, via a killed test `curl`) canceled the context every
+subsequent DB write depended on — including the final run-status
+`UPDATE` — silently leaving `workflow_runs.status` stuck at `'running'`
+forever. Fixed identically to B-039's precedent: `context.WithoutCancel
+(r.Context())`. Security review (a direct adversarial trace-through
+targeting the brief's own stated bar, "the same rigor as B-057's original
+adversarial proof"): confirmed the workflow runner's own pre-dispatch
+connector read is purely informational and structurally cannot be
+substituted into or weaken `dispatch()`'s own independent enforcement;
+confirmed cross-org scoping holds throughout; zero exploitable findings.
+
+**Live-verified end-to-end against the real `docker-compose` stack,
+rebuilt fresh both before and after the context-cancellation fix:** a
+real 2-step workflow executed via a real agent JWT — step 1 dispatched
+for real with its own static params; step 2 genuinely blocked on a real
+pending approval. **The real TOCTOU attack, not simulated:** step 2's
+connector edited via a real `PATCH` while its approval sat pending, then
+approved — resume correctly refused (`resume_outcome='config_changed'`,
+run `status='failed'`). A second, untampered run completed successfully
+end-to-end. The context-cancellation bug itself was reproduced and fixed
+live, before/after: pre-fix, a killed client left the run stuck at
+`'running'` forever even after the approval was later decided; post-fix,
+the identical scenario correctly reached `'completed'`. Full writeup in
+`BUILT.md`'s `Cross-cutting / shared` section and `BACKLOG.md`'s B-059
+entry.
+
+**Remaining Thread B briefs (3-7: output→input mapping, durable
+escalation pause/resume, chain-aware approval UI, audit-log linkage, and
+any others) remain NOT YET SCOPED — no B-ID assigned for any of them.**
+
+Prior entry, still accurate: 2026-08-12 by Claude Code — B-058: Multi-Hop
+Workflows, Brief 1 (schema + CRUD foundation), first real brief of the
+Thread B epic this session's own earlier investigation (below) identified.
+Schema-and-CRUD only, per the task brief's explicit scope: new
+`workflows`/`workflow_steps` tables (`schema/migrations-v2/000006`), new
+`eami-api` CRUD (`internal/api/workflows.go`, `internal/store/
+workflows.sql.go`), new `eami-ui` `WorkflowsPage.tsx`/`useWorkflows.ts`.
+Nothing executed a workflow at that point — confirmed via direct grep
+that `eami-gateway`'s entire module had zero references to `workflow`/
+`workflows` anywhere (now closed by B-059 above).
 
 **Design choice for a deleted/edited connector reference**
 (`workflow_steps.gateway_tool_id`): `ON DELETE SET NULL`, mirroring

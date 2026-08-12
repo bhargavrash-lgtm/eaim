@@ -193,6 +193,8 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/v1/gateway/workflows", s.CreateWorkflow)
 			r.Patch("/v1/gateway/workflows/{workflowId}", s.UpdateWorkflow)
 			r.Delete("/v1/gateway/workflows/{workflowId}", s.DeleteWorkflow)
+			// Multi-Hop Workflows Brief 2 (B-059): static per-step params.
+			r.Put("/v1/gateway/workflow-steps/{stepId}/params", s.PutWorkflowStepParams)
 			r.Delete("/v1/gateway/nodes/{nodeId}", s.DeleteNode)
 			r.Post("/v1/approvals", s.CreateApproval)
 			// Alert rules (write)
@@ -222,6 +224,7 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/v1/gateway/tools", s.ListTools)
 			r.Get("/v1/gateway/workflows", s.ListWorkflows)
 			r.Get("/v1/gateway/workflows/{workflowId}", s.GetWorkflow)
+			r.Get("/v1/gateway/workflow-steps/{stepId}/params", s.GetWorkflowStepParams)
 			r.Get("/v1/gateway/nodes", s.ListNodes)
 			r.Get("/v1/audit", s.ListAudit)
 			r.Get("/v1/audit/export", s.ExportAudit)
