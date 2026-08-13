@@ -509,7 +509,39 @@ or prior context suggests otherwise, it is wrong; trust this line.
   building anything.
 
 ## Last updated
-2026-08-13 by Claude Code — B-063: Multi-Hop Workflows, Brief 3
+2026-08-13 by Claude Code — B-064: Multi-Hop Workflows, Brief 4
+(extraction expression UI). Added the first real UI for B-063's
+output→input mapping mechanism to `WorkflowsPage.tsx`. Two findings
+re-verified directly against current code before building, changing
+what "minimal but real" meant: no static-value step UI existed at all
+today (B-059's params endpoint had only ever been driven by direct API
+calls, so this brief also had to build the first-ever static-param row
+editor); and no path exists anywhere for the frontend to fetch a prior
+step's last real run result (`workflow_run_steps` is gateway-owned with
+zero `eami-api` references, and `eami-ui` has no network path to
+`eami-gateway` at all — `VITE_GATEWAY_URL` is dead, unreferenced
+config). Decided, confirmed with the user, to always use a plain-text
+fallback rather than attempt a live sample preview — stays within this
+brief's file scope, logged as a natural future brief pairing with a
+runs-history view. Extraction sources are referenced by a client-local
+stable id (`crypto.randomUUID()`, or the step's real id once
+persisted) — the frontend-local analog of B-063's own "reference by id,
+not position" fix — and a reorder/removal that invalidates a reference
+flags it visibly rather than silently clearing or leaving it looking
+valid. `npm run type-check`/`build` clean (Node/npm confirmed actually
+installed on this machine now). No dedicated reviewer/security pass —
+this brief's own standing rules didn't require one (frontend-only, no
+backend/SQL/extraction-logic surface touched). Live-verified end-to-end
+(browser automation still unavailable in this environment, same
+standing limitation as every prior `eami-ui` brief) by sending the
+exact request sequence the UI's own code generates for a real simulated
+admin flow — a real 2-step workflow configured this way executed
+correctly, the extracted value traced through the real
+`workflow_run_steps.result` column, the same evidence B-063 used. Full
+writeup in `BUILT.md`'s `eami-ui` section and `BACKLOG.md`'s B-064
+entry.
+
+Prior entry, still accurate: 2026-08-13 by Claude Code — B-063: Multi-Hop Workflows, Brief 3
 (output→input mapping). A later step's parameter can now be extracted
 from an EARLIER step's real recorded execution result within the same
 run — Thread B's single hardest, most consequential piece. Re-verified
