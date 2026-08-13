@@ -509,7 +509,32 @@ or prior context suggests otherwise, it is wrong; trust this line.
   building anything.
 
 ## Last updated
-2026-08-13 by Claude Code — B-064: Multi-Hop Workflows, Brief 4
+2026-08-13 by Claude Code — B-065: Multi-Hop Workflows, Brief 5
+(Freshservice-styled visual redesign). Restyled the Workflows editor's
+step list from plain form rows into a vertical sequence of summary
+cards, with the detailed connector/action/parameter editor (B-060/B-064,
+logic unchanged) relocated into a new second, layered slide-out panel
+(`StepConfigPanel`) opened via a "Configure" button per card — mirroring
+`ToolsPage.tsx`'s drawer pattern rather than the inline accordion this
+replaces. Confirmed before building that no graph-canvas library is
+needed: a card stack with a connecting chevron reads as a clear sequence
+without node/port machinery, matching the standing v1-linear-only scope.
+Presentation only — `useWorkflows.ts` confirmed zero diff. Added a
+genuine small new capability directly required by AC4: an explicit
+"Activate" button on a draft workflow, firing a standalone
+`PATCH {status: 'active'}` that never touches steps. `npm run
+type-check`/`build` clean. No dedicated reviewer/security pass (frontend-
+only, no backend/SQL/extraction-logic surface touched, same as B-064's
+precedent). Live-verified end-to-end (browser automation still
+unavailable in this environment) by reusing B-064's exact request-
+sequence-equivalence method — a real workflow configured, activated, and
+run this way genuinely dispatched an extracted value, traced through the
+real `workflow_run_steps.result` column; explicitly disclosed that this
+proves the data/API side unaffected but can't itself observe the new
+card layout rendering, unlike a real browser session. Full writeup in
+`BUILT.md`'s `eami-ui` section and `BACKLOG.md`'s B-065 entry.
+
+Prior entry, still accurate: 2026-08-13 by Claude Code — B-064: Multi-Hop Workflows, Brief 4
 (extraction expression UI). Added the first real UI for B-063's
 output→input mapping mechanism to `WorkflowsPage.tsx`. Two findings
 re-verified directly against current code before building, changing

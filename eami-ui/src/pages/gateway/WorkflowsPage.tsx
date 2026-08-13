@@ -12,7 +12,7 @@
 // bearing (ActionPathsEditor's rows have no inherent order).
 import { useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
-import { Plus, Trash2, Pencil, ArrowUp, ArrowDown, AlertTriangle } from 'lucide-react'
+import { Plus, Trash2, Pencil, ArrowUp, ArrowDown, AlertTriangle, Settings2, ChevronDown, CheckCircle2 } from 'lucide-react'
 import {
   PageHeader,
   ConfirmDialog,
@@ -199,13 +199,186 @@ async function saveStaticParams(
   return { failed: results.filter(r => r === false).length }
 }
 
+// summarizeParams (B-065) drives a step card's one-line parameter
+// summary (AC2) -- computed purely from already-loaded local state, no
+// new fetch. A single extraction gets a specific, readable sentence
+// ("Extracting "x" from Step N"); anything else collapses to a count so
+// the card stays a summary, not a second copy of the detail panel.
+function summarizeParams(params: ParamRow[], rows: StepRow[]): string {
+  const named = params.filter(p => p.key.trim())
+  if (named.length === 0) return 'No parameters configured'
+  const staticRows = named.filter(p => p.mode === 'static')
+  const extractRows = named.filter(p => p.mode === 'extract')
+  if (staticRows.length === 0 && extractRows.length === 1) {
+    const p = extractRows[0]
+    const sourceIdx = rows.findIndex(r => r.localId === p.fromStepLocalId)
+    const label = sourceIdx >= 0 ? `Step ${sourceIdx + 1}` : 'an earlier step'
+    return `Extracting "${p.key}" from ${label}`
+  }
+  const parts: string[] = []
+  if (staticRows.length > 0) parts.push(`${staticRows.length} static`)
+  if (extractRows.length > 0) parts.push(`${extractRows.length} extracted`)
+  return parts.join(', ')
+}
+
+// StepConfigPanel (B-065) is the detail editor for exactly ONE step,
+// opened from its summary card -- connector/action pickers (B-060,
+// unchanged) and the full parameter editor (B-064, unchanged). A second,
+// layered slide-out drawer over the workflow panel itself, mirroring
+// ToolsPage.tsx's own drawer pattern rather than an inline accordion
+// (what this replaces). Every mutation still goes through the SAME
+// commit()-wrapped callbacks StepsEditor already owns -- this component
+// holds zero state and zero validation logic of its own, purely a view.
+function StepConfigPanel({
+  row, index, rows, tools, onClose, updateRow, updateParam, addParam, removeParam,
+}: {
+  row: StepRow
+  index: number
+  rows: StepRow[]
+  tools: ToolWithActions[]
+  onClose: () => void
+  updateRow: (i: number, patch: Partial<StepRow>) => void
+  updateParam: (stepIdx: number, paramIdx: number, patch: Partial<ParamRow>) => void
+  addParam: (stepIdx: number) => void
+  removeParam: (stepIdx: number, paramIdx: number) => void
+}) {
+  const selectedTool = tools.find(t => t.id === row.gatewayToolId)
+  const actionKeys = selectedTool?.action_paths ? Object.keys(selectedTool.action_paths) : []
+  const actionOptions = row.action && !actionKeys.includes(row.action) ? [...actionKeys, row.action] : actionKeys
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/20 z-[55]" onClick={onClose} />
+      <div className="fixed inset-y-0 right-0 w-[420px] bg-white shadow-xl flex flex-col z-[60] border-l border-gray-200">
+        <div className="flex items-center justify-between px-6 py-4 border-b">
+          <h3 className="font-semibold text-gray-900">Configure step {index + 1}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">x</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          {row.toolDeleted && (
+            <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              This step's connector was deleted -- pick a new one.
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Connector</label>
+            <select value={row.gatewayToolId}
+              // action is always reset on a connector change (B-060) --
+              // simplest rule that can never leave a stale action value
+              // behind, whether the old or new connector uses the
+              // dropdown or free-text path.
+              onChange={e => updateRow(index, { gatewayToolId: e.target.value, action: '', toolDeleted: false })}
+              className={`w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${row.toolDeleted ? 'border-red-300 text-red-600' : ''}`}>
+              <option value="">{row.toolDeleted ? 'connector removed -- select a new one' : 'Select a connector...'}</option>
+              {tools.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Action</label>
+            {/* Real action picker (B-060): a rest_api connector with
+                action_paths (B-046) defined gets a dropdown of its real,
+                known actions instead of free text. A connector with none
+                falls back to free text unchanged, exactly matching
+                action_paths' own "unmapped falls back to base_url"
+                convention on the dispatch side. */}
+            {actionKeys.length === 0 ? (
+              <input value={row.action} onChange={e => updateRow(index, { action: e.target.value })}
+                placeholder="action"
+                className="w-full border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            ) : (
+              <select value={row.action} onChange={e => updateRow(index, { action: e.target.value })}
+                className="w-full border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <option value="">Select an action...</option>
+                {actionOptions.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            )}
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-sm font-medium text-gray-700">Parameters</label>
+              <button type="button" onClick={() => addParam(index)} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
+                + Add parameter
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 mb-2">
+              Static: a fixed value. Extract: pull a field (dot-path, e.g. contact.id) from an earlier step's real result.
+            </p>
+            {row.params.length === 0 ? (
+              <p className="text-xs text-gray-400 italic">No parameters -- add one above.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {row.params.map((p, pi) => (
+                  <div key={pi} className="flex items-center gap-1.5">
+                    <input value={p.key} onChange={e => updateParam(index, pi, { key: e.target.value })}
+                      placeholder="param name"
+                      className="w-24 border rounded px-1.5 py-1 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                    <select value={p.mode}
+                      onChange={e => updateParam(index, pi, { mode: e.target.value as ParamRow['mode'] })}
+                      className="border rounded px-1 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                      <option value="static">Static</option>
+                      <option value="extract">Extract</option>
+                    </select>
+                    {p.mode === 'static' ? (
+                      <input value={p.value} onChange={e => updateParam(index, pi, { value: e.target.value })}
+                        placeholder="value"
+                        className="flex-1 border rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                    ) : (
+                      <>
+                        <select value={p.fromStepLocalId}
+                          onChange={e => updateParam(index, pi, { fromStepLocalId: e.target.value })}
+                          className={`flex-1 border rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 ${p.invalid ? 'border-red-300 text-red-600' : ''}`}>
+                          <option value="">{p.invalid ? 'source no longer valid -- pick again' : 'Select a source step...'}</option>
+                          {rows.slice(0, index).map((r, ri) => r.id && (
+                            <option key={r.localId} value={r.localId}>
+                              Step {ri + 1}: {tools.find(t => t.id === r.gatewayToolId)?.name ?? '(connector)'} / {r.action || '(action)'}
+                            </option>
+                          ))}
+                        </select>
+                        <input value={p.path} onChange={e => updateParam(index, pi, { path: e.target.value })}
+                          placeholder="e.g. contact.id"
+                          className="w-28 border rounded px-1.5 py-1 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                      </>
+                    )}
+                    <button type="button" onClick={() => removeParam(index, pi)} className="text-gray-400 hover:text-red-600 shrink-0" title="Remove parameter">
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+                {row.params.some(p => p.mode === 'extract' && p.invalid) && (
+                  <p className="text-xs text-red-600">
+                    One or more extraction sources are no longer valid (moved later, removed, or not yet saved) -- pick a new source or remove the parameter.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t">
+          <button type="button" onClick={onClose}
+            className="w-full bg-indigo-600 text-white rounded px-4 py-2 text-sm font-medium hover:bg-indigo-700">
+            Done
+          </button>
+        </div>
+      </div>
+    </>
+  )
+}
+
 function StepsEditor({ rows, onChange }: { rows: StepRow[]; onChange: (rows: StepRow[]) => void }) {
   const { data: toolsData } = useTools()
   // Typed properly (mirrors ToolsPage.tsx's own identical pattern) so
   // action_paths -- B-046, already fetched here for free -- is usable
   // below without a second `any` cast.
   const tools: ToolWithActions[] = (toolsData as any)?.data ?? []
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  // configuringLocalId (B-065) tracks which step's StepConfigPanel is
+  // open -- replaces B-064's inline per-row `expanded` accordion state.
+  const [configuringLocalId, setConfiguringLocalId] = useState<string | null>(null)
 
   // commit is the single path every row/param mutation below goes
   // through -- always re-runs revalidateExtractionRefs first (B-064
@@ -255,144 +428,83 @@ function StepsEditor({ rows, onChange }: { rows: StepRow[]; onChange: (rows: Ste
       {rows.length === 0 ? (
         <p className="text-xs text-gray-400 italic">No steps yet -- add at least one.</p>
       ) : (
-        <div className="space-y-2">
-          {rows.map((row, i) => (
-            <div key={row.localId}>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-400 w-4 text-right shrink-0">{i + 1}</span>
-              <div className="flex flex-col shrink-0">
-                <button type="button" onClick={() => moveRow(i, -1)} disabled={i === 0}
-                  className="text-gray-400 hover:text-indigo-600 disabled:opacity-30" title="Move up">
-                  <ArrowUp className="h-3 w-3" />
-                </button>
-                <button type="button" onClick={() => moveRow(i, 1)} disabled={i === rows.length - 1}
-                  className="text-gray-400 hover:text-indigo-600 disabled:opacity-30" title="Move down">
-                  <ArrowDown className="h-3 w-3" />
-                </button>
-              </div>
-              {row.toolDeleted && (
-                <span title="This step's connector was deleted -- pick a new one" className="shrink-0">
-                  <AlertTriangle className="h-4 w-4 text-red-500" />
-                </span>
-              )}
-              <select value={row.gatewayToolId}
-                // action is always reset on a connector change (B-060) --
-                // simplest rule that can never leave a stale action value
-                // behind, whether the old or new connector uses the
-                // dropdown or free-text path.
-                onChange={e => updateRow(i, { gatewayToolId: e.target.value, action: '', toolDeleted: false })}
-                className={`flex-1 border rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 ${row.toolDeleted ? 'border-red-300 text-red-600' : ''}`}>
-                <option value="">{row.toolDeleted ? 'connector removed -- select a new one' : 'Select a connector...'}</option>
-                {tools.map(t => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
-              {(() => {
-                // Real action picker (B-060): a rest_api connector with
-                // action_paths (B-046) defined gets a dropdown of its real,
-                // known actions instead of free text -- action_paths is
-                // already fetched by useTools() above, no new endpoint
-                // needed. A connector with none (ai_provider/mcp/database,
-                // or a rest_api tool that hasn't defined per-action
-                // mappings yet) falls back to free text unchanged, exactly
-                // matching action_paths' own existing "unmapped falls back
-                // to base_url" convention on the dispatch side.
-                const selectedTool = tools.find(t => t.id === row.gatewayToolId)
-                const actionKeys = selectedTool?.action_paths ? Object.keys(selectedTool.action_paths) : []
-                if (actionKeys.length === 0) {
-                  return (
-                    <input value={row.action} onChange={e => updateRow(i, { action: e.target.value })}
-                      placeholder="action"
-                      className="w-1/3 border rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-                  )
-                }
-                // A saved-but-now-unrecognized action (its mapping was
-                // removed from the connector after this workflow was
-                // saved) is appended as an extra option rather than
-                // dropped -- loading a workflow must never silently mutate
-                // its saved data, only an actual user edit should.
-                const options = row.action && !actionKeys.includes(row.action) ? [...actionKeys, row.action] : actionKeys
-                return (
-                  <select value={row.action} onChange={e => updateRow(i, { action: e.target.value })}
-                    className="w-1/3 border rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    <option value="">Select an action...</option>
-                    {options.map(a => <option key={a} value={a}>{a}</option>)}
-                  </select>
-                )
-              })()}
-              <button type="button" onClick={() => removeRow(i)} className="text-gray-400 hover:text-red-600 shrink-0" title="Remove step">
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-
-            {/* Parameters (B-064): collapsible, per step -- static values
-                (B-059) and extractions from an earlier step's real result
-                (B-063), side by side per param key. No live preview of a
-                prior step's actual result is offered (no backend path
-                exists for it today, see BACKLOG.md's B-064 entry) --
-                honest text-input path expression instead. */}
-            <div className="ml-6 mt-1">
-              <button type="button" onClick={() => setExpanded(e => ({ ...e, [row.localId]: !e[row.localId] }))}
-                className="text-xs text-gray-500 hover:text-indigo-600">
-                {expanded[row.localId] ? '▾' : '▸'} Parameters{row.params.length > 0 ? ` (${row.params.length})` : ''}
-              </button>
-              {expanded[row.localId] && (
-                <div className="mt-1 pl-3 border-l-2 border-gray-100 space-y-1.5">
-                  {row.params.length === 0 && (
-                    <p className="text-xs text-gray-400 italic">No parameters -- add one below.</p>
-                  )}
-                  {row.params.map((p, pi) => (
-                    <div key={pi} className="flex items-center gap-1.5">
-                      <input value={p.key} onChange={e => updateParam(i, pi, { key: e.target.value })}
-                        placeholder="param name"
-                        className="w-28 border rounded px-1.5 py-1 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-                      <select value={p.mode}
-                        onChange={e => updateParam(i, pi, { mode: e.target.value as ParamRow['mode'] })}
-                        className="border rounded px-1 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                        <option value="static">Static</option>
-                        <option value="extract">Extract</option>
-                      </select>
-                      {p.mode === 'static' ? (
-                        <input value={p.value} onChange={e => updateParam(i, pi, { value: e.target.value })}
-                          placeholder="value"
-                          className="flex-1 border rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-                      ) : (
-                        <>
-                          <select value={p.fromStepLocalId}
-                            onChange={e => updateParam(i, pi, { fromStepLocalId: e.target.value })}
-                            className={`flex-1 border rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 ${p.invalid ? 'border-red-300 text-red-600' : ''}`}>
-                            <option value="">{p.invalid ? 'source no longer valid -- pick again' : 'Select a source step...'}</option>
-                            {rows.slice(0, i).map((r, ri) => r.id && (
-                              <option key={r.localId} value={r.localId}>
-                                Step {ri + 1}: {tools.find(t => t.id === r.gatewayToolId)?.name ?? '(connector)'} / {r.action || '(action)'}
-                              </option>
-                            ))}
-                          </select>
-                          <input value={p.path} onChange={e => updateParam(i, pi, { path: e.target.value })}
-                            placeholder="e.g. contact.id"
-                            className="w-32 border rounded px-1.5 py-1 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-                        </>
-                      )}
-                      <button type="button" onClick={() => removeParam(i, pi)} className="text-gray-400 hover:text-red-600 shrink-0" title="Remove parameter">
-                        <Trash2 className="h-3 w-3" />
+        <div>
+          {rows.map((row, i) => {
+            const tool = tools.find(t => t.id === row.gatewayToolId)
+            const hasInvalidExtraction = row.params.some(p => p.mode === 'extract' && p.invalid)
+            const flagged = row.toolDeleted || hasInvalidExtraction
+            return (
+              <div key={row.localId}>
+                {/* Step card (B-065): a summary only -- connector, action,
+                    and a one-line parameter summary (AC2), computed from
+                    already-loaded state. Full configuration lives in
+                    StepConfigPanel, opened via "Configure" below. */}
+                <div className={`rounded-lg border bg-white shadow-sm p-3 ${flagged ? 'border-red-200' : 'border-gray-200'}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <span className="flex items-center justify-center h-6 w-6 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold shrink-0">
+                        {i + 1}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          {row.toolDeleted && <AlertTriangle className="h-3.5 w-3.5 text-red-500 shrink-0" />}
+                          <span className="text-sm font-medium text-gray-900 truncate">
+                            {row.toolDeleted ? 'Connector removed' : tool?.name ?? 'Select a connector...'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-500 font-mono truncate">{row.action || '(no action selected)'}</div>
+                        <div className={`text-xs mt-0.5 ${hasInvalidExtraction ? 'text-red-600' : 'text-gray-400'}`}>
+                          {summarizeParams(row.params, rows)}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <div className="flex flex-col">
+                        <button type="button" onClick={() => moveRow(i, -1)} disabled={i === 0}
+                          className="text-gray-400 hover:text-indigo-600 disabled:opacity-30" title="Move up">
+                          <ArrowUp className="h-3 w-3" />
+                        </button>
+                        <button type="button" onClick={() => moveRow(i, 1)} disabled={i === rows.length - 1}
+                          className="text-gray-400 hover:text-indigo-600 disabled:opacity-30" title="Move down">
+                          <ArrowDown className="h-3 w-3" />
+                        </button>
+                      </div>
+                      <button type="button" onClick={() => setConfiguringLocalId(row.localId)}
+                        className="text-gray-400 hover:text-indigo-600 p-1" title="Configure step">
+                        <Settings2 className="h-4 w-4" />
+                      </button>
+                      <button type="button" onClick={() => removeRow(i)} className="text-gray-400 hover:text-red-600 p-1" title="Remove step">
+                        <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
-                  ))}
-                  {row.params.some(p => p.mode === 'extract' && p.invalid) && (
-                    <p className="text-xs text-red-600">
-                      One or more extraction sources are no longer valid (moved later, removed, or not yet saved) -- pick a new source or remove the parameter.
+                  </div>
+                  {hasInvalidExtraction && (
+                    <p className="text-xs text-red-600 mt-2 pl-8">
+                      One or more extraction sources are no longer valid -- open Configure to fix or remove.
                     </p>
                   )}
-                  <button type="button" onClick={() => addParam(i)} className="text-xs text-indigo-600 hover:text-indigo-800">
-                    + Add parameter
-                  </button>
                 </div>
-              )}
-            </div>
-            </div>
-          ))}
+                {i < rows.length - 1 && (
+                  <div className="flex justify-center py-0.5">
+                    <ChevronDown className="h-3.5 w-3.5 text-gray-300" />
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
+      {configuringLocalId && (() => {
+        const idx = rows.findIndex(r => r.localId === configuringLocalId)
+        if (idx === -1) return null
+        return (
+          <StepConfigPanel
+            row={rows[idx]} index={idx} rows={rows} tools={tools}
+            onClose={() => setConfiguringLocalId(null)}
+            updateRow={updateRow} updateParam={updateParam} addParam={addParam} removeParam={removeParam}
+          />
+        )
+      })()}
     </div>
   )
 }
@@ -486,6 +598,26 @@ function EditWorkflowPanel({ workflowId, onClose }: { workflowId: string; onClos
   const [name, setName] = useState('')
   const [status, setStatus] = useState<WorkflowStatus>('draft')
   const [rows, setRows] = useState<StepRow[] | null>(null)
+  const [activating, setActivating] = useState(false)
+
+  // B-065: an explicit, immediate activate action (AC4) -- a standalone
+  // PATCH touching only status, never steps, so flipping a workflow from
+  // draft to active doesn't require a full save. Reuses `update` (same
+  // mutation instance the main Save button uses) rather than a second
+  // hook, so the two can't race each other into conflicting writes.
+  async function handleActivate() {
+    setActivating(true)
+    try {
+      await update.mutateAsync({ id: workflowId, body: { status: 'active' } })
+      setStatus('active')
+      setToast('Workflow activated')
+      setTimeout(() => setToast(null), 1500)
+    } catch {
+      setToast('Failed to activate workflow')
+    } finally {
+      setActivating(false)
+    }
+  }
 
   // B-064: fetch every already-persisted step's real static params
   // (B-059's own endpoint, never previously consumed by any UI) so the
@@ -582,6 +714,24 @@ function EditWorkflowPanel({ workflowId, onClose }: { workflowId: string; onClos
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              {/* B-065 AC4: status made visually prominent, plus an
+                  explicit Activate action from draft -- a real, immediate
+                  PATCH (handleActivate above), not something that only
+                  takes effect after the main Save. The dropdown below is
+                  unchanged and still works (e.g. to set Disabled), so no
+                  existing capability is lost. */}
+              <div className="flex items-center gap-3 mb-2">
+                <span className={`inline-flex items-center px-2.5 py-1 rounded text-sm font-medium capitalize ${STATUS_BADGE[status]}`}>
+                  {status}
+                </span>
+                {status === 'draft' && (
+                  <button type="button" onClick={handleActivate} disabled={activating}
+                    className="flex items-center gap-1 text-xs font-medium text-green-700 hover:text-green-800 disabled:opacity-50">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    {activating ? 'Activating...' : 'Activate'}
+                  </button>
+                )}
+              </div>
               <select value={status} onChange={e => setStatus(e.target.value as WorkflowStatus)}
                 className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
                 {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
