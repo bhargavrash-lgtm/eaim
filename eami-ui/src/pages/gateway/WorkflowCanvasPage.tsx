@@ -1,25 +1,25 @@
 // WorkflowCanvasPage.tsx -- Gateway / Workflows / Canvas
-// B-066 Brief 1: read-only rendering. B-067 Brief 2 (this revision):
-// real interactivity -- click a node to configure it (StepConfigPanel,
-// B-065, reused verbatim), add/remove nodes, draw connections with real
-// draw-time validation. B-065's card UI remains the ONLY way to persist
-// a workflow's structure or its extraction (input_mapping) config;
-// nothing in this file calls a backend mutation for structure -- see
-// the persistence-split note below for exactly what DOES persist here
-// and why.
+// B-066 Brief 1: read-only rendering. B-067 Brief 2: real interactivity
+// -- click a node to configure it (StepConfigPanel, B-065, reused
+// verbatim), add/remove nodes, draw connections with real draw-time
+// validation. B-068 Brief 3 (this revision): the mandatory second
+// validation layer (the investigation's A.2 finding -- draw-time alone
+// can't catch a deletion leaving a broken graph) plus real structural
+// persistence, closing the epic's own two-layer requirement.
 //
-// ── The persistence split, a real finding not an oversight ─────────────
+// ── The persistence split, a real finding from B-067, now resolved ─────
 // A step's STATIC params have their own real, independent endpoint
-// (PUT /workflow-steps/{id}/params, B-059) -- safe to save immediately
-// from this page, touches nothing structural. A step's EXTRACTION
-// config (input_mapping) has NO independent endpoint at all -- B-063/
-// 064's backend only ever writes it as part of a full workflow PATCH
-// that also carries `steps` (structure), which this brief is explicitly
-// forbidden from calling. So: static param edits persist for real,
-// immediately, when the config panel closes; everything else (add/
-// remove a node, draw/delete a connection, an extraction-mode param
-// edit) stays local-only, surfaced through one unambiguous "unsaved
-// changes" banner -- never a silent, unpersisted "looks saved" state.
+// (PUT /workflow-steps/{id}/params, B-059) -- saved immediately from
+// this page since B-067, touches nothing structural. A step's
+// EXTRACTION config (input_mapping) has NO independent endpoint --
+// B-063/064's backend only ever writes it as part of a full workflow
+// PATCH that also carries `steps` (structure). B-067 left that half
+// local-only because it couldn't call that PATCH yet. B-068 closes the
+// gap: once the graph is validated and correctly ordered (validateGraph
+// below), the EXISTING, unmodified validateAndConvertRows (WorkflowsPage
+// .tsx) builds input_mapping from the reordered rows exactly as it
+// always has -- extraction config now rides along in the same real
+// PATCH as structure, with zero new logic for that half.
 import { useState, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQueries } from '@tanstack/react-query'
@@ -34,13 +34,13 @@ import {
   type Connection,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { AlertTriangle, Settings2, Trash2, Plus } from 'lucide-react'
+import { AlertTriangle, Settings2, Trash2, Plus, Save } from 'lucide-react'
 import { PageHeader, EmptyState, LoadingSpinner } from '@/components/common'
 import { apiFetch } from '@/api/client'
-import { useWorkflow, useSetWorkflowStepParams } from '@/hooks/useWorkflows'
+import { useWorkflow, useUpdateWorkflow, useSetWorkflowStepParams } from '@/hooks/useWorkflows'
 import { useTools } from '@/hooks/useTools'
 import type { ToolWithActions } from '@/hooks/useTools'
-import { summarizeParams, revalidateExtractionRefs, StepConfigPanel } from './WorkflowsPage'
+import { summarizeParams, revalidateExtractionRefs, validateAndConvertRows, saveStaticParams, StepConfigPanel } from './WorkflowsPage'
 import type { ParamRow, StepRow } from './WorkflowsPage'
 
 type WorkflowNodeData = {
@@ -82,7 +82,7 @@ function WorkflowStepNode({ data }: NodeProps & { data: WorkflowNodeData }) {
           <button type="button" onClick={data.onConfigure} className="text-gray-400 hover:text-indigo-600 p-1" title="Configure step">
             <Settings2 className="h-4 w-4" />
           </button>
-          <button type="button" onClick={data.onRemove} className="text-gray-400 hover:text-red-600 p-1" title="Remove step (visual only, not saved)">
+          <button type="button" onClick={data.onRemove} className="text-gray-400 hover:text-red-600 p-1" title="Remove step (click Save structure to persist)">
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -107,12 +107,87 @@ function staticParamsKey(params: ParamRow[]): string {
   return JSON.stringify(obj)
 }
 
+// validateGraph (B-068) is the mandatory save-time backstop the
+// investigation's A.2 finding requires -- draw-time validation
+// (isValidConnection, B-067) only gates NEW connection attempts; it
+// can't catch a later edge/node deletion leaving a broken graph. This
+// re-derives the graph's validity fresh from current `rows`/`edges`,
+// trusting nothing from draw time, and (on success) the one valid
+// linear order to save in -- exactly one connected chain from a single
+// start to a single end, covering every node exactly once. Every
+// rejection names the specific offending step(s), per the ease-of-use
+// principle (CONTEXT.md): never just "invalid graph."
+function validateGraph(rows: StepRow[], edges: Edge[]): { order: string[] | null; error: string | null } {
+  if (rows.length === 0) return { order: null, error: 'Add at least one step before saving.' }
+  if (rows.length === 1) return { order: [rows[0].localId], error: null }
+
+  const label = (localId: string): string => {
+    const idx = rows.findIndex(r => r.localId === localId)
+    return idx === -1 ? 'an unknown step' : `Step ${idx + 1}`
+  }
+
+  const outgoingCount = new Map<string, number>()
+  const incomingCount = new Map<string, number>()
+  for (const row of rows) { outgoingCount.set(row.localId, 0); incomingCount.set(row.localId, 0) }
+  for (const e of edges) {
+    outgoingCount.set(e.source, (outgoingCount.get(e.source) ?? 0) + 1)
+    incomingCount.set(e.target, (incomingCount.get(e.target) ?? 0) + 1)
+  }
+
+  // Defensive re-check of the same per-node degree limit draw-time
+  // already enforces for NEW connections (B-067) -- re-verified here
+  // rather than trusted, since this is the actual backstop.
+  const overConnected = rows.filter(r => (outgoingCount.get(r.localId) ?? 0) > 1 || (incomingCount.get(r.localId) ?? 0) > 1)
+  if (overConnected.length > 0) {
+    return { order: null, error: `${overConnected.map(r => label(r.localId)).join(', ')} ${overConnected.length === 1 ? 'has' : 'have'} more than one connection in or out -- each step can only connect to one step before it and one step after it.` }
+  }
+
+  const starts = rows.filter(r => (incomingCount.get(r.localId) ?? 0) === 0)
+  const ends = rows.filter(r => (outgoingCount.get(r.localId) ?? 0) === 0)
+  if (starts.length === 0) {
+    return { order: null, error: 'Every step has a connection leading into it, with no starting step -- this usually means a cycle. Remove a connection to break it.' }
+  }
+  if (starts.length > 1) {
+    return { order: null, error: `${starts.map(r => label(r.localId)).join(', ')} have no connection leading into them -- there can only be one starting step. Connect them into the chain or remove the extra ones.` }
+  }
+  if (ends.length > 1) {
+    return { order: null, error: `${ends.map(r => label(r.localId)).join(', ')} have no connection leading out of them -- there can only be one ending step. Connect them into the chain or remove the extra ones.` }
+  }
+
+  // Walk from the single start following outgoing edges. If this visits
+  // every node exactly once, the graph is exactly one connected linear
+  // chain -- the only shape the backend's flat, ordered `steps` array
+  // can represent. The walk only ever advances onto a real row id
+  // (rowIds.has(current)) -- this function claims to trust nothing from
+  // draw time, so an edge whose target isn't a live row (which shouldn't
+  // happen given today's UI, but isn't guaranteed by this function's own
+  // types) must never be able to smuggle a phantom id into `order`.
+  const rowIds = new Set(rows.map(r => r.localId))
+  const edgeBySource = new Map<string, Edge>()
+  for (const e of edges) edgeBySource.set(e.source, e)
+  const order: string[] = []
+  const visited = new Set<string>()
+  let current: string | undefined = starts[0].localId
+  while (current && rowIds.has(current) && !visited.has(current)) {
+    visited.add(current)
+    order.push(current)
+    current = edgeBySource.get(current)?.target
+  }
+
+  if (order.length !== rows.length) {
+    const unreached = rows.filter(r => !visited.has(r.localId))
+    return { order: null, error: `${unreached.map(r => label(r.localId)).join(', ')} ${unreached.length === 1 ? "isn't" : "aren't"} connected to the main chain -- connect ${unreached.length === 1 ? 'it' : 'them'} in or remove ${unreached.length === 1 ? 'it' : 'them'}.` }
+  }
+  return { order, error: null }
+}
+
 export function WorkflowCanvasPage() {
   const { workflowId } = useParams<{ workflowId: string }>()
   const { data: workflow, isLoading, error } = useWorkflow(workflowId ?? null)
   const { data: toolsData } = useTools()
   const tools: ToolWithActions[] = (toolsData as any)?.data ?? []
   const setStepParams = useSetWorkflowStepParams()
+  const update = useUpdateWorkflow()
 
   const stepIds = (workflow?.steps ?? []).map(s => s.id)
   const paramsQueries = useQueries({
@@ -133,6 +208,12 @@ export function WorkflowCanvasPage() {
   // genuine static-param change triggers a real PUT (AC1), never a
   // no-op write on every open/close.
   const [savedStaticKeys, setSavedStaticKeys] = useState<Record<string, string>>({})
+  // isSaving/saveError (B-068) are distinct from the transient
+  // connection-attempt `toast` above -- a save failure is persistent
+  // (survives until the next save attempt or a fix), never auto-clears,
+  // since it names a real structural problem the admin must act on.
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // Initialize local editable state once, guarded exactly like
   // EditWorkflowPanel's own row-init (never re-runs on a background
@@ -289,6 +370,86 @@ export function WorkflowCanvasPage() {
     setHasUnsavedChanges(true)
   }
 
+  // handleSave (B-068) is the real save path this whole brief exists
+  // for: validateGraph first (the mandatory save-time backstop), then
+  // reorder rows to the one valid chain order, THEN revalidateExtractionRefs
+  // on that reordered array (order can change what counts as "earlier"),
+  // then the existing, unmodified validateAndConvertRows builds the exact
+  // same { steps, staticParamsByIndex } shape the card editor's own save
+  // path already builds -- this calls the SAME useUpdateWorkflow mutation
+  // EditWorkflowPanel uses, with the same body shape, nothing new on the
+  // backend side. Any rejection at any stage is a persistent, specific
+  // saveError -- never a silent no-op or a generic "save failed."
+  async function handleSave() {
+    if (!rows || !workflow || !workflowId) return
+    setSaveError(null)
+
+    const { order, error: graphError } = validateGraph(rows, edges)
+    if (graphError || !order) {
+      setSaveError(graphError ?? 'This workflow graph is not valid.')
+      return
+    }
+
+    const orderedRows = order.map(localId => rows.find(r => r.localId === localId)!)
+    const revalidated = revalidateExtractionRefs(orderedRows)
+    const { steps, staticParamsByIndex, error: convertError } = validateAndConvertRows(revalidated)
+    if (convertError) {
+      setSaveError(convertError)
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      const updated = await update.mutateAsync({ id: workflowId, body: { name: workflow.name, status: workflow.status, steps } })
+      const responseSteps = updated.steps ?? []
+      const { failed } = await saveStaticParams(responseSteps, staticParamsByIndex, setStepParams)
+
+      // Rebuild local rows/edges/savedStaticKeys from the confirmed
+      // persisted response -- same construction as initial load -- so
+      // the canvas visually reflects the real saved order/ids
+      // immediately (AC4), not just the locally-guessed order.
+      const newRows: StepRow[] = responseSteps.map((s, idx) => {
+        const staticParams = staticParamsByIndex[idx] ?? {}
+        const staticRowsNew: ParamRow[] = Object.entries(staticParams).map(([key, value]) => ({
+          key, mode: 'static', value: typeof value === 'string' ? value : JSON.stringify(value),
+          fromStepLocalId: '', path: '',
+        }))
+        const extractRowsNew: ParamRow[] = Object.entries(s.input_mapping ?? {}).map(([key, ref]) => ({
+          key, mode: 'extract', value: '', fromStepLocalId: ref.from_step, path: ref.path,
+        }))
+        return {
+          localId: s.id,
+          id: s.id,
+          gatewayToolId: s.gateway_tool_id,
+          action: s.action,
+          toolDeleted: !s.gateway_tool_id,
+          params: [...staticRowsNew, ...extractRowsNew],
+        }
+      })
+      setRows(newRows)
+      setEdges(newRows.slice(1).map((row, i) => ({
+        id: `${newRows[i].localId}-${row.localId}`,
+        source: newRows[i].localId,
+        target: row.localId,
+      })))
+      const snapshot: Record<string, string> = {}
+      newRows.forEach(r => { snapshot[r.localId] = staticParamsKey(r.params) })
+      setSavedStaticKeys(snapshot)
+      setHasUnsavedChanges(false)
+
+      if (failed > 0) {
+        setSaveError(`Workflow structure saved, but ${failed} step${failed === 1 ? "'s" : "s'"} static parameters failed to save -- reopen the affected step and try again.`)
+      } else {
+        setToast('Workflow saved')
+        setTimeout(() => setToast(null), 2500)
+      }
+    } catch {
+      setSaveError('Failed to save the workflow -- check your connection and try again.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   if (isLoading) return <div className="p-6"><LoadingSpinner /></div>
   if (error || !workflow) return <div className="p-6 text-sm text-red-500">Failed to load workflow.</div>
   if (rows === null) return <div className="p-6"><LoadingSpinner /></div>
@@ -320,20 +481,34 @@ export function WorkflowCanvasPage() {
   return (
     <div className="flex flex-col h-full">
       <PageHeader
-        title={`${workflow.name} -- Canvas (preview)`}
-        subtitle="Click a step to configure it. Static parameter edits save for real; everything else here is visual only -- see the banner below."
+        title={`${workflow.name} -- Canvas`}
+        subtitle="Click a step to configure it. Draw or delete connections to change step order, then Save structure to persist the graph for real."
         actions={
-          <button onClick={addNode}
-            className="flex items-center gap-1.5 bg-indigo-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-indigo-700">
-            <Plus className="h-4 w-4" />
-            Add step (visual only)
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={addNode}
+              className="flex items-center gap-1.5 bg-white border border-gray-300 text-gray-700 rounded px-3 py-1.5 text-sm font-medium hover:bg-gray-50">
+              <Plus className="h-4 w-4" />
+              Add step
+            </button>
+            <button onClick={handleSave} disabled={isSaving}
+              className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60 ${
+                hasUnsavedChanges ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-400 hover:bg-gray-500'
+              }`}>
+              <Save className="h-4 w-4" />
+              {isSaving ? 'Saving...' : 'Save structure'}
+            </button>
+          </div>
         }
       />
 
       {hasUnsavedChanges && (
         <div className="mx-4 mt-3 px-4 py-2 rounded text-sm border bg-amber-50 border-amber-200 text-amber-800">
-          You have unsaved structural or extraction changes on this canvas. These are visual only in this preview and are not saved -- use the Workflows page to make and save real structural changes.
+          You have unsaved structural or extraction changes on this canvas. Click "Save structure" to persist them.
+        </div>
+      )}
+      {saveError && (
+        <div className="mx-4 mt-3 px-4 py-2 rounded text-sm border bg-red-50 border-red-200 text-red-700">
+          {saveError}
         </div>
       )}
       {toast && (
@@ -346,7 +521,7 @@ export function WorkflowCanvasPage() {
         {rows.length === 0 ? (
           <EmptyState
             title="No steps in this workflow"
-            description="Add a step above -- remember, structural changes here are visual only and are not saved."
+            description="Add a step above, then click Save structure to persist it."
           />
         ) : (
           <ReactFlow

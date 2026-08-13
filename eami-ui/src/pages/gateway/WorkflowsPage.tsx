@@ -133,7 +133,7 @@ export function revalidateExtractionRefs(rows: StepRow[]): StepRow[] {
 // not yet by real step id -- see AddWorkflowPanel/EditWorkflowPanel's
 // submit handlers for why: a new step's real id is only known once the
 // main Create/Update response comes back).
-function validateAndConvertRows(rows: StepRow[]): {
+export function validateAndConvertRows(rows: StepRow[]): {
   steps: { id?: string; gateway_tool_id: string; action: string; input_mapping?: Record<string, ExtractionRef> }[]
   staticParamsByIndex: (Record<string, string> | null)[]
   error: string | null
@@ -186,7 +186,7 @@ function validateAndConvertRows(rows: StepRow[]): {
 // Runs all step param saves in parallel; a failure surfaces a distinct
 // count rather than being silently swallowed (the workflow itself did
 // save successfully either way).
-async function saveStaticParams(
+export async function saveStaticParams(
   responseSteps: WorkflowStep[],
   staticParamsByIndex: (Record<string, string> | null)[],
   setStepParams: ReturnType<typeof useSetWorkflowStepParams>,

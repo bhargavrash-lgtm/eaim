@@ -522,7 +522,50 @@ or prior context suggests otherwise, it is wrong; trust this line.
   checked for every Thread B brief.
 
 ## Last updated
-2026-08-13 by Claude Code — B-067: Workflow Canvas, Brief 2
+2026-08-13 by Claude Code — B-068: Workflow Canvas, Brief 3
+(save-time validation, real structural persistence) — closes the
+investigation's own A.2 two-layer requirement: draw-time (B-067) alone
+can't catch a deletion leaving a broken graph, so this brief added the
+save-time full-graph validation backstop (new `validateGraph`, re-
+deriving graph validity fresh from current state, trusting nothing from
+draw time — requires exactly one start/one end, no over-connected node,
+and a walk visiting every node exactly once), then wired the canvas to
+the SAME `UpdateWorkflow` PATCH `EditWorkflowPanel`'s cards already use,
+unmodified. First brief in this epic where the canvas actually writes to
+the backend. Every rejection names the specific offending step(s) by
+number, per the Workflow Canvas ease-of-use principle above — never a
+generic "invalid graph." The extraction-persistence gap B-067 left open
+(no independent endpoint for `input_mapping`) closes itself here with
+zero new logic: once the graph is validated and correctly ordered, the
+existing, unmodified `validateAndConvertRows` builds `input_mapping`
+from the reordered rows exactly as it always has. **A real defensive gap
+found and closed during the mandatory reviewer + security pass this
+brief's own standing rules required (unlike B-064-067):** the original
+reachability check only guarded under-coverage — an edge targeting an id
+outside `rows` (not reachable via any current UI path) could let a
+corrupted order slip through as a false success, crashing `handleSave`
+outside its `try/catch`. Hardened so the walk only ever advances onto a
+real row id. Security review separately traced the real trust boundary
+in code: the backend deliberately doesn't validate `input_mapping.
+from_step` ordering/existence at write time, but this is safe by
+construction — `eami-gateway`'s `resolveParams` is scoped per-run to
+only that run's already-completed steps, so a forward or cross-org
+reference simply fails the run cleanly rather than resolving to
+anything. `npm run type-check`/`build` clean. `WorkflowsPage.tsx`
+changed by exactly the two new additive `export`s (`git diff --stat`
+confirmed), zero logic touched. **Live-verified at B-063's original full
+rigor standard, not the lighter request-sequence-equivalence substitute
+used since B-064**: `validateGraph` extracted verbatim from the served
+module and actually executed (not just read) against six concrete
+topologies, all correct; a real extraction was configured, saved, and
+traced through the real `workflow_run_steps.result` column after a real
+run via a real agent JWT — the same evidence standard B-063 itself used.
+Backend-side defense in depth confirmed directly: a structurally
+incomplete step submitted straight to the PATCH endpoint (bypassing the
+frontend) got a real `400`. Full writeup in `BUILT.md`'s `eami-ui`
+section and `BACKLOG.md`'s Workflow Canvas epic header + B-068 entry.
+
+Prior entry, still accurate: 2026-08-13 by Claude Code — B-067: Workflow Canvas, Brief 2
 (interactivity + draw-time connection validation). Made B-066's canvas
 interactive: click a node opens `StepConfigPanel` (B-065, reused
 verbatim, zero changes to its own code), add/remove nodes and draw
