@@ -509,7 +509,35 @@ or prior context suggests otherwise, it is wrong; trust this line.
   building anything.
 
 ## Last updated
-2026-08-13 by Claude Code — B-065: Multi-Hop Workflows, Brief 5
+2026-08-13 by Claude Code — B-066: Workflow Canvas, Brief 1
+(`@xyflow/react` integration + read-only rendering). First brief of a
+new, separate epic (distinct from Thread B, which is complete) —
+investigated earlier this session, recommending `@xyflow/react` directly
+over the `@workflowbuilder/sdk` wrapper and flagging that real
+editing/connection-drawing needs a two-layer validation design (draw-time
+gating + a save-time full-graph check) before it ships, since React Flow
+doesn't structurally prevent branching/cycles/disconnected nodes on its
+own. This brief only proves the dependency integrates cleanly and renders
+an existing workflow's real steps as ordered, explicitly read-only canvas
+nodes at a new route — B-065's card UI is completely untouched (`git
+diff --stat` confirms only 19 additive lines in `WorkflowsPage.tsx`) and
+remains the only editor. Corrected a stated premise before building on
+it: this project's Tailwind has a real JIT compiler, not "pre-defined
+classes only" as the investigation brief assumed — didn't change the
+technical outcome (React Flow ships its own precompiled CSS regardless)
+but worth verifying rather than silently accepting. `npm run
+type-check`/`build` clean on the first attempt, real measured bundle-
+weight impact (+~57 kB gzipped JS, +~16 kB CSS) rather than an estimate.
+Live-verified what's actually checkable (served code is real and wired;
+real API data is correct for both an existing 2-step workflow and a
+temporary 5-step one made for the "many steps" case) and explicitly
+disclosed what isn't (the rendered pixels themselves — this brief's own
+acceptance criteria are unusually visual, and this environment's standing
+no-browser-automation limitation applies here just as it has to every
+prior `eami-ui` brief). Full writeup in `BUILT.md`'s `eami-ui` section
+and `BACKLOG.md`'s new "Workflow Canvas" epic header + B-066 entry.
+
+Prior entry, still accurate: 2026-08-13 by Claude Code — B-065: Multi-Hop Workflows, Brief 5
 (Freshservice-styled visual redesign). Restyled the Workflows editor's
 step list from plain form rows into a vertical sequence of summary
 cards, with the detailed connector/action/parameter editor (B-060/B-064,

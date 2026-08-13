@@ -11,8 +11,9 @@
 // with up/down reorder controls since a workflow's step order is load-
 // bearing (ActionPathsEditor's rows have no inherent order).
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQueries } from '@tanstack/react-query'
-import { Plus, Trash2, Pencil, ArrowUp, ArrowDown, AlertTriangle, Settings2, ChevronDown, CheckCircle2 } from 'lucide-react'
+import { Plus, Trash2, Pencil, ArrowUp, ArrowDown, AlertTriangle, Settings2, ChevronDown, CheckCircle2, Waypoints } from 'lucide-react'
 import {
   PageHeader,
   ConfirmDialog,
@@ -68,7 +69,7 @@ function StatusBadge({ status }: { status: string }) {
 // reorder/removal that leaves this reference pointing at a step that's
 // no longer earlier (or no longer exists, or still has no real id) --
 // surfaced visibly, never silently cleared (AC3).
-type ParamRow = {
+export type ParamRow = {
   key: string
   mode: 'static' | 'extract'
   value: string
@@ -86,7 +87,7 @@ type ParamRow = {
 // is exactly what makes it ineligible as an extraction SOURCE (no real
 // id for a later step to reference yet) while still being free to
 // itself extract FROM an already-real-id'd earlier step.
-type StepRow = {
+export type StepRow = {
   localId: string
   id?: string
   gatewayToolId: string
@@ -204,7 +205,9 @@ async function saveStaticParams(
 // new fetch. A single extraction gets a specific, readable sentence
 // ("Extracting "x" from Step N"); anything else collapses to a count so
 // the card stays a summary, not a second copy of the detail panel.
-function summarizeParams(params: ParamRow[], rows: StepRow[]): string {
+// Exported (B-066) so the read-only canvas view reuses this verbatim
+// instead of reimplementing the same summary text a second way.
+export function summarizeParams(params: ParamRow[], rows: StepRow[]): string {
   const named = params.filter(p => p.key.trim())
   if (named.length === 0) return 'No parameters configured'
   const staticRows = named.filter(p => p.mode === 'static')
@@ -814,6 +817,14 @@ export function WorkflowsPage() {
                     <td className="px-4 py-3 text-xs text-gray-400">{formatDate(wf.created_at)}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-3">
+                        {/* B-066 Brief 1: a read-only canvas preview,
+                            reached via its own route -- deliberately not
+                            wired into the edit drawer's live-editing
+                            state, see WorkflowCanvasPage.tsx. */}
+                        <Link to={`/gateway/workflows/${wf.id}/canvas`}
+                          className="text-gray-400 hover:text-indigo-600" title="View as canvas (preview)">
+                          <Waypoints className="h-4 w-4" />
+                        </Link>
                         <button onClick={() => setEditTargetId(wf.id)}
                           className="text-gray-400 hover:text-indigo-600" title="Edit">
                           <Pencil className="h-4 w-4" />
