@@ -46,7 +46,7 @@ func Resolve(ctx context.Context, pool *pgxpool.Pool, orgID, workflowID uuid.UUI
 
 	rows, err := pool.Query(ctx, `
 		SELECT ws.id, ws.step_order, ws.gateway_tool_id, ws.action,
-		       COALESCE(wsp.params, '{}'::jsonb)
+		       COALESCE(wsp.params, '{}'::jsonb), ws.input_mapping
 		FROM workflow_steps ws
 		LEFT JOIN workflow_step_params wsp ON wsp.workflow_step_id = ws.id
 		WHERE ws.workflow_id = $1
@@ -60,8 +60,8 @@ func Resolve(ctx context.Context, pool *pgxpool.Pool, orgID, workflowID uuid.UUI
 	for rows.Next() {
 		var st Step
 		var gatewayToolID *uuid.UUID
-		var paramsRaw []byte
-		if err := rows.Scan(&st.WorkflowStepID, &st.StepOrder, &gatewayToolID, &st.Action, &paramsRaw); err != nil {
+		var paramsRaw, inputMappingRaw []byte
+		if err := rows.Scan(&st.WorkflowStepID, &st.StepOrder, &gatewayToolID, &st.Action, &paramsRaw, &inputMappingRaw); err != nil {
 			return nil, fmt.Errorf("workflow: scan step: %w", err)
 		}
 		if gatewayToolID == nil {
@@ -71,6 +71,11 @@ func Resolve(ctx context.Context, pool *pgxpool.Pool, orgID, workflowID uuid.UUI
 		if len(paramsRaw) > 0 {
 			if err := json.Unmarshal(paramsRaw, &st.Params); err != nil {
 				return nil, fmt.Errorf("workflow: unmarshal step %d params: %w", st.StepOrder, err)
+			}
+		}
+		if len(inputMappingRaw) > 0 {
+			if err := json.Unmarshal(inputMappingRaw, &st.InputMapping); err != nil {
+				return nil, fmt.Errorf("workflow: unmarshal step %d input_mapping: %w", st.StepOrder, err)
 			}
 		}
 		def.Steps = append(def.Steps, st)

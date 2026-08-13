@@ -509,7 +509,40 @@ or prior context suggests otherwise, it is wrong; trust this line.
   building anything.
 
 ## Last updated
-2026-08-12 by Claude Code — B-062: fixed Vite dev server serving stale
+2026-08-13 by Claude Code — B-063: Multi-Hop Workflows, Brief 3
+(output→input mapping). A later step's parameter can now be extracted
+from an EARLIER step's real recorded execution result within the same
+run — Thread B's single hardest, most consequential piece. Re-verified
+the MCP Discovery investigation's D9 finding directly before building:
+zero new tables/columns/migrations needed (`workflow_steps.input_mapping`
+and `workflow_run_steps.result` already existed for exactly this,
+reserved by B-058/B-059). Expression library: `github.com/tidwall/gjson`
+(read-only JSON-path querying, no eval capability).
+**A critical, plan-changing finding, surfaced and approved before any
+code was written:** `workflow_steps.id` was not actually stable across a
+save — `UpdateWorkflow`'s full-replace always minted fresh step ids
+(and never even passed `input_mapping` through), so extraction wiring
+would have been wiped by the very next unrelated save, not just
+misdirected by a reorder. Fixed with a minimal, additive, approved
+expansion of `workflows.go`'s scope (a caller-echoable step `id`,
+reused only when it matches a real existing step of that exact
+workflow) — same "genuine fork, presented not decided unilaterally"
+category as B-044/B-059's own forks. A second, related bug (static
+`workflow_step_params` silently cascade-wiped on any sibling-step edit,
+even with id reuse working) was found live during this brief's own
+verification and fixed the same session, disclosed not glossed over.
+Reviewer + security passes both clean — security review matched B-042's
+own rigor for the cross-run/cross-workflow isolation claim (AC4) and
+confirmed it holds by construction: extraction resolution never queries
+Postgres, only an in-memory per-run map. `go build`/`go vet`/`go test
+./... -count=1` clean across `eami-gateway` and `eami-api`.
+Live-verified end-to-end against the real `docker-compose` stack: a real
+2-step workflow's step 2 genuinely received a value extracted from step
+1's real recorded response, traced through the real
+`workflow_run_steps.result` column. Full writeup in `BUILT.md`'s
+Cross-cutting/shared section and `BACKLOG.md`'s B-063 entry.
+
+Prior entry, still accurate: 2026-08-12 by Claude Code — B-062: fixed Vite dev server serving stale
 code after edits, reported live against B-060's dropdown not rendering.
 User asked to rule out a stale Docker image first (B-035/B-055 class)
 before assuming a code bug — the image genuinely was stale (rebuilt), but

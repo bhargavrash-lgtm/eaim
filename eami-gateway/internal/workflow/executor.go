@@ -90,9 +90,16 @@ func (e *Executor) Run(ctx context.Context, template mcp.ActionContext, workflow
 	result := &RunResult{RunID: runID}
 	finalStatus := "completed"
 
+	// priorResults (B-063) accumulates every completed step of THIS run,
+	// keyed by workflow_steps.id -- the only data source resolveParams
+	// ever reads from. Never touched by any DB query; see params.go's
+	// doc comment for why that closes AC4 (cross-run/cross-workflow/
+	// future-step isolation) structurally, not just by convention.
+	priorResults := make(map[uuid.UUID]StepResult, len(def.Steps))
 	for _, step := range def.Steps {
-		sr := e.runStep(ctx, template, orgID, runID, step)
+		sr := e.runStep(ctx, template, orgID, runID, step, priorResults)
 		result.Steps = append(result.Steps, sr)
+		priorResults[step.WorkflowStepID] = sr
 		if sr.Outcome != "allowed" {
 			// Fail-safe, no partial-failure recovery or step-skipping (v1
 			// scope, explicit): the first non-allowed step stops the run.
@@ -115,10 +122,13 @@ func (e *Executor) Run(ctx context.Context, template mcp.ActionContext, workflow
 }
 
 // runStep executes exactly one step: resolves its connector (for this
-// package's own informational pinning record), records a pre-dispatch
-// workflow_run_steps row, calls the SAME unmodified dispatch() closure
-// every standalone MCP call uses, then records the real outcome.
-func (e *Executor) runStep(ctx context.Context, template mcp.ActionContext, orgID, runID uuid.UUID, step Step) StepResult {
+// package's own informational pinning record), resolves its real
+// dispatch parameters (static merged with any extraction, B-063),
+// records a pre-dispatch workflow_run_steps row, calls the SAME
+// unmodified dispatch() closure every standalone MCP call uses, then
+// records the real outcome. priorResults holds every step already
+// completed in this exact run -- see resolveParams' doc comment.
+func (e *Executor) runStep(ctx context.Context, template mcp.ActionContext, orgID, runID uuid.UUID, step Step, priorResults map[uuid.UUID]StepResult) StepResult {
 	sr := StepResult{
 		StepOrder:      step.StepOrder,
 		WorkflowStepID: step.WorkflowStepID,
@@ -138,6 +148,20 @@ func (e *Executor) runStep(ctx context.Context, template mcp.ActionContext, orgI
 	sr.ResolvedToolID = step.GatewayToolID
 	sr.ResolvedConfigHash = approval.ComputeConfigHash(conn.toolType, conn.baseURLOrProvider, conn.credentialsEncrypted, conn.configHashJSON())
 
+	// Resolve this step's real params (static + extracted) before any
+	// policy preview or dispatch -- an extraction that can't resolve
+	// fails the step cleanly here, dispatch() is never called, and no
+	// partial/empty value is ever substituted (B-063 AC3).
+	resolvedParams, paramErr := resolveParams(step, priorResults)
+	if paramErr != nil {
+		sr.Outcome = "blocked"
+		sr.ErrorDetail = paramErr.Error()
+		sr.FinishedAt = time.Now().UTC()
+		e.insertRunStep(ctx, rowID, runID, sr)
+		e.updateRunStep(ctx, rowID, sr)
+		return sr
+	}
+
 	// Independent, informational pre-dispatch policy preview -- the exact
 	// same Evaluate method dispatch() itself calls, invoked a second time
 	// purely so the audit record can show "this step escalated" (dispatch()'s
@@ -148,7 +172,7 @@ func (e *Executor) runStep(ctx context.Context, template mcp.ActionContext, orgI
 		ToolName:    conn.name,
 		ActionType:  step.Action,
 		Environment: template.Environment,
-		Parameters:  step.Params,
+		Parameters:  resolvedParams,
 		Scope:       template.AgentScope,
 	}
 	if decision, evalErr := e.policyEval.Evaluate(ctx, pc); evalErr == nil {
@@ -159,7 +183,7 @@ func (e *Executor) runStep(ctx context.Context, template mcp.ActionContext, orgI
 	stepAC := template
 	stepAC.Tool = conn.name
 	stepAC.Action = step.Action
-	stepAC.Parameters = step.Params
+	stepAC.Parameters = resolvedParams
 	stepAC.ReceivedAt = time.Now().UTC()
 
 	// The real, enforced dispatch -- completely unmodified. If this

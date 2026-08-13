@@ -6,9 +6,12 @@
 // contract.
 //
 // Scope (Multi-Hop Workflows Brief 2, B-059): execution + per-hop TOCTOU
-// pinning + static per-step parameters only. Output->input mapping
-// between steps, durable pause/resume for escalation, and a chain-aware
-// approval UI are all explicitly out of scope -- see BACKLOG.md's Thread
+// pinning + static per-step parameters. Brief 3 (B-063) added
+// output->input mapping (resolveParams, params.go) -- a step's
+// parameters can now also be extracted from a prior step's real
+// recorded result within the same run, layered on top of static params
+// via merge. Durable pause/resume for escalation and a chain-aware
+// approval UI remain explicitly out of scope -- see BACKLOG.md's Thread
 // B entry for the full epic.
 package workflow
 
@@ -19,15 +22,28 @@ import (
 	"github.com/google/uuid"
 )
 
+// ExtractionRef (B-063) names a value to pull from a PRIOR step's real
+// recorded execution result within the SAME run: FromStep is that
+// step's own stable workflow_steps.id (never a step_order position --
+// see resolveParams' doc comment for why), Path is a gjson path into
+// that step's StepResult.Result JSON.
+type ExtractionRef struct {
+	FromStep uuid.UUID `json:"from_step"`
+	Path     string    `json:"path"`
+}
+
 // Step is one resolved step of a workflow, ready to execute: the
-// connector it targets (by ID, per B-058's schema) and its static
-// parameters (B-059's workflow_step_params, migration 000007).
+// connector it targets (by ID, per B-058's schema), its static
+// parameters (B-059's workflow_step_params, migration 000007), and its
+// extracted parameters (B-063's workflow_steps.input_mapping -- see
+// resolveParams for how the two combine).
 type Step struct {
 	WorkflowStepID uuid.UUID
 	StepOrder      int32
 	GatewayToolID  uuid.UUID // never uuid.Nil for an executable step -- see Resolve's dangling-reference handling
 	Action         string
 	Params         map[string]any
+	InputMapping   map[string]ExtractionRef
 }
 
 // Definition is a workflow ready to execute -- resolved once per Run call.

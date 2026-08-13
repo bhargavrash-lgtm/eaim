@@ -155,16 +155,21 @@ func (q *Queries) CreateWorkflow(ctx context.Context, p CreateWorkflowParams) (*
 }
 
 const insertWorkflowStepQuery = `-- name: InsertWorkflowStep :exec
-INSERT INTO workflow_steps (workflow_id, step_order, gateway_tool_id, action)
-VALUES ($1, $2, $3, $4)
+INSERT INTO workflow_steps (id, workflow_id, step_order, gateway_tool_id, action, input_mapping)
+VALUES ($1, $2, $3, $4, $5, $6)
 `
 
-// InsertWorkflowStep inserts one step row. stepOrder is always caller-
-// assigned from array position (workflows.go), never client-supplied
-// directly, so there is no duplicate/gap ordering case to validate here.
-func (q *Queries) InsertWorkflowStep(ctx context.Context, workflowID uuid.UUID, stepOrder int32, gatewayToolID uuid.UUID, action string) error {
+// InsertWorkflowStep inserts one step row with a caller-assigned id
+// (B-063 -- previously DB DEFAULT-generated) so UpdateWorkflow can reuse
+// an existing step's real id across a full-replace save instead of
+// always minting a fresh one, which is what makes a workflow_steps.id
+// stable enough for another step's input_mapping to reference. stepOrder
+// is always caller-assigned from array position (workflows.go), never
+// client-supplied directly, so there is no duplicate/gap ordering case
+// to validate here. inputMapping is raw JSONB passthrough, nil = NULL.
+func (q *Queries) InsertWorkflowStep(ctx context.Context, id, workflowID uuid.UUID, stepOrder int32, gatewayToolID uuid.UUID, action string, inputMapping []byte) error {
 	_, err := q.db.Exec(ctx, insertWorkflowStepQuery,
-		toPgtypeUUID(workflowID), stepOrder, toPgtypeUUID(gatewayToolID), action,
+		toPgtypeUUID(id), toPgtypeUUID(workflowID), stepOrder, toPgtypeUUID(gatewayToolID), action, inputMapping,
 	)
 	return err
 }

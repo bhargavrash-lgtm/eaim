@@ -28,7 +28,7 @@ func seedWorkflowWithStep(t *testing.T, ctx context.Context, q *store.Queries, o
 	if err != nil {
 		t.Fatalf("CreateWorkflow: %v", err)
 	}
-	if err := q.InsertWorkflowStep(ctx, wf.ID, 0, toolID, "query"); err != nil {
+	if err := q.InsertWorkflowStep(ctx, uuid.New(), wf.ID, 0, toolID, "query", nil); err != nil {
 		t.Fatalf("InsertWorkflowStep: %v", err)
 	}
 	steps, err := q.ListWorkflowSteps(ctx, wf.ID)

@@ -268,9 +268,10 @@ type WorkflowStep struct {
 	GatewayToolID pgtype.UUID
 	ToolName      pgtype.Text // joined from gateway_tools.name; invalid if tool deleted or (defensively) not yet joined
 	Action        string
-	// InputMapping is the raw JSONB bytes of workflow_steps.input_mapping --
-	// a genuinely inert placeholder for a later brief (output->input
-	// mapping between hops). Never read or written beyond NULL passthrough
-	// in this brief.
+	// InputMapping is the raw JSONB bytes of workflow_steps.input_mapping:
+	// a per-param map of {from_step, path} extraction references (B-063),
+	// resolved at execution time by eami-gateway/internal/workflow against
+	// a prior step's real recorded result within the same run. This layer
+	// never interprets the contents -- only passes the bytes through.
 	InputMapping []byte
 }
