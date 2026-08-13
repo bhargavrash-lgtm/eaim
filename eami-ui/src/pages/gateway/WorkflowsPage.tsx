@@ -109,7 +109,7 @@ function newParamRow(): ParamRow {
 // reference that's no longer valid -- source step removed, or no longer
 // earlier than the referencing step (B-064 AC3). Run after every
 // row-order/row-set mutation (see StepsEditor's commit()).
-function revalidateExtractionRefs(rows: StepRow[]): StepRow[] {
+export function revalidateExtractionRefs(rows: StepRow[]): StepRow[] {
   return rows.map((row, i) => ({
     ...row,
     params: row.params.map(p => {
@@ -232,7 +232,7 @@ export function summarizeParams(params: ParamRow[], rows: StepRow[]): string {
 // (what this replaces). Every mutation still goes through the SAME
 // commit()-wrapped callbacks StepsEditor already owns -- this component
 // holds zero state and zero validation logic of its own, purely a view.
-function StepConfigPanel({
+export function StepConfigPanel({
   row, index, rows, tools, onClose, updateRow, updateParam, addParam, removeParam,
 }: {
   row: StepRow

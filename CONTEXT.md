@@ -509,7 +509,39 @@ or prior context suggests otherwise, it is wrong; trust this line.
   building anything.
 
 ## Last updated
-2026-08-13 by Claude Code — B-066: Workflow Canvas, Brief 1
+2026-08-13 by Claude Code — B-067: Workflow Canvas, Brief 2
+(interactivity + draw-time connection validation). Made B-066's canvas
+interactive: click a node opens `StepConfigPanel` (B-065, reused
+verbatim, zero changes to its own code), add/remove nodes and draw
+connections locally, real draw-time validation (one-in/one-out + cycle
+rejection via `getOutgoers`) matching React Flow's own documented
+pattern from the earlier investigation's A.2 finding. **A critical
+finding, re-verified against actual code before building, not taken on
+the brief's own stated assumption:** clicking a node did NOT already
+have independent real persistence — `StepConfigPanel`'s param mutators
+only ever updated local state in every existing caller; the real network
+write always came from the *enclosing panel's* own Save button, which
+the canvas page doesn't have. Resolved with a disclosed persistence
+split: static params (their own independent endpoint, B-059) now save
+for real, immediately, on config-panel close; extraction/`input_mapping`
+edits (no independent endpoint — only ever written as part of a full
+structural workflow PATCH, which this brief is forbidden from calling)
+stay local-only, surfaced through the same unsaved-changes banner as
+structural edits — a real consequence of the existing B-063/064
+contract, not a bug. `npm run type-check`/`build` clean.
+`WorkflowsPage.tsx` changed by exactly 2 lines (`git diff --stat`
+confirmed) — two more additive `export`s, zero logic touched. Live-
+verified what's checkable (a real static-param edit persisted correctly
+against the real `b063-live-verify` workflow, with its `updated_at`
+confirmed unaffected, proving the write never touches workflow
+structure; served code confirmed real and deployed; the three
+structural-mutation functions grep-confirmed to contain zero backend
+calls) and disclosed what isn't (a literal draw-and-reject browser
+interaction, same standing no-browser-automation limitation as every
+prior `eami-ui` brief). Full writeup in `BUILT.md`'s `eami-ui` section
+and `BACKLOG.md`'s Workflow Canvas epic header + B-067 entry.
+
+Prior entry, still accurate: 2026-08-13 by Claude Code — B-066: Workflow Canvas, Brief 1
 (`@xyflow/react` integration + read-only rendering). First brief of a
 new, separate epic (distinct from Thread B, which is complete) —
 investigated earlier this session, recommending `@xyflow/react` directly
