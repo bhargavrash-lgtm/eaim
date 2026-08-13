@@ -507,6 +507,19 @@ or prior context suggests otherwise, it is wrong; trust this line.
   explicitly in each brief's plan**, the same way B-059's own plan
   explicitly reasoned through per-hop vs. upfront TOCTOU pinning before
   building anything.
+- **Workflow Canvas ease-of-use principle — a durable design convention,
+  not tied to any single B-ID, same category as the Thread B
+  extensibility principle above.** Every future Workflow Canvas brief
+  must be evaluated for admin usability, not just technical correctness:
+  connector/action selection should be as close to zero-typing/zero-
+  guessing as the underlying data allows (favor real discovery over
+  manual entry wherever it exists), configuration should require the
+  minimum clicks/context-switches needed, and error states must tell the
+  admin exactly what's wrong and how to fix it, not just that something
+  failed. **This applies to every future canvas brief, not just the
+  current one — check against this principle explicitly in each brief's
+  plan**, the same way the extensibility principle above is already
+  checked for every Thread B brief.
 
 ## Last updated
 2026-08-13 by Claude Code — B-067: Workflow Canvas, Brief 2
