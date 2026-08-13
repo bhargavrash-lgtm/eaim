@@ -522,7 +522,51 @@ or prior context suggests otherwise, it is wrong; trust this line.
   checked for every Thread B brief.
 
 ## Last updated
-2026-08-13 by Claude Code — B-068: Workflow Canvas, Brief 3
+2026-08-13 by Claude Code — B-069: Workflow Canvas discontinued, code
+removed. Real hands-on browser testing of the canvas (the first time any
+human, rather than this environment's disclosed code-inspection/
+structural-proof verification substitute, actually clicked through it)
+found multiple genuinely broken interactions that B-066/067/068's own
+"live verification" sections did not catch: edge/node keyboard-deletion
+(`onDelete`/`onNodesDelete`/`onEdgesDelete` were never wired to
+`<ReactFlow>` at all — confirmed by tracing the actual installed
+`@xyflow/system` source, not assumed — and `deleteKeyCode` defaulted to
+`'Backspace'`-only, missing Windows' separate `Delete` key) and step-
+configuration dropdowns not responding when opened from the canvas
+context specifically (root cause never found despite exhaustive tracing
+against the same library source and byte-identical prop-wiring compared
+against the proven-working card editor). Node dragging/repositioning was
+never broken -- it was always explicitly out of scope and disclosed as
+such in every canvas brief's own code comments; the user's report
+correctly separated this from the two real bugs. Rather than keep
+debugging an interaction layer with an unknown remaining bug count in an
+environment with no browser automation to verify fixes, the decision was
+made to remove the epic entirely rather than continue patching it.
+`WorkflowCanvasPage.tsx` deleted, its route removed, `@xyflow/react`
+uninstalled for real (`npm uninstall`, not a hand-edit) -- bundle size
+confirmed to return to the EXACT pre-B-066 baseline (933.80 kB / 256.72
+kB gzipped JS, matching B-066's own recorded "before" measurement to the
+byte), proving genuine removal rather than dead-code elimination of an
+unreferenced import. The 7 additive `export` keywords B-066/067/068 had
+added to `WorkflowsPage.tsx` (`ParamRow`, `StepRow`, `summarizeParams`,
+`StepConfigPanel`, `revalidateExtractionRefs`, `validateAndConvertRows`,
+`saveStaticParams`) were reverted to file-private -- each confirmed via
+grep still used internally by the card editor before touching it, so
+none of the underlying functions/types were deleted, only their
+canvas-only visibility. B-065's card editor -- never broken, never
+dependent on the canvas -- is the sole workflow editor again, re-verified
+end-to-end at its own original rigor (real create, static param, real
+extraction, save, real agent-JWT run, `workflow_run_steps.result` trace)
+with zero regression from the removal. **This is kept as an honest
+record, not erased**: `BACKLOG.md`'s Workflow Canvas epic header is
+marked DISCONTINUED with the same reasoning, its B-066/067/068 DONE
+entries left untouched, and `BUILT.md` gained a closing note rather than
+having those three entries deleted. The Workflow Canvas ease-of-use
+principle below is left in place for any future decision to revisit a
+visual canvas -- the principle itself was never wrong, only this
+particular library integration's actual interaction reliability was.
+
+Prior entry, still accurate: 2026-08-13 by Claude Code — B-068: Workflow Canvas, Brief 3
 (save-time validation, real structural persistence) — closes the
 investigation's own A.2 two-layer requirement: draw-time (B-067) alone
 can't catch a deletion leaving a broken graph, so this brief added the
