@@ -465,7 +465,17 @@ func run() error {
 	mux.HandleFunc("GET /v1/gateway/episodes/{id}", episodeHTTP.GetEpisode)
 	// Workflow execution (B-059): synchronous, blocks until the run
 	// finishes (including any escalation Hold()) -- see workflow/http.go.
-	mux.HandleFunc("POST /v1/gateway/workflows/{workflowId}/run", workflowHTTP.HandleRun)
+	// B-070: wrapped with per-agent-identity rate limiting -- see
+	// workflow/ratelimit.go's doc comment for why this needs its own
+	// bearer-token peek rather than reusing chi-style middleware (this
+	// module has no chi dependency at all; routing is stdlib ServeMux).
+	mux.HandleFunc("POST /v1/gateway/workflows/{workflowId}/run", workflow.RateLimitRunMiddleware(
+		idManager,
+		agentRegistry,
+		cfg.RateLimit.WorkflowRunPerAgent,
+		time.Duration(cfg.RateLimit.WorkflowRunPerAgentWindowSeconds)*time.Second,
+		workflowHTTP.HandleRun,
+	))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

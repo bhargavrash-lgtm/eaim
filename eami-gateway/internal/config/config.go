@@ -11,14 +11,22 @@ import (
 
 // Config is the top-level gateway configuration.
 type Config struct {
-	ListenAddr  string         `yaml:"listen_addr"`
-	PostgresDSN string         `yaml:"postgres_dsn"`
-	Token       TokenConfig    `yaml:"token"`
-	Policy      PolicyConfig   `yaml:"policy"`
-	Proxy       ProxyConfig    `yaml:"proxy"`
-	Approval    ApprovalConfig `yaml:"approval"`
-	API         APIConfig      `yaml:"api"`
-	Log         LogConfig      `yaml:"log"`
+	ListenAddr  string          `yaml:"listen_addr"`
+	PostgresDSN string          `yaml:"postgres_dsn"`
+	Token       TokenConfig     `yaml:"token"`
+	Policy      PolicyConfig    `yaml:"policy"`
+	Proxy       ProxyConfig     `yaml:"proxy"`
+	Approval    ApprovalConfig  `yaml:"approval"`
+	API         APIConfig       `yaml:"api"`
+	Log         LogConfig       `yaml:"log"`
+	RateLimit   RateLimitConfig `yaml:"rate_limit"`
+}
+
+// RateLimitConfig configures the in-memory limiter guarding
+// POST /v1/gateway/workflows/{workflowId}/run (B-070, per-agent-identity).
+type RateLimitConfig struct {
+	WorkflowRunPerAgent              int `yaml:"workflow_run_per_agent"`
+	WorkflowRunPerAgentWindowSeconds int `yaml:"workflow_run_per_agent_window_seconds"`
 }
 
 // TokenConfig controls AI token issuance (ADR-006).
@@ -162,6 +170,10 @@ func Load(path string) (*Config, error) {
 		cfg.API.ToolCredentialsEncryptionKey = v
 	}
 
+	// Rate limit overrides (B-070).
+	setIntEnv(os.Getenv("WORKFLOW_RUN_RATE_LIMIT_PER_AGENT"), &cfg.RateLimit.WorkflowRunPerAgent)
+	setIntEnv(os.Getenv("WORKFLOW_RUN_RATE_LIMIT_WINDOW_SECONDS"), &cfg.RateLimit.WorkflowRunPerAgentWindowSeconds)
+
 	// Policy rules file: default to empty (allows gateway to start without rules)
 	if cfg.Policy.RulesPath == "" {
 		cfg.Policy.RulesPath = "/etc/eami-gateway/rules.yaml"
@@ -187,6 +199,20 @@ var knownPlaceholderSecrets = map[string]bool{
 
 func isPlaceholderSecret(v string) bool {
 	return knownPlaceholderSecrets[strings.ToLower(strings.TrimSpace(v))]
+}
+
+// setIntEnv parses raw as an integer and, on success, overwrites *dst.
+// Empty or unparseable values are silently ignored, leaving the existing
+// default in place -- matches this file's established convention for
+// numeric env overrides.
+func setIntEnv(raw string, dst *int) {
+	if raw == "" {
+		return
+	}
+	var v int
+	if _, err := fmt.Sscanf(raw, "%d", &v); err == nil {
+		*dst = v
+	}
 }
 
 // dsnPassword extracts the password segment from a "scheme://user:password@
@@ -243,6 +269,17 @@ func validate(cfg *Config) error {
 	if cfg.API.BaseURL == "" {
 		cfg.API.BaseURL = "http://eami-api:8081"
 	}
+	// B-070 default: 5 run-attempts/60s per agent. Each run can legitimately
+	// hold resources for up to 10 minutes (a synchronous escalation Hold()),
+	// so the real threat is a bursty retry/runaway-agent loop starting many
+	// overlapping runs, not sustained high-frequency polling -- a tight
+	// per-minute cap addresses that directly.
+	if cfg.RateLimit.WorkflowRunPerAgent == 0 {
+		cfg.RateLimit.WorkflowRunPerAgent = 5
+	}
+	if cfg.RateLimit.WorkflowRunPerAgentWindowSeconds == 0 {
+		cfg.RateLimit.WorkflowRunPerAgentWindowSeconds = 60
+	}
 
 	// Required fields
 	if cfg.PostgresDSN == "" {
@@ -267,6 +304,18 @@ func validate(cfg *Config) error {
 	// Bounds check
 	if cfg.Token.DefaultTTLSeconds < 60 || cfg.Token.DefaultTTLSeconds > 14400 {
 		return fmt.Errorf("config: token.default_ttl_seconds must be between 60 and 14400, got %d", cfg.Token.DefaultTTLSeconds)
+	}
+	// B-070: only 0 is defaulted above (WORKFLOW_RUN_RATE_LIMIT_PER_AGENT=0
+	// means "use the default", matching this file's own convention for
+	// every other zero-valued field) -- an explicit negative is a real
+	// misconfiguration, not "unset", and would make ratelimit.go's Allow
+	// index kept[0] once len(kept) >= limit, true on the very first
+	// request for any negative limit. Reject it outright.
+	if cfg.RateLimit.WorkflowRunPerAgent < 0 {
+		return fmt.Errorf("config: rate_limit.workflow_run_per_agent (WORKFLOW_RUN_RATE_LIMIT_PER_AGENT) must not be negative, got %d", cfg.RateLimit.WorkflowRunPerAgent)
+	}
+	if cfg.RateLimit.WorkflowRunPerAgentWindowSeconds < 0 {
+		return fmt.Errorf("config: rate_limit.workflow_run_per_agent_window_seconds (WORKFLOW_RUN_RATE_LIMIT_WINDOW_SECONDS) must not be negative, got %d", cfg.RateLimit.WorkflowRunPerAgentWindowSeconds)
 	}
 
 	return nil

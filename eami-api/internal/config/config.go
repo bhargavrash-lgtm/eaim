@@ -25,6 +25,28 @@ type Config struct {
 	// closed (returns an error, stores nothing) for any request that
 	// includes credentials until this is set. Generate: openssl rand -hex 32
 	ToolCredentialsEncryptionKey string `yaml:"tool_credentials_encryption_key"`
+
+	// RateLimit (B-070) configures the in-memory limiters guarding
+	// /v1/auth/login (per-IP and per-account) and the first-boot setup
+	// wizard's routes (per-IP). See internal/api/ratelimit.go.
+	RateLimit RateLimitConfig `yaml:"rate_limit"`
+}
+
+// RateLimitConfig holds the fixed-window limiter parameters for B-070's
+// rate-limited routes. All fields have safe defaults (see defaults() below)
+// and are individually overridable via environment variables so an operator
+// never has to accept every default just to change one.
+type RateLimitConfig struct {
+	LoginPerIP              int `yaml:"login_per_ip"`
+	LoginPerIPWindowSeconds int `yaml:"login_per_ip_window_seconds"`
+
+	LoginPerAccount              int `yaml:"login_per_account"`
+	LoginPerAccountWindowSeconds int `yaml:"login_per_account_window_seconds"`
+
+	// Setup* mirrors B-055's original hardcoded setupRateLimiter(10, 15min)
+	// -- same defaults, now overridable instead of fixed in code.
+	Setup              int `yaml:"setup"`
+	SetupWindowSeconds int `yaml:"setup_window_seconds"`
 }
 
 // CollectorConfig tells the API server how to reach the on-prem collector for
@@ -155,6 +177,14 @@ func Load(path string) (*Config, error) {
 		cfg.ToolCredentialsEncryptionKey = v
 	}
 
+	// Rate limit overrides (B-070).
+	setIntEnv(os.Getenv("LOGIN_RATE_LIMIT_PER_IP"), &cfg.RateLimit.LoginPerIP)
+	setIntEnv(os.Getenv("LOGIN_RATE_LIMIT_PER_IP_WINDOW_SECONDS"), &cfg.RateLimit.LoginPerIPWindowSeconds)
+	setIntEnv(os.Getenv("LOGIN_RATE_LIMIT_PER_ACCOUNT"), &cfg.RateLimit.LoginPerAccount)
+	setIntEnv(os.Getenv("LOGIN_RATE_LIMIT_PER_ACCOUNT_WINDOW_SECONDS"), &cfg.RateLimit.LoginPerAccountWindowSeconds)
+	setIntEnv(os.Getenv("SETUP_RATE_LIMIT"), &cfg.RateLimit.Setup)
+	setIntEnv(os.Getenv("SETUP_RATE_LIMIT_WINDOW_SECONDS"), &cfg.RateLimit.SetupWindowSeconds)
+
 	if err := validate(cfg); err != nil {
 		return nil, err
 	}
@@ -220,6 +250,28 @@ func validate(cfg *Config) error {
 	if dsnHasPlaceholderPassword(cfg.Database.DSN) {
 		return fmt.Errorf("config: database DSN password (POSTGRES_PASSWORD/API_DB_PASSWORD) must be set to a real secret, not empty or a known placeholder — see .env.example (generate: openssl rand -base64 24)")
 	}
+	// B-070: a non-positive limit or window would make every single
+	// request to the guarded route instantly rate-limited (limit <= 0) or
+	// panic (ratelimit.go's Allow indexes kept[0] once len(kept) >= limit,
+	// which is immediately true for limit <= 0 on the very first request).
+	// Reject at startup rather than let a typo'd env var reach that code
+	// path at all -- same "fail loudly at boot, not silently at runtime"
+	// convention as every other required value in this function.
+	for _, f := range []struct {
+		name string
+		val  int
+	}{
+		{"LOGIN_RATE_LIMIT_PER_IP", cfg.RateLimit.LoginPerIP},
+		{"LOGIN_RATE_LIMIT_PER_IP_WINDOW_SECONDS", cfg.RateLimit.LoginPerIPWindowSeconds},
+		{"LOGIN_RATE_LIMIT_PER_ACCOUNT", cfg.RateLimit.LoginPerAccount},
+		{"LOGIN_RATE_LIMIT_PER_ACCOUNT_WINDOW_SECONDS", cfg.RateLimit.LoginPerAccountWindowSeconds},
+		{"SETUP_RATE_LIMIT", cfg.RateLimit.Setup},
+		{"SETUP_RATE_LIMIT_WINDOW_SECONDS", cfg.RateLimit.SetupWindowSeconds},
+	} {
+		if f.val <= 0 {
+			return fmt.Errorf("config: %s must be a positive integer, got %d", f.name, f.val)
+		}
+	}
 	return nil
 }
 
@@ -251,5 +303,41 @@ func defaults() *Config {
 		Gateway: GatewayConfig{
 			URL: "http://eami-gateway:8080",
 		},
+		RateLimit: DefaultRateLimitConfig(),
+	}
+}
+
+// DefaultRateLimitConfig returns B-070's default limiter parameters.
+// Exported so test-only constructors (internal/api.NewHandler, which builds
+// a bare &config.Config{} rather than calling Load) can get the same
+// non-zero defaults production does -- a zero-value RateLimitConfig would
+// mean limit=0, which blocks every single request, not "no limiting".
+//
+// Login per-account is tighter (5/5min) than per-IP (20/5min) since one IP
+// legitimately represents many real users behind NAT/a corporate proxy,
+// while one account should never see 20 password attempts in 5 minutes
+// from anyone legitimate. Setup mirrors B-055's original hardcoded values.
+func DefaultRateLimitConfig() RateLimitConfig {
+	return RateLimitConfig{
+		LoginPerIP:                    20,
+		LoginPerIPWindowSeconds:       300,
+		LoginPerAccount:               5,
+		LoginPerAccountWindowSeconds:  300,
+		Setup:                         10,
+		SetupWindowSeconds:            900,
+	}
+}
+
+// setIntEnv parses raw as an integer and, on success, overwrites *dst.
+// Empty or unparseable values are silently ignored, leaving the existing
+// default in place -- matches this file's established convention for
+// numeric env overrides (see the API_LISTEN_PORT handling above).
+func setIntEnv(raw string, dst *int) {
+	if raw == "" {
+		return
+	}
+	var v int
+	if _, err := fmt.Sscanf(raw, "%d", &v); err == nil {
+		*dst = v
 	}
 }

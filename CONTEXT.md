@@ -520,9 +520,47 @@ or prior context suggests otherwise, it is wrong; trust this line.
   current one — check against this principle explicitly in each brief's
   plan**, the same way the extensibility principle above is already
   checked for every Thread B brief.
+- **B-070 (done, 2026-08-17):** rate limiting on `POST /v1/auth/login`
+  (`eami-api`), the setup-wizard bootstrap routes (`eami-api`, extending
+  B-055's pre-existing per-IP limiter rather than duplicating it), and
+  `POST /v1/gateway/workflows/{workflowId}/run` (`eami-gateway`,
+  per-agent-identity). The task brief's own premise ("no rate limiting
+  exists anywhere in this stack") was checked against the code before
+  building and found inaccurate — B-055 already had one; it was reused,
+  not replaced. This brief's own mandatory security review found and fixed
+  three real bugs before shipping: a fail-open bug where a body-read error
+  skipped rate limiting on `/v1/auth/login` entirely even when the full
+  valid request had already been captured; a parser-disagreement bug
+  (`json.Unmarshal` vs. `Login()`'s own streaming `Decoder`) that let one
+  appended byte downgrade the tighter per-account limiter to the looser
+  per-IP one; and a cross-org rate-limit collision in the gateway
+  middleware (keyed on the raw JWT agent name, unique only per-org, instead
+  of the resolved agent's real globally-unique registry ID) — the same
+  class of bug B-042's `LookupByNameAndOrg` fix addressed for token revoke.
+  A shared non-positive-limit panic risk in both modules' `rateLimiter.Allow`
+  (a misconfigured `"0"` env var would crash every request to the guarded
+  route, not disable limiting) was closed with a fail-closed runtime guard
+  plus startup config validation in both `eami-api` and `eami-gateway`.
+  `eami-gateway` has zero chi dependency (stdlib `http.ServeMux`) — the
+  brief's "reuse chi's rate limiter" assumption only held for `eami-api`.
+  ADR-020 Model A (single-instance appliance) confirmed as the reason an
+  in-memory limiter is architecturally correct here, not a distributed one.
+  20 new tests across both modules, `go build`/`vet`/`test` clean in both.
+  Live-verified end-to-end against the real `docker-compose` stack, rebuilt
+  fresh before AND after the security fixes: real 429s with real
+  `Retry-After` headers on all three routes after threshold, real
+  below-threshold success (including a genuine 2-typo-then-correct login),
+  real per-IP cross-account trip, real per-agent workflow-run trip. Full
+  writeup in `BUILT.md`'s `eami-api`/`eami-gateway` sections and
+  `BACKLOG.md`'s B-070 entry.
 
 ## Last updated
-2026-08-13 by Claude Code — B-069: Workflow Canvas discontinued, code
+2026-08-17 by Claude Code — B-070: rate limiting added to login, the setup
+wizard, and workflow-run (see the Active decision thread entry immediately
+above for the full summary, including the three real security-review
+findings fixed before shipping). No other files' scope touched.
+
+Prior entry, still accurate: 2026-08-13 by Claude Code — B-069: Workflow Canvas discontinued, code
 removed. Real hands-on browser testing of the canvas (the first time any
 human, rather than this environment's disclosed code-inspection/
 structural-proof verification substitute, actually clicked through it)

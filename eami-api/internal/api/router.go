@@ -43,7 +43,15 @@ type Server struct {
 	// setupLimiter rate-limits the first-boot setup wizard's token-guessing
 	// surface (bootstrap.go). Defense-in-depth only -- the setup token's own
 	// 256-bit entropy is the primary defense against brute force.
-	setupLimiter *setupRateLimiter
+	setupLimiter *rateLimiter
+
+	// loginIPLimiter/loginAccountLimiter rate-limit POST /v1/auth/login
+	// (B-070) -- see ratelimit_login.go. Both must pass for a login attempt
+	// to reach Login() at all: per-IP alone doesn't stop credential
+	// stuffing spread across many accounts from one IP, and per-account
+	// alone doesn't stop one IP hammering many different accounts.
+	loginIPLimiter      *rateLimiter
+	loginAccountLimiter *rateLimiter
 }
 
 // NewServer creates a Server with the given dependencies. cfg may be nil
@@ -54,7 +62,19 @@ type Server struct {
 func NewServer(queries *store.Queries, authSvc *auth.Service, engine *alerting.Engine, cfg *config.Config) *Server {
 	s := &Server{queries: queries, authSvc: authSvc, alertEngine: engine, cfg: cfg}
 	s.storeIface = &queriesAdapter{q: queries}
-	s.setupLimiter = newSetupRateLimiter(10, 15*time.Minute)
+	// A cfg built directly (not via config.Load(), e.g. bootstrap_test.go's
+	// &config.Config{ServiceKey: "..."}) leaves RateLimit at its zero value
+	// -- limit=0 would mean every single request is instantly rate-limited,
+	// not "unconfigured". Only trust cfg.RateLimit when at least one field
+	// was actually set; an all-zero struct falls back to the same defaults
+	// config.Load() itself would have produced.
+	rl := config.DefaultRateLimitConfig()
+	if cfg != nil && cfg.RateLimit != (config.RateLimitConfig{}) {
+		rl = cfg.RateLimit
+	}
+	s.setupLimiter = newRateLimiter(rl.Setup, time.Duration(rl.SetupWindowSeconds)*time.Second)
+	s.loginIPLimiter = newRateLimiter(rl.LoginPerIP, time.Duration(rl.LoginPerIPWindowSeconds)*time.Second)
+	s.loginAccountLimiter = newRateLimiter(rl.LoginPerAccount, time.Duration(rl.LoginPerAccountWindowSeconds)*time.Second)
 	var gwURL, gwKey string
 	if cfg != nil {
 		gwURL, gwKey = cfg.Gateway.URL, cfg.Gateway.EpisodeReadServiceKey
@@ -84,7 +104,15 @@ func NewServer(queries *store.Queries, authSvc *auth.Service, engine *alerting.E
 // Handlers that reach s.queries will panic and return 500 until the Store
 // interface is fully wired -- see TASK-035.
 func NewHandler(s Store, authSvc *auth.Service) *Server {
-	return &Server{storeIface: s, authSvc: authSvc, cfg: &config.Config{}, setupLimiter: newSetupRateLimiter(10, 15*time.Minute)}
+	rl := config.DefaultRateLimitConfig()
+	return &Server{
+		storeIface:          s,
+		authSvc:             authSvc,
+		cfg:                 &config.Config{RateLimit: rl},
+		setupLimiter:        newRateLimiter(rl.Setup, time.Duration(rl.SetupWindowSeconds)*time.Second),
+		loginIPLimiter:      newRateLimiter(rl.LoginPerIP, time.Duration(rl.LoginPerIPWindowSeconds)*time.Second),
+		loginAccountLimiter: newRateLimiter(rl.LoginPerAccount, time.Duration(rl.LoginPerAccountWindowSeconds)*time.Second),
+	}
 }
 
 // WithGatewayClient overrides the gateway episode proxy client -- a
@@ -133,7 +161,7 @@ func (s *Server) Handler() http.Handler {
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	r.Post("/v1/auth/login", s.Login)
+	r.With(s.rateLimitLogin).Post("/v1/auth/login", s.Login)
 	r.Post("/v1/auth/refresh", s.Refresh)
 
 	// ── First-boot setup wizard (B-053 follow-up, bootstrap.go) ────────────────

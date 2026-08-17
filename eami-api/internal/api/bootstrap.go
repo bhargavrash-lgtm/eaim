@@ -27,10 +27,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -61,65 +59,15 @@ type BootstrapResponse struct {
 }
 
 // ── Rate limiting ────────────────────────────────────────────────────────────
-
-// setupRateLimiter is a small in-memory, per-key fixed-window limiter --
-// deliberately hand-rolled rather than a new dependency (no other rate
-// limiting exists anywhere in this codebase to reuse, and this appliance is
-// always a single process, so an in-memory limiter is the whole story, not
-// a partial one). Defense-in-depth only: the setup token itself is a
-// 256-bit value (appliance/scripts/eami-stack.sh's `openssl rand -hex 32`),
-// so brute force is computationally infeasible regardless of this limiter.
-type setupRateLimiter struct {
-	mu       sync.Mutex
-	attempts map[string][]time.Time
-	limit    int
-	window   time.Duration
-}
-
-func newSetupRateLimiter(limit int, window time.Duration) *setupRateLimiter {
-	return &setupRateLimiter{attempts: make(map[string][]time.Time), limit: limit, window: window}
-}
-
-// Allow records an attempt for key and reports whether it's within the
-// window's limit. Not cryptographically precise (a caller could spoof
-// source IPs on some networks) -- it exists to blunt casual/automated
-// guessing, not as the primary defense, which is the token's entropy.
-func (rl *setupRateLimiter) Allow(key string) bool {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-
-	now := time.Now()
-	cutoff := now.Add(-rl.window)
-	var kept []time.Time
-	for _, t := range rl.attempts[key] {
-		if t.After(cutoff) {
-			kept = append(kept, t)
-		}
-	}
-	if len(kept) >= rl.limit {
-		rl.attempts[key] = kept
-		return false
-	}
-	rl.attempts[key] = append(kept, now)
-	return true
-}
-
-// Known, accepted limitation: attempts never removes a key once created,
-// even after every timestamp under it has expired -- a distinct source IP
-// that hits these routes once leaves a small permanent map entry for the
-// rest of the eami-api process's lifetime. Not fixed here: these are a
-// single appliance's pre-auth setup routes with no realistic reason to see
-// sustained traffic from many thousands of distinct IPs (this isn't a
-// multi-tenant SaaS endpoint), and a correct fix needs a background sweep
-// goroutine -- real added complexity for a bound this narrow-purpose
-// process is very unlikely to ever hit in practice.
-
-func clientKey(r *http.Request) string {
-	if ip := middleware.GetClientIP(r.Context()); ip != "" {
-		return ip
-	}
-	return r.RemoteAddr
-}
+//
+// setupLimiter (s.setupLimiter, wired in router.go) is a *rateLimiter --
+// see ratelimit.go (B-070) for the shared implementation and clientKey.
+// Originally hand-rolled here by B-055 as a bootstrap-only type; extracted
+// and generalized for B-070 so login could reuse the identical design
+// rather than a second bespoke limiter. Defense-in-depth only for these
+// setup routes: the setup token itself is a 256-bit value
+// (appliance/scripts/eami-stack.sh's `openssl rand -hex 32`), so brute
+// force is computationally infeasible regardless of this limiter.
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -151,7 +99,8 @@ func (s *Server) ValidateSetupToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "setup store is not configured")
 		return
 	}
-	if !s.setupLimiter.Allow(clientKey(r)) {
+	if ok, retryAfter := s.setupLimiter.Allow(clientKey(r)); !ok {
+		setRetryAfter(w, retryAfter)
 		writeError(w, http.StatusTooManyRequests, "rate_limited", "too many setup attempts -- try again later")
 		return
 	}
@@ -205,7 +154,8 @@ func (s *Server) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "setup store is not configured")
 		return
 	}
-	if !s.setupLimiter.Allow(clientKey(r)) {
+	if ok, retryAfter := s.setupLimiter.Allow(clientKey(r)); !ok {
+		setRetryAfter(w, retryAfter)
 		writeError(w, http.StatusTooManyRequests, "rate_limited", "too many setup attempts -- try again later")
 		return
 	}
