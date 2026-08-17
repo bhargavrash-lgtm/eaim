@@ -4,11 +4,16 @@
 #   2. docker compose -f docker-compose.prod.yml up -d
 #
 # Differences from docker-compose.yml (dev):
-#   - Uses pinned GHCR image tags instead of local builds
+#   - Uses pinned GHCR image tags instead of local builds (eami-proxy is a
+#     disclosed exception -- see its own comment below)
 #   - eami-ui runs nginx (production target) not Vite dev server
 #   - PostgreSQL port not exposed externally
 #   - No hot-reload volume mount on eami-ui/src
 #   - pprof disabled by default (set GATEWAY_PPROF_ADDR=:6060 to enable)
+#   - TLS-terminated at the edge (B-071, eami-proxy) -- eami-ui/eami-api/
+#     eami-gateway no longer publish ports directly; only eami-proxy's
+#     443/8443 (plus a plaintext 80 that only ever 308-redirects to 443,
+#     never serves content) are reachable from outside the docker network.
 #
 # Image registry: ghcr.io/bhargavrash-lgtm/<service>:v1.0.0
 # To upgrade: update the IMAGE_TAG variable or replace v1.0.0 below.
@@ -142,11 +147,14 @@ services:
       GATEWAY_PPROF_ADDR: ${GATEWAY_PPROF_ADDR:-}
     volumes:
       - gateway_certs:/certs
-    ports:
-      - "8080:8080"
-      - "3000:3000"
-      - "7946:7946"
-      # 6060 (pprof) intentionally not exposed — enable only for profiling sessions
+    # 8080 intentionally not published (B-071) -- eami-proxy's :8443 is the
+    # only path to it now (see eami-proxy service below). 3000/7946 removed
+    # entirely, not just unpublished -- confirmed via repo-wide grep
+    # neither is backed by any real listener (the whole gateway mux,
+    # including MCP SSE, runs on the single port eami-proxy fronts; Serf/
+    # gossip-based multi-node broadcast has zero code references anywhere
+    # in this module, matching B-043's own finding). 6060 (pprof)
+    # intentionally not exposed — enable only for profiling sessions.
     depends_on:
       postgres:
         condition: service_healthy
@@ -182,8 +190,9 @@ services:
       TOOL_CREDENTIALS_ENCRYPTION_KEY: ${TOOL_CREDENTIALS_ENCRYPTION_KEY}
     volumes:
       - api_certs:/certs
-    ports:
-      - "8081:8081"
+    # 8081 intentionally not published (B-071) -- eami-proxy's :443 fronts
+    # all UI/API traffic; eami-collector reaches this over the internal
+    # docker network by service name, not the published port, unaffected.
     depends_on:
       postgres:
         condition: service_healthy
@@ -193,13 +202,60 @@ services:
 
   # ──────────────────────────────────────────────────────────────
   # eami-ui — React web application (nginx, production build)
+  # No longer publishes a port directly (B-071) -- eami-proxy is the only
+  # path to it now. Its own nginx.conf (unmodified) still proxies /v1/*
+  # to eami-api internally, exactly as before.
   # ──────────────────────────────────────────────────────────────
   eami-ui:
     image: ghcr.io/bhargavrash-lgtm/eami-ui:v1.0.1
-    ports:
-      - "80:80"
     depends_on:
       - eami-api
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────
+  # eami-proxy — TLS termination at the edge (B-071)
+  # Fronts eami-ui (:443, which already internally proxies /v1/* to
+  # eami-api -- zero changes to its nginx.conf) and eami-gateway (:8443,
+  # one port serving both the REST control API and MCP SSE). See
+  # docker/caddy/docker-entrypoint.sh for the certificate-selection logic
+  # and BUILT.md's B-071 entry for the full topology reasoning (proxy-only,
+  # not mTLS -- ADR-020 Model A is a single-tenant appliance, not a
+  # zero-trust/multi-tenant environment).
+  #
+  # Built locally rather than a pinned ghcr.io image, a disclosed exception
+  # to this file's own established all-pinned-images convention: this
+  # session has no CI/registry access to publish a real eami-proxy image,
+  # and a compose file referencing a tag that doesn't exist yet isn't
+  # actually runnable or verifiable. Publishing a real pinned image via the
+  # existing CI pipeline is a natural, still-open follow-up (not CI config
+  # this session was authorized to touch).
+  # ──────────────────────────────────────────────────────────────
+  eami-proxy:
+    build:
+      context: ./docker/caddy
+      dockerfile: Dockerfile
+    environment:
+      # Redirect target for :80->:443, and (self-signed default only) the
+      # identifier the internal cert is issued for. Deliberately NOT
+      # derived from the client-supplied Host header (a security-review
+      # finding -- reflecting it would be an open-redirect primitive) --
+      # see eami-stack.sh's own already-correct SERVER_IP detection at the
+      # VM host level (a container can't correctly detect its own host's
+      # real external address from inside its own network namespace).
+      EAMI_PUBLIC_HOST: ${EAMI_PUBLIC_HOST:-localhost}
+    volumes:
+      - caddy_data:/data
+      # Customer-supplied certificate override -- see appliance/README.md's
+      # "TLS certificates" section and eami-stack.sh's EAMI_CERT_DIR.
+      # Read-only: this container never writes certificate material back.
+      - ${EAMI_CERT_DIR:-./certs}/custom:/certs/custom:ro
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8443:8443"
+    depends_on:
+      - eami-ui
+      - eami-gateway
     restart: unless-stopped
 
 volumes:
@@ -208,3 +264,4 @@ volumes:
   collector_data:
   gateway_certs:
   api_certs:
+  caddy_data:

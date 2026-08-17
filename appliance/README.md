@@ -156,6 +156,80 @@ same as above: interrupt GRUB, get a rescue shell, inspect the disk
 manually (`lsblk`, `wipefs -n /dev/vdb`, `blkid`) before either relabeling
 an intentionally-reused disk or attaching the correct empty one.
 
+## TLS certificates (B-071)
+
+The UI, the API, and agent connections to the gateway are TLS-terminated
+at the edge by a new `eami-proxy` container (Caddy) —
+`docker-compose.prod.yml`'s `eami-ui`/`eami-api`/`eami-gateway` no longer
+publish ports directly at all; only `eami-proxy`'s `443` (UI + API) and
+`8443` (gateway) are reachable from outside the appliance's own internal
+docker network (plus a plaintext `80` that only ever issues a redirect to
+`443`, never serves content).
+
+**Not covered by this change, disclosed rather than silently left out:**
+`eami-collector`'s endpoint-agent-facing port (`8888`, where `eami-agent`
+scanners upload their reports) is unaffected by B-071 and remains
+plaintext HTTP, published directly. This traffic crosses the customer's
+own network from potentially many endpoint machines, not just a browser or
+a single admin — a real, still-open gap, tracked with priority as its own
+backlog item (`BACKLOG.md`) rather than folded into this brief, which was
+scoped to the UI/API/gateway surfaces only (per its own task brief's
+CONTRACTS/ACCEPTANCE CRITERIA, neither of which named the collector).
+
+**Default, out of the box: a self-signed certificate, generated
+automatically.** Caddy's own built-in `tls internal` directive handles
+this entirely — no script, no manual step, nothing to configure. The
+generated certificate/CA persists across container restarts (a
+`caddy_data` named volume), so it isn't silently regenerated (and isn't a
+fresh, newly-browser-warned cert) every time the stack restarts. Every
+browser will show a certificate warning the first time it connects — this
+is expected for a self-signed cert on an appliance with no public
+hostname, and is why the alternative below exists.
+
+**To install a real certificate**, if the customer has one (a private CA,
+a certificate for the appliance's actual DNS name, etc.):
+
+1. Copy the certificate and private key onto the appliance's **data disk**
+   (not the OS disk — same reasoning as every other secret in this
+   document) as:
+   ```
+   /data/eami/certs/custom/fullchain.pem
+   /data/eami/certs/custom/privkey.pem
+   ```
+2. Restart the proxy container:
+   ```
+   docker compose -f /opt/eami/docker-compose.prod.yml --env-file /data/eami/.env restart eami-proxy
+   ```
+3. `eami-proxy`'s entrypoint checks for both files on every start and uses
+   them instead of the self-signed default automatically — no other
+   configuration change needed. Removing both files and restarting again
+   reverts to the self-signed default.
+
+`eami-stack.sh` creates `/data/eami/certs/custom/` (empty) on every boot,
+so it's always ready for an admin to drop files into, and writes
+`EAMI_CERT_DIR=/data/eami/certs` into the generated `.env` so
+`docker-compose.prod.yml`'s bind mount resolves to the data disk correctly
+regardless of the current working directory `docker compose` is invoked
+from.
+
+**Not built this round, a reasonable future extension:** a setup-wizard
+UI step to upload a certificate through the browser instead of placing
+files by hand. The file-drop path above is the deliberately simpler v1
+default — matches this appliance's existing "console/file-based
+configuration, no fancy UI" precedent (e.g. `GATEWAY_UI_BASE_URL`
+correction) rather than building new `eami-api` storage/validation
+machinery for something a `scp`+`restart` already solves correctly.
+
+**Also not built this round, explicitly out of scope per B-071's own
+brief:** public CA / Let's Encrypt automation (unrealistic default for the
+common case of an on-prem appliance with no public hostname) and full
+internal mTLS between every service (ADR-020 Model A is a single-tenant,
+single-VM appliance — every service already shares one private docker
+network with no other tenant on it; an attacker who already has
+traffic-sniffing access inside that network has far worse access
+available already, e.g. direct Postgres/volume/secret access — mTLS
+defends against a zero-trust/multi-tenant threat model this product isn't).
+
 ## Known limitations / explicitly out of scope this round
 
 - `.ova` conversion — not attempted; flagged as a fast-follow, per the

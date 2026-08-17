@@ -553,12 +553,63 @@ or prior context suggests otherwise, it is wrong; trust this line.
   real per-IP cross-account trip, real per-agent workflow-run trip. Full
   writeup in `BUILT.md`'s `eami-api`/`eami-gateway` sections and
   `BACKLOG.md`'s B-070 entry.
+- **B-071 (done, 2026-08-17):** TLS termination for the appliance — the
+  last major gap from the original infra audit's "everything communicates
+  in plaintext" finding, closed for the UI/API/gateway surfaces. New
+  `eami-proxy` (Caddy) container terminates TLS at the edge;
+  `eami-ui`/`eami-api`/`eami-gateway` no longer publish ports directly in
+  `docker-compose.prod.yml`. **Topology: proxy-only, not full internal
+  mTLS** — justified against ADR-020 Model A's actual threat model (a
+  single-tenant appliance where an attacker already inside the private
+  docker network has far worse access available regardless; mTLS defends
+  against a zero-trust/multi-tenant model this product isn't).
+  Certificates: self-signed by default (Caddy's built-in `tls internal`,
+  zero custom scripting), customer cert via a data-disk file-drop +
+  restart (matching B-053's precedent, no new UI upload flow built).
+  **A real, scoped exception to B-070's own rate-limiting code, confirmed
+  with the user before touching it:** `eami-api`'s `clientKey()` now
+  trusts `X-Forwarded-For`, narrowly — B-047's original "no single trusted
+  ingress" premise is what this brief's own port-closure changes
+  invalidate, and only `clientKey()` itself changed, not the global
+  middleware every other consumer uses. This brief's own mandatory
+  security review found and fixed four real bugs before shipping: a
+  same-network-container spoofing gap (any other container on the
+  unsegmented compose network, e.g. `eami-collector`, could reach
+  `eami-api` directly and spoof the header — closed with a live-DNS
+  `trustedProxyPeer` check), a Host-header-reflected open redirect on the
+  `:80→:443` block, an ambiguous self-signed-cert SAN for raw-IP access,
+  and an upgrade-survival gap where the new env vars were only written on
+  first boot. Live-verified end-to-end against a real, fully-rebuilt
+  instantiation of the new topology (not the stale pinned images
+  `docker-compose.prod.yml` references): real TLS 1.3 handshakes
+  inspected directly, plaintext ports confirmed refused, self-signed and
+  customer-cert paths both confirmed working, real login/API/agent/
+  workflow-run flows all proven over HTTPS, and B-070's rate limiting
+  confirmed still functioning correctly through the proxy — including a
+  definitive anti-spoofing proof (21 requests, each with a different
+  forged `X-Forwarded-For` and a different account, collapsed into one
+  real bucket and tripped together). **Known gap, disclosed not hidden,
+  logged as its own priority backlog item (B-072):** `eami-collector`'s
+  endpoint-agent-facing port (`8888`) was out of this brief's precise
+  CONTRACTS/ACCEPTANCE CRITERIA scope and remains plaintext — the last
+  genuinely open piece of the original infra audit's finding. Full writeup
+  in `BUILT.md`'s Cross-cutting section and `BACKLOG.md`'s B-071/B-072
+  entries.
 
 ## Last updated
-2026-08-17 by Claude Code — B-070: rate limiting added to login, the setup
-wizard, and workflow-run (see the Active decision thread entry immediately
-above for the full summary, including the three real security-review
-findings fixed before shipping). No other files' scope touched.
+2026-08-17 by Claude Code — B-071: TLS termination added for the UI, API,
+and gateway surfaces via a new Caddy edge proxy (see the Active decision
+thread entry immediately above for the full summary, including the four
+real security-review findings fixed before shipping and the scoped
+exception to B-070's rate-limiting code). B-072 (eami-collector TLS)
+logged as a new, still-open, priority-flagged backlog item — not built
+this session.
+
+Prior entry, still accurate: 2026-08-17 by Claude Code — B-070: rate
+limiting added to login, the setup wizard, and workflow-run (see the
+Active decision thread entry above for the full summary, including the
+three real security-review findings fixed before shipping). No other
+files' scope touched.
 
 Prior entry, still accurate: 2026-08-13 by Claude Code — B-069: Workflow Canvas discontinued, code
 removed. Real hands-on browser testing of the canvas (the first time any

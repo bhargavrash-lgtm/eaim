@@ -148,12 +148,19 @@ func (s *Server) Router() http.Handler { return s.Handler() }
 //   viewer   -- GET requests only
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
-	// eami-api is reachable both via eami-ui's nginx proxy (which sets
-	// X-Forwarded-For/X-Real-IP) and directly on its published port -- there
-	// is no single trusted ingress, so we don't trust caller-supplied IP
-	// headers. ClientIPFromRemoteAddr reads only the TCP connection's actual
-	// source address; read it back with middleware.GetClientIP. Replaces the
-	// deprecated middleware.RealIP (CVE-class header-spoofing risk).
+	// This global middleware deliberately stays conservative even after
+	// B-071 closed off eami-api's directly-published port (eami-proxy/Caddy
+	// is now the only ingress in production): ClientIPFromRemoteAddr reads
+	// only the TCP connection's actual source address, never a
+	// caller-supplied X-Forwarded-For/X-Real-IP header, matching B-047's
+	// original CVE-class-header-spoofing reasoning (replaces the deprecated
+	// middleware.RealIP). Every consumer of middleware.GetClientIP keeps
+	// this stricter behavior. B-070/B-071's rate limiters are the one
+	// narrowly-scoped exception -- ratelimit.go's own clientKey() trusts
+	// X-Forwarded-For directly (not via this middleware), specifically
+	// because eami-proxy is now provably the sole path to the two
+	// rate-limited route groups; see that function's own doc comment for
+	// the full reasoning.
 	r.Use(middleware.ClientIPFromRemoteAddr)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)

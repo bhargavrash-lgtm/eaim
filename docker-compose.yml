@@ -14,9 +14,23 @@
 #   5432  — PostgreSQL
 #   8081  — eami-api       (stub until BE-Policy/BE-Gateway implement it)
 #   8080  — eami-gateway   (stub until BE-Gateway implements it)
-#   3000  — eami-gateway MCP/SSE port
+#   3000  — eami-gateway MCP/SSE port (published but unused -- confirmed via
+#           grep no code ever listens on it; the real gateway mux, incl.
+#           MCP SSE, is served entirely on 8080. Left published here only
+#           for parity with the pre-B-071 dev topology; harmless.)
 #   8888  — eami-collector
-#   5173  — eami-ui        (stub until FE-Dashboard implements it)
+#   5173  — eami-ui        (Vite dev server, hot reload)
+#
+# TLS (B-071) is a production-topology concern only, not added to this
+# file: eami-ui's dev target runs the Vite dev server (port 5173, no
+# nginx), a fundamentally different shape than the nginx production
+# target docker-compose.prod.yml's eami-proxy actually fronts -- forcing
+# the same Caddy topology onto a Vite HMR dev server would add real
+# fragility (proxying its websocket-based hot-reload channel) for a file
+# that isn't what ships to a customer anyway. Same category of documented
+# prod/dev divergence as this file's Postgres port already being exposed
+# here and not in prod. See docker-compose.prod.yml for the real TLS
+# termination (eami-proxy) and BUILT.md's B-071 entry for the full design.
 
 version: '3.9'
 

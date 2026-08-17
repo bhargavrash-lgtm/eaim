@@ -40,6 +40,32 @@ gen_hex_secret() { openssl rand -hex 32; }
 
 if [[ -f "$ENV_FILE" ]]; then
     log "${ENV_FILE} already exists -- reusing existing secrets (not regenerating)"
+    # B-071, a real gap a security review caught: an appliance provisioned
+    # BEFORE this brief shipped has an existing .env with no EAMI_CERT_DIR
+    # key at all -- exactly the "OS image update, .env survives on the data
+    # disk" scenario this script's own header comment exists to protect.
+    # Without this backfill, docker-compose.prod.yml's
+    # ${EAMI_CERT_DIR:-./certs}/custom would silently fall back to a path
+    # relative to /opt/eami (the OS disk, wiped on every image update)
+    # instead of the data disk -- an admin who follows README.md's exact
+    # instructions (drop a cert at /data/eami/certs/custom, restart
+    # eami-proxy) would see no error, but eami-proxy would keep using the
+    # self-signed default because it's bind-mounted from the wrong
+    # directory. Append-only: never touches any existing secret.
+    if ! grep -q '^EAMI_CERT_DIR=' "$ENV_FILE"; then
+        echo "EAMI_CERT_DIR=${DATA_DIR}/certs" >> "$ENV_FILE"
+        log "Backfilled EAMI_CERT_DIR into existing ${ENV_FILE}"
+    fi
+    # Same backfill, same reasoning, for eami-proxy's redirect-target host
+    # (B-071) -- an appliance provisioned before this brief has no
+    # EAMI_PUBLIC_HOST either. Best-effort re-detection here (not a stored
+    # value from first boot) since the appliance's IP could legitimately
+    # differ from whatever it was at original provisioning time.
+    if ! grep -q '^EAMI_PUBLIC_HOST=' "$ENV_FILE"; then
+        BACKFILL_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+        echo "EAMI_PUBLIC_HOST=${BACKFILL_IP:-localhost}" >> "$ENV_FILE"
+        log "Backfilled EAMI_PUBLIC_HOST into existing ${ENV_FILE}"
+    fi
 else
     log "No existing ${ENV_FILE} -- generating secrets for first boot"
 
@@ -70,13 +96,35 @@ GATEWAY_API_SERVICE_KEY=${SERVICE_KEY}
 GATEWAY_EPISODE_READ_SERVICE_KEY=${GATEWAY_EPISODE_READ_SERVICE_KEY}
 GATEWAY_TOKEN_REVOKE_SERVICE_KEY=${GATEWAY_TOKEN_REVOKE_SERVICE_KEY}
 TOOL_CREDENTIALS_ENCRYPTION_KEY=${TOOL_CREDENTIALS_ENCRYPTION_KEY}
-GATEWAY_UI_BASE_URL=http://${SERVER_IP}
+# https, not http (B-071) -- the UI is only ever reachable via eami-proxy's
+# TLS listener now; this value is used solely to build links in Slack
+# approval notifications, not required for the stack to start.
+GATEWAY_UI_BASE_URL=https://${SERVER_IP}
 GATEWAY_APPROVAL_SLACK_WEBHOOK=
 GATEWAY_PPROF_ADDR=
+# B-071: directory eami-proxy checks for a customer-supplied certificate
+# (fullchain.pem/privkey.pem in a "custom" subdirectory) -- see
+# appliance/README.md's "TLS certificates" section. Lives on the data disk
+# like every other secret/cert this script manages, so it survives an OS
+# image update. Falls back to Caddy's own self-signed internal CA
+# automatically if this directory has no cert in it.
+EAMI_CERT_DIR=${DATA_DIR}/certs
+# B-071: eami-proxy's :80 -> :443 redirect target, and (when using the
+# self-signed default) the identifier its internal cert is issued for.
+# Same best-effort IP detection as GATEWAY_UI_BASE_URL above, deliberately
+# NOT derived from any client-supplied value.
+EAMI_PUBLIC_HOST=${SERVER_IP}
 EOF
     chmod 600 "$ENV_FILE"
     log "Wrote ${ENV_FILE} (chmod 600)"
 fi
+
+# Ensure the custom-cert directory exists on every boot, not just first boot
+# -- an admin should be able to drop a certificate in and restart eami-proxy
+# at any time, without needing to delete/regenerate the whole .env file
+# first. mkdir -p is a no-op if it already exists (e.g. every boot after
+# the first).
+mkdir -p "${DATA_DIR}/certs/custom"
 
 log "Starting stack: docker compose -f ${OPT_DIR}/docker-compose.prod.yml --env-file ${ENV_FILE} up -d"
 docker compose -f "${OPT_DIR}/docker-compose.prod.yml" --env-file "$ENV_FILE" up -d
@@ -146,7 +194,11 @@ else
     echo " This appliance has no organization or admin account yet."
     echo " Open the setup wizard in a browser:"
     echo ""
-    echo "   http://${SERVER_IP_DISPLAY}/setup"
+    echo "   https://${SERVER_IP_DISPLAY}/setup"
+    echo ""
+    echo " (TLS-terminated by eami-proxy, B-071 -- your browser will warn"
+    echo " about the self-signed certificate unless a real one has been"
+    echo " installed; see appliance/README.md's \"TLS certificates\" section.)"
     echo ""
     echo " Setup token (single use, expires in 30 minutes):"
     echo ""

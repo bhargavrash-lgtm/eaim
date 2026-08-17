@@ -12,3 +12,10 @@ scripts/migrate.sh text eol=lf
 # Same class of fix, B-053: appliance provisioning/boot scripts, run inside
 # a Debian VM via Packer (upload) and systemd (boot) -- not Windows at all.
 appliance/scripts/*.sh text eol=lf
+
+# Same class of fix, B-071: eami-proxy's entrypoint is COPYed into a Linux
+# (Alpine) Docker image at build time and run as its container ENTRYPOINT
+# -- a CRLF-corrupted shebang line would fail to parse on the Linux side
+# exactly like the bind-mounted scripts above, just via COPY instead of a
+# volume mount.
+docker/caddy/docker-entrypoint.sh text eol=lf

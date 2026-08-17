@@ -1,8 +1,10 @@
 package api
 
 import (
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -86,14 +88,97 @@ func (rl *rateLimiter) Allow(key string) (ok bool, retryAfter time.Duration) {
 // unlikely to ever hit in practice. Same accepted tradeoff B-055 made for
 // setupRateLimiter, now shared by every caller of this type.
 
-// clientKey returns the caller's real TCP source IP -- see Handler()'s
-// middleware.ClientIPFromRemoteAddr comment for why caller-supplied
-// X-Forwarded-For/X-Real-IP headers are never trusted here.
+// clientKey returns the caller's real source IP for rate-limiting purposes.
+//
+// B-071 changed this from B-070's original behavior: Handler()'s own
+// middleware.ClientIPFromRemoteAddr (used for every OTHER purpose in this
+// package) still deliberately ignores X-Forwarded-For/X-Real-IP, per
+// B-047's original reasoning -- "eami-api is reachable both via eami-ui's
+// nginx proxy ... and directly on its published port -- there is no single
+// trusted ingress." B-071's own docker-compose changes are what invalidate
+// that premise specifically for rate limiting: eami-api no longer
+// publishes a port at all, so eami-proxy (Caddy, the new TLS-terminating
+// edge) is the only path a request from OUTSIDE the docker network can
+// take to reach this process.
+//
+// That is not, by itself, enough to trust X-Forwarded-For unconditionally
+// -- a security-review finding caught this: docker-compose.prod.yml has no
+// network segmentation, so any OTHER container on the same compose network
+// (e.g. eami-collector, which has its own real external-facing attack
+// surface via endpoint-agent report ingestion) can still reach
+// eami-api:8081 directly by service name and send an arbitrary
+// X-Forwarded-For value, defeating login/setup-wizard rate limiting via a
+// completely unrelated compromise. trustedProxyPeer (below) closes this:
+// X-Forwarded-For is trusted ONLY when the request's actual TCP peer
+// resolves to eami-proxy's own address, verified per-request via DNS --
+// any other caller (including one on the same internal network) falls
+// back to the strict RemoteAddr-based behavior below, unable to spoof
+// anything.
+//
+// Takes the LAST comma-separated entry in X-Forwarded-For, not the first:
+// Caddy is the outermost hop (nothing sits in front of it), so it always
+// appends the real, directly-observed TCP peer's address as its own entry
+// -- correct whether Caddy replaces or appends to an inbound header, and
+// safe against a malicious client prepending a fake leading entry, since
+// only the trailing entry is ever Caddy's own. Verified empirically during
+// B-071's own live verification, not just asserted -- see BUILT.md.
+//
+// Falls back to middleware.GetClientIP/RemoteAddr when the header is
+// absent, or the peer isn't eami-proxy (e.g. a request reaching eami-api
+// directly over the internal docker network with no proxy in front at
+// all, such as manual `docker compose exec` debugging, or the
+// same-network-container scenario above) -- this fallback path behaves
+// exactly as it did before B-071.
 func clientKey(r *http.Request) string {
+	// Header presence checked BEFORE trustedProxyPeer, not after -- the
+	// latter does a real DNS lookup, and there is nothing to validate
+	// trust for when the header is absent anyway. Every request without
+	// X-Forwarded-For (the common case for any direct-to-eami-api caller,
+	// and every existing test that doesn't specifically exercise this
+	// path) skips the lookup entirely.
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" && trustedProxyPeer(r.RemoteAddr) {
+		parts := strings.Split(xff, ",")
+		last := strings.TrimSpace(parts[len(parts)-1])
+		if last != "" {
+			return last
+		}
+	}
 	if ip := middleware.GetClientIP(r.Context()); ip != "" {
 		return ip
 	}
 	return r.RemoteAddr
+}
+
+// trustedProxyPeer is a package var (not a plain function) so tests can
+// substitute it -- "eami-proxy" only resolves inside the real
+// docker-compose network, never in a Go test sandbox, matching this
+// codebase's established test-seam convention (e.g. eami-gateway's
+// tokenUsageWriteFunc).
+var trustedProxyPeer = defaultTrustedProxyPeer
+
+// defaultTrustedProxyPeer reports whether remoteAddr (an r.RemoteAddr
+// value, "ip:port") is eami-proxy's own container. Resolved fresh via DNS
+// on every call rather than cached: this only guards the low-frequency
+// login/setup-wizard routes (not a hot path), so the extra lookup's cost
+// is negligible, and a fresh lookup can never go stale if eami-proxy is
+// ever recreated with a new address. A resolution failure fails closed
+// (returns false, same as "not eami-proxy") -- if eami-proxy's own name
+// can't even be resolved, there is nothing to trust.
+func defaultTrustedProxyPeer(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	ips, err := net.LookupIP("eami-proxy")
+	if err != nil {
+		return false
+	}
+	for _, ip := range ips {
+		if ip.String() == host {
+			return true
+		}
+	}
+	return false
 }
 
 // setRetryAfter sets the Retry-After header from a rate-limit duration,
