@@ -156,25 +156,23 @@ same as above: interrupt GRUB, get a rescue shell, inspect the disk
 manually (`lsblk`, `wipefs -n /dev/vdb`, `blkid`) before either relabeling
 an intentionally-reused disk or attaching the correct empty one.
 
-## TLS certificates (B-071)
+## TLS certificates (B-071, extended to eami-collector by B-072)
 
-The UI, the API, and agent connections to the gateway are TLS-terminated
-at the edge by a new `eami-proxy` container (Caddy) —
-`docker-compose.prod.yml`'s `eami-ui`/`eami-api`/`eami-gateway` no longer
-publish ports directly at all; only `eami-proxy`'s `443` (UI + API) and
-`8443` (gateway) are reachable from outside the appliance's own internal
-docker network (plus a plaintext `80` that only ever issues a redirect to
-`443`, never serves content).
+The UI, the API, agent connections to the gateway, **and endpoint-agent
+connections to the collector (B-072)** are all TLS-terminated at the edge
+by the `eami-proxy` container (Caddy) — `docker-compose.prod.yml`'s
+`eami-ui`/`eami-api`/`eami-gateway`/`eami-collector` no longer publish
+ports directly at all; only `eami-proxy`'s `443` (UI + API), `8443`
+(gateway), and `8888` (collector) are reachable from outside the
+appliance's own internal docker network (plus a plaintext `80` that only
+ever issues a redirect to `443`, never serves content).
 
-**Not covered by this change, disclosed rather than silently left out:**
-`eami-collector`'s endpoint-agent-facing port (`8888`, where `eami-agent`
-scanners upload their reports) is unaffected by B-071 and remains
-plaintext HTTP, published directly. This traffic crosses the customer's
-own network from potentially many endpoint machines, not just a browser or
-a single admin — a real, still-open gap, tracked with priority as its own
-backlog item (`BACKLOG.md`) rather than folded into this brief, which was
-scoped to the UI/API/gateway surfaces only (per its own task brief's
-CONTRACTS/ACCEPTANCE CRITERIA, neither of which named the collector).
+**B-071's original gap, now closed:** at the time B-071 shipped,
+`eami-collector`'s port `8888` was explicitly out of that brief's scope
+(its own CONTRACTS/ACCEPTANCE CRITERIA named only the UI/API/gateway
+surfaces) and stayed plaintext, disclosed as a priority follow-up. B-072
+closes it — same edge-proxy pattern, same CA, reused rather than a second
+parallel mechanism.
 
 **Default, out of the box: a self-signed certificate, generated
 automatically.** Caddy's own built-in `tls internal` directive handles
@@ -220,8 +218,77 @@ configuration, no fancy UI" precedent (e.g. `GATEWAY_UI_BASE_URL`
 correction) rather than building new `eami-api` storage/validation
 machinery for something a `scp`+`restart` already solves correctly.
 
-**Also not built this round, explicitly out of scope per B-071's own
-brief:** public CA / Let's Encrypt automation (unrealistic default for the
+### TLS certificates for eami-collector — trusting the CA on endpoint agents (B-072)
+
+Unlike the UI/API/gateway (reached by a browser, which can click through a
+self-signed-cert warning once), `eami-collector` is reached by
+`eami-agent` running unattended, non-interactively, on every managed
+endpoint — there's no human present to click through anything, and the
+whole point of an installer-driven rollout is zero-touch deployment across
+many machines. So a real endpoint agent needs to be told to trust the
+appliance's CA *at install time*, not discover a warning at runtime.
+
+**If the collector is using a real, publicly-trusted certificate**
+(customer-supplied, per the section above): nothing to do here — it's
+already in every OS's default trust store, exactly like any other HTTPS
+site.
+
+**If the collector is using the default self-signed certificate**
+(the appliance's out-of-the-box state), extract the CA cert from the
+running `eami-proxy` container once:
+
+```
+docker compose -f /opt/eami/docker-compose.prod.yml --env-file /data/eami/.env \
+  exec eami-proxy cat /data/caddy/pki/authorities/local/root.crt \
+  > eami-collector-ca.pem
+```
+
+Then stage `eami-collector-ca.pem` on each target machine (via whatever
+mechanism already stages the installer package itself — an SCCM package,
+an Intune Win32 app payload, a login script, a shared network path) and
+pass its **path** as an extra installer parameter alongside the existing
+`COLLECTOR_URL`/`COLLECTOR_API_KEY` ones:
+
+- **Windows (MSI):** `COLLECTOR_CA_CERT_PATH=C:\Staging\eami-collector-ca.pem`
+- **Linux (.deb/.rpm):** `EAMI_COLLECTOR_CA_CERT_PATH=/tmp/eami-collector-ca.pem`
+- **macOS (.pkg):** `EAMI_COLLECTOR_CA_CERT_PATH=/tmp/eami-collector-ca.pem`
+  (or Jamf script parameter `$6`)
+
+See `eami-agent/installer/README.md` for the full per-platform command
+examples. The value is a **file path**, never the certificate content
+itself, passed directly through an installer property/env var — embedding
+multi-line PEM content through an `msiexec`/shell command line has its own
+real quoting and length fragility this design deliberately avoids.
+
+**Why this is safe to distribute this way, not a weaker trust model than
+the browser-facing default:** the CA cert is the appliance's own *public*
+key material — extracting and staging it doesn't expose anything an
+attacker could use to impersonate the collector or decrypt traffic (that
+would require the *private* key, which never leaves the `caddy_data`
+volume). Distributing it via the same channel that already carries the
+API key (SCCM/Intune/GPO, all already trusted to deliver credentials to
+managed endpoints) is consistent with how those tools are already used in
+this deployment model.
+
+### eami-collector authentication — still one shared key (B-074, deferred)
+
+B-072 closes the *transport* gap (traffic is now encrypted) but does not
+change `eami-collector`'s authentication model: every endpoint agent still
+presents the same single, static `COLLECTOR_API_KEY` value. TLS means that
+key (and the report content it protects) can no longer be read off the
+wire by passive network access — but anyone who obtains the key through
+*any other* means (a compromised endpoint's own local config/registry, an
+insider) can still impersonate any other agent to the collector.
+Investigated as part of B-072: `eami-collector` already has a *dormant*
+DB-backed per-key mechanism (`api_keys` table, `internal/api/
+middleware.go`), but it has no agent-identity linkage in its schema (just
+a free-text label) and no real key-minting mechanism (`RegisterKey` has
+zero callers anywhere) — making it real needs its own scoping pass, not a
+config flip. Logged as **B-074**, a clearly-scoped follow-up, not silently
+skipped — see `BACKLOG.md`.
+
+**Also not built this round, explicitly out of scope per B-071/B-072's own
+briefs:** public CA / Let's Encrypt automation (unrealistic default for the
 common case of an on-prem appliance with no public hostname) and full
 internal mTLS between every service (ADR-020 Model A is a single-tenant,
 single-VM appliance — every service already shares one private docker

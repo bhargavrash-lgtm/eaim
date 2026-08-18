@@ -1,5 +1,6 @@
 // Package config loads agent configuration from YAML, with Windows registry
-// fallback for collector.url and collector.api_key (ADR-014).
+// fallback for collector.url and collector.api_key (ADR-014), extended by
+// B-072 to also cover collector.ca_cert_path.
 package config
 
 import (
@@ -28,6 +29,14 @@ type CollectorConfig struct {
 	URL            string `yaml:"url"`
 	APIKey         string `yaml:"api_key"`
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
+	// CACertPath is the path to a PEM file containing the CA the collector's
+	// TLS certificate was issued by (B-072). Only needed when that CA isn't
+	// already in the OS trust store -- the appliance's default self-signed
+	// cert (eami-proxy's Caddy, B-071's tls internal) is the case this
+	// exists for. Empty means "use the OS default trust store," identical
+	// to this field not existing at all -- a customer who installs a
+	// real, publicly-trusted certificate on eami-proxy needs nothing here.
+	CACertPath string `yaml:"ca_cert_path"`
 }
 
 // DetectionConfig controls scanner behaviour.
@@ -129,6 +138,13 @@ func applyRegistry(cfg *Config, reg RegistryReader) error {
 			return fmt.Errorf("read CollectorAPIKey: %w", err)
 		}
 		cfg.Collector.APIKey = val
+	}
+	if cfg.Collector.CACertPath == "" {
+		val, err := reg.ReadString(`SOFTWARE\EAMI\Agent`, "CollectorCACertPath")
+		if err != nil {
+			return fmt.Errorf("read CollectorCACertPath: %w", err)
+		}
+		cfg.Collector.CACertPath = val
 	}
 	return nil
 }

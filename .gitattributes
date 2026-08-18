@@ -19,3 +19,15 @@ appliance/scripts/*.sh text eol=lf
 # exactly like the bind-mounted scripts above, just via COPY instead of a
 # volume mount.
 docker/caddy/docker-entrypoint.sh text eol=lf
+
+# Same class of fix, B-072: run as the .deb/.rpm/.pkg postinstall script on
+# real Linux/macOS endpoints (dpkg/rpm/macOS Installer invoke these
+# directly as maintainer/postinstall scripts) -- substantially modified by
+# B-072 to add real ownership/permission-bit checks on the CA-trust
+# staging path, security-relevant logic that must not silently break on a
+# Windows checkout. Not previously covered (a pre-existing repo-wide gap,
+# same class B-021 tracks) -- added here because this brief materially
+# changed these two files, not as a general fix for every script B-021
+# still covers.
+eami-agent/installer/linux/postinstall.sh text eol=lf
+eami-agent/installer/macos/postinstall text eol=lf

@@ -588,22 +588,86 @@ or prior context suggests otherwise, it is wrong; trust this line.
   confirmed still functioning correctly through the proxy — including a
   definitive anti-spoofing proof (21 requests, each with a different
   forged `X-Forwarded-For` and a different account, collapsed into one
-  real bucket and tripped together). **Known gap, disclosed not hidden,
-  logged as its own priority backlog item (B-072):** `eami-collector`'s
+  real bucket and tripped together). **Known gap at the time, closed by
+  B-072 (2026-08-18, see immediately below):** `eami-collector`'s
   endpoint-agent-facing port (`8888`) was out of this brief's precise
-  CONTRACTS/ACCEPTANCE CRITERIA scope and remains plaintext — the last
-  genuinely open piece of the original infra audit's finding. Full writeup
-  in `BUILT.md`'s Cross-cutting section and `BACKLOG.md`'s B-071/B-072
-  entries.
+  CONTRACTS/ACCEPTANCE CRITERIA scope and remained plaintext. Full writeup
+  in `BUILT.md`'s Cross-cutting section and `BACKLOG.md`'s B-071 entry.
+- **B-072 (done, 2026-08-18):** TLS for `eami-collector`'s endpoint-agent-
+  facing traffic, closing B-071's own disclosed gap — the last surface
+  named in the original infra audit's "everything communicates in
+  plaintext" finding. Extended `eami-proxy` with a 4th Caddy site block
+  (`:8888` → `eami-collector:8888`) rather than building native Go TLS
+  into the collector, which already had dormant, unused `TLSCertPath`/
+  `TLSKeyPath` fields — one reused CA/trust mechanism, not a second
+  parallel one. **The real usability constraint this brief was mostly
+  about:** an endpoint agent installed unattended via B-053's installers
+  has no human present to click through a cert warning, so trusting the
+  appliance's self-signed CA had to happen at install time — closed by
+  extending `eami-agent`'s existing ADR-014 Windows-registry-fallback
+  pattern with a third value (`CollectorCACertPath`, mirroring
+  `CollectorURL`/`CollectorAPIKey` exactly) and a matching install-time
+  parameter on Linux/macOS, carrying a **file path** (never inline PEM
+  content — real quoting/length fragility avoided). This brief's own
+  mandatory security review found and fixed four real bugs: **a genuine
+  B-ID process mistake** (built under a freshly-minted "B-073" before the
+  reviewer caught that `BACKLOG.md` already reserved B-072 for this exact
+  scope, from this session's own prior work — renamed throughout, exactly
+  the failure mode the user's standing B-ID feedback memory exists to
+  prevent, since the reservation predated this session's roadmap
+  conversation); a real pre-planting/TOCTOU vulnerability from
+  recommending `/tmp` (world-writable) as the CA-staging path, closed with
+  a real root-ownership + bitwise (not numeric-magnitude) permission-bit
+  check in both Unix installer scripts before trusting any staged file; a
+  missing persistent-copy step on the Windows MSI (unlike Linux/macOS),
+  which would have silently broken CA trust once a deployment tool's own
+  staging cache was cleaned up post-install; and a misleading copy-pasted
+  comment. **A second, self-inflicted bug in the Windows fix above, caught
+  only by literally installing the built MSI and reading the registry back
+  — not by re-reading the XML:** a `SetProperty` scheduled
+  `Before="CostFinalize"` referenced `[INSTALLFOLDER]` before that
+  directory was actually resolved to a real path, producing a broken
+  relative registry value even though the real file copy (correctly
+  scheduled) had succeeded. Fixed, rebuilt, reinstalled, reconfirmed live.
+  **Per-agent authentication investigated and deliberately deferred, not
+  silently skipped** — `api_keys`' schema has no agent-identity linkage,
+  no key-minting mechanism exists today, and a real distribution-logistics
+  decision is needed that would change today's zero-touch install
+  simplicity; logged as new backlog item B-073, confirmed with the user
+  before scoping it out of this brief. Live-verified end-to-end including
+  a **real Windows MSI install** (not just Go unit tests): real TLS 1.3
+  handshake inspected directly on the collector's new port for both the
+  self-signed default and a customer-cert override; a real agent installed
+  silently via the actual documented `msiexec` command connected and
+  uploaded a report with **zero manual certificate approval**, confirmed
+  by the collector's own logs (`"report buffered"`/`202`) from the live
+  Windows machine; a live negative control (clearing the CA-trust registry
+  value) produced zero requests reaching the collector at all — true
+  fail-closed, not a silent plaintext fallback — with restoration
+  immediately resuming successful reporting. Confirmed the collector's own
+  ingestion logic is unaffected (a separate, pre-existing, unrelated gap
+  in `docker-compose.prod.yml`'s collector→`eami-api` forwarder auth
+  caused an unrelated downstream `401`, not on the path this brief
+  changed). Full writeup in `BUILT.md`'s Cross-cutting section and
+  `BACKLOG.md`'s B-072/B-073 entries.
 
 ## Last updated
-2026-08-17 by Claude Code — B-071: TLS termination added for the UI, API,
-and gateway surfaces via a new Caddy edge proxy (see the Active decision
-thread entry immediately above for the full summary, including the four
-real security-review findings fixed before shipping and the scoped
-exception to B-070's rate-limiting code). B-072 (eami-collector TLS)
-logged as a new, still-open, priority-flagged backlog item — not built
-this session.
+2026-08-18 by Claude Code — B-072: TLS added for eami-collector's
+endpoint-agent-facing traffic via eami-proxy's 4th site block, plus
+install-time CA-trust distribution through eami-agent's existing
+registry-fallback pattern (see the Active decision thread entry
+immediately above for the full summary, including the B-ID process
+mistake caught and fixed mid-session, the four security-review findings,
+and the self-inflicted WiX sequencing bug caught only by a real live
+install). B-073 (per-agent authentication) logged as a new, still-open,
+clearly-scoped backlog item — investigated and deliberately deferred, not
+built this session.
+
+Prior entry, still accurate: 2026-08-17 by Claude Code — B-071: TLS
+termination added for the UI, API, and gateway surfaces via a new Caddy
+edge proxy (see BUILT.md's B-071 entry for the full summary, including the
+four real security-review findings fixed before shipping and the scoped
+exception to B-070's rate-limiting code).
 
 Prior entry, still accurate: 2026-08-17 by Claude Code — B-070: rate
 limiting added to login, the setup wizard, and workflow-run (see the

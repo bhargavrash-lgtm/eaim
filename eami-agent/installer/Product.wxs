@@ -25,6 +25,19 @@
   msiexec /i eami-agent-1.0.0-windows-amd64.msi /qn
       COLLECTOR_URL=https://collector.corp.internal:8888
       COLLECTOR_API_KEY=eami_k_your_key_here
+      COLLECTOR_CA_CERT_PATH=C:\Staging\eami-collector-ca.pem
+
+  COLLECTOR_CA_CERT_PATH (B-072, optional): only needed when the
+  collector's TLS certificate is the appliance's own default self-signed
+  one (eami-proxy's Caddy, B-071/B-072) rather than a real,
+  publicly-trusted certificate. Points at a CA cert file the deployment
+  tool (SCCM/Intune package, a login script, etc.) has ALREADY staged on
+  this machine before/alongside this install command — the property
+  carries a path, not the certificate content itself, avoiding the real
+  quoting/length fragility of trying to pass multi-line PEM content
+  through an msiexec command line. See appliance/README.md's "TLS
+  certificates for eami-collector" section for how to extract the
+  appliance's CA cert and get it staged.
 
   UNINSTALL
   =========
@@ -37,11 +50,12 @@
   REGISTRY KEYS WRITTEN
   =====================
   HKLM\SOFTWARE\EAMI\Agent\
-    CollectorUrl       (REG_SZ)    value of COLLECTOR_URL property
-    CollectorApiKey    (REG_SZ)    value of COLLECTOR_API_KEY property
-    InstallDir         (REG_SZ)    resolved install directory
-    Version            (REG_SZ)    MSI version string
-    IntervalSeconds    (REG_DWORD) scan interval (default 300)
+    CollectorUrl        (REG_SZ)    value of COLLECTOR_URL property
+    CollectorApiKey     (REG_SZ)    value of COLLECTOR_API_KEY property
+    CollectorCACertPath (REG_SZ)    value of COLLECTOR_CA_CERT_PATH property (B-072, optional)
+    InstallDir          (REG_SZ)    resolved install directory
+    Version             (REG_SZ)    MSI version string
+    IntervalSeconds     (REG_DWORD) scan interval (default 300)
 
   WINDOWS SERVICE
   ===============
@@ -138,6 +152,33 @@
     -->
     <Property Id="COLLECTOR_URL" Value="http://localhost:8888" Secure="yes" />
     <Property Id="COLLECTOR_API_KEY" Secure="yes" />
+    <!-- B-072: optional — only needed for the appliance's default
+         self-signed collector cert. Empty by default; see the top comment
+         block for what this property expects. -->
+    <Property Id="COLLECTOR_CA_CERT_PATH" Secure="yes" />
+
+    <!-- B-072: resolves to a fixed path under INSTALLFOLDER only when a
+         source cert was actually supplied, otherwise stays unset (empty
+         string when referenced as [CA_CERT_REGISTRY_VALUE]) — this is
+         what CollectorCACertPath's RegistryValue above actually writes.
+
+         Scheduled AFTER CostFinalize, not before — a real bug this
+         brief's own live installer test caught (not assumed correct from
+         reading the XML alone): CostFinalize is the standard action that
+         actually resolves Directory-table entries like INSTALLFOLDER into
+         real paths. An earlier version of this file scheduled this
+         Before="CostFinalize", so [INSTALLFOLDER] was still empty/
+         unresolved when this property was set, producing a broken
+         relative registry value ("collector-ca.pem" with no directory
+         prefix) even though CopyCollectorCACert (below, scheduled well
+         after InstallFiles) copied the actual file to the correct
+         location successfully. Caught by literally installing the MSI and
+         reading the resulting registry value back, not by inspection. -->
+    <SetProperty
+      Id="CA_CERT_REGISTRY_VALUE"
+      Value="[INSTALLFOLDER]collector-ca.pem"
+      After="CostFinalize"
+      Condition="COLLECTOR_CA_CERT_PATH" />
 
     <!--
       Directory layout: C:\Program Files\EAMI\Agent\
@@ -230,6 +271,28 @@
             Value="[COLLECTOR_API_KEY]"
             Type="string" />
 
+          <!-- B-072: optional — points at a PERMANENT copy of the CA
+               cert under INSTALLFOLDER, not the original staged path
+               ([COLLECTOR_CA_CERT_PATH] itself — see CopyCollectorCACert
+               below, which makes that copy). A real gap this brief's own
+               mandatory security review caught: unlike the Linux/macOS
+               postinstall scripts (which already copy into /etc/eami),
+               an earlier version of this file pointed the registry
+               straight at the original staged path — SCCM/Intune
+               commonly clean up their staging/download cache after a
+               package finishes installing, which would silently break
+               CA trust (falling back to the OS default store, failing
+               every handshake against the self-signed cert) the next
+               time the agent restarted and that path no longer existed.
+               Empty when COLLECTOR_CA_CERT_PATH was never set, which
+               config.applyRegistry (eami-agent side) treats identically
+               to the registry value being entirely absent — "use the OS
+               default trust store." -->
+          <RegistryValue
+            Name="CollectorCACertPath"
+            Value="[CA_CERT_REGISTRY_VALUE]"
+            Type="string" />
+
           <!-- Absolute install path - useful for diagnostic scripts -->
           <RegistryValue
             Name="InstallDir"
@@ -268,6 +331,33 @@
       of the new version doesn't unregister and immediately re-register on
       every upgrade.
     -->
+    <!--
+      Copies the CA cert from its staged location ([COLLECTOR_CA_CERT_PATH],
+      wherever the deployment tool placed it) into a permanent copy under
+      INSTALLFOLDER (B-072) — see CollectorCACertPath's RegistryValue
+      comment above for why this exists: without it, the registry would
+      point at a path a deployment tool's own staging cleanup could later
+      delete, silently breaking CA trust on next agent restart. Runs
+      unconditionally; the underlying cmd.exe IF guards the no-cert-supplied
+      case internally rather than needing a second WiX-level Condition here
+      (COLLECTOR_CA_CERT_PATH may contain spaces, and quoting an empty
+      property value inside an ExeCommand's own quotes still parses
+      correctly as an empty argument, verified by this brief's own real
+      `wix build` + live install test — not assumed).
+      Impersonate="no": writes into Program Files, needs elevated context,
+      same reason every other deferred action in this file runs this way.
+      Return="check": a real copy failure (e.g. a bad path or a source file
+      that genuinely doesn't exist) should surface as an install error, not
+      silently leave TLS trust broken with no diagnostic.
+    -->
+    <CustomAction
+      Id="CopyCollectorCACert"
+      Directory="INSTALLFOLDER"
+      ExeCommand='cmd.exe /c if not "[COLLECTOR_CA_CERT_PATH]"=="" copy /Y "[COLLECTOR_CA_CERT_PATH]" "[INSTALLFOLDER]collector-ca.pem"'
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
+
     <CustomAction
       Id="RegisterNativeMessaging"
       FileRef="AgentExe"
@@ -285,7 +375,8 @@
       Return="ignore" />
 
     <InstallExecuteSequence>
-      <Custom Action="RegisterNativeMessaging" After="InstallFiles" Condition="NOT Installed" />
+      <Custom Action="CopyCollectorCACert" After="InstallFiles" Condition="NOT Installed" />
+      <Custom Action="RegisterNativeMessaging" After="CopyCollectorCACert" Condition="NOT Installed" />
       <Custom Action="UnregisterNativeMessaging" Before="RemoveFiles" Condition="Installed AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
 

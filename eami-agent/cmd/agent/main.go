@@ -189,11 +189,27 @@ func main() {
 // runLoop executes the scan-then-wait loop until ctx is cancelled.
 // It is called both from interactive mode and from the Windows service handler.
 func runLoop(ctx context.Context, cfg *config.Config, log *slog.Logger) {
-	sender := collector.New(collector.Config{
+	sender, err := collector.New(collector.Config{
 		URL:            cfg.Collector.URL,
 		APIKey:         cfg.Collector.APIKey,
 		TimeoutSeconds: cfg.Collector.TimeoutSeconds,
+		CACertPath:     cfg.Collector.CACertPath,
 	})
+	if err != nil {
+		// A misconfigured CA cert path must be loud, not fatal -- this loop
+		// runs as a long-lived background service; crashing it over a bad
+		// trust-anchor file would crash-loop under the service manager.
+		// Falling back to the OS default trust store means every report
+		// send will fail its own TLS handshake (a clear, per-attempt log
+		// line from Send() itself) until the admin fixes the path, rather
+		// than the agent silently never starting at all.
+		log.Error("collector sender: CA cert misconfigured, falling back to OS trust store", "ca_cert_path", cfg.Collector.CACertPath, "err", err)
+		sender, _ = collector.New(collector.Config{
+			URL:            cfg.Collector.URL,
+			APIKey:         cfg.Collector.APIKey,
+			TimeoutSeconds: cfg.Collector.TimeoutSeconds,
+		})
+	}
 
 	// Derive agentID once; used for remote config polling.
 	agentID := cfg.Agent.ID
@@ -292,11 +308,28 @@ func runNativeMessagingHost(cfg *config.Config, log *slog.Logger) {
 		}
 	}
 
-	sender := collector.New(collector.Config{
+	sender, err := collector.New(collector.Config{
 		URL:            cfg.Collector.URL,
 		APIKey:         cfg.Collector.APIKey,
 		TimeoutSeconds: cfg.Collector.TimeoutSeconds,
+		CACertPath:     cfg.Collector.CACertPath,
 	})
+	if err != nil {
+		// A misconfigured CA cert path must be loud, not fatal -- this is
+		// invoked fresh by the browser on every native-messaging
+		// connection (see this function's own doc comment: short-lived,
+		// exits when the session ends, no long-running state), so a hard
+		// exit here would just mean the browser sees the connection fail
+		// with no diagnostic beyond that. Falling back to the OS default
+		// trust store means the eventual report send fails its own TLS
+		// handshake with a clear, logged error instead.
+		log.Error("collector sender: CA cert misconfigured, falling back to OS trust store", "ca_cert_path", cfg.Collector.CACertPath, "err", err)
+		sender, _ = collector.New(collector.Config{
+			URL:            cfg.Collector.URL,
+			APIKey:         cfg.Collector.APIKey,
+			TimeoutSeconds: cfg.Collector.TimeoutSeconds,
+		})
+	}
 
 	agentID := cfg.Agent.ID
 	hostname, _ := os.Hostname()

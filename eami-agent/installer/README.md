@@ -28,6 +28,7 @@ Platform-specific installers for the EAMI endpoint agent. All platforms share th
 |---|---|---|
 | `CollectorUrl` | REG_SZ | Value of `COLLECTOR_URL` property |
 | `CollectorApiKey` | REG_SZ | Value of `COLLECTOR_API_KEY` property |
+| `CollectorCACertPath` | REG_SZ | Value of `COLLECTOR_CA_CERT_PATH` property (B-072, optional — see below) |
 | `InstallDir` | REG_SZ | Resolved install path |
 | `Version` | REG_SZ | MSI version string |
 | `IntervalSeconds` | REG_DWORD | `300` (scan interval, default) |
@@ -60,6 +61,25 @@ msiexec /i eami-agent-1.0.0-windows-amd64.msi /qn ^
     COLLECTOR_URL=https://collector.corp.internal:8888 ^
     COLLECTOR_API_KEY=eami_k_your_key_here
 ```
+
+**If the collector is using its default self-signed certificate** (the
+appliance's out-of-the-box state, B-071/B-072 — not needed if a real,
+publicly-trusted certificate was installed on it), also stage the
+appliance's CA cert file on the target machine first and pass its path:
+
+```cmd
+msiexec /i eami-agent-1.0.0-windows-amd64.msi /qn ^
+    COLLECTOR_URL=https://collector.corp.internal:8888 ^
+    COLLECTOR_API_KEY=eami_k_your_key_here ^
+    COLLECTOR_CA_CERT_PATH=C:\Staging\eami-collector-ca.pem
+```
+
+`COLLECTOR_CA_CERT_PATH` carries a **path**, not the certificate content —
+the deployment tool (SCCM package, Intune Win32 app payload, a login
+script) needs to place the file on the machine before or alongside this
+install command runs, the same way it already stages the MSI itself. See
+`appliance/README.md`'s "TLS certificates for eami-collector" section for
+how to extract the appliance's CA cert.
 
 ### Silent uninstall
 
@@ -141,6 +161,14 @@ sudo installer -pkg eami-agent-1.0.0-darwin-amd64.pkg -target /
 # Install with config injected at install time
 sudo EAMI_COLLECTOR_URL=https://collector.corp.internal:8888 \
      EAMI_COLLECTOR_API_KEY=eami_k_your_key_here \
+     installer -pkg eami-agent-1.0.0-darwin-amd64.pkg -target /
+
+# If the collector is using its default self-signed certificate
+# (B-071/B-072 -- not needed for a real, publicly-trusted certificate),
+# also stage its CA cert on the machine first and pass its path:
+sudo EAMI_COLLECTOR_URL=https://collector.corp.internal:8888 \
+     EAMI_COLLECTOR_API_KEY=eami_k_your_key_here \
+     EAMI_COLLECTOR_CA_CERT_PATH=/tmp/eami-collector-ca.pem \
      installer -pkg eami-agent-1.0.0-darwin-amd64.pkg -target /
 ```
 
@@ -228,6 +256,14 @@ Output: `dist/eami-agent_1.0.0_amd64.deb` and `dist/eami-agent-1.0.0.x86_64.rpm`
 # Install with config from env vars (postinstall script reads these)
 sudo EAMI_COLLECTOR_URL=https://collector.corp.internal:8888 \
      EAMI_COLLECTOR_API_KEY=eami_k_your_key_here \
+     dpkg -i eami-agent_1.0.0_amd64.deb
+
+# If the collector is using its default self-signed certificate
+# (B-071/B-072), also stage its CA cert on the machine first and pass its
+# path:
+sudo EAMI_COLLECTOR_URL=https://collector.corp.internal:8888 \
+     EAMI_COLLECTOR_API_KEY=eami_k_your_key_here \
+     EAMI_COLLECTOR_CA_CERT_PATH=/tmp/eami-collector-ca.pem \
      dpkg -i eami-agent_1.0.0_amd64.deb
 
 # Verify service started

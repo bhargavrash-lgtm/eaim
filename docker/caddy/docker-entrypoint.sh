@@ -44,6 +44,7 @@ if [ -f "${CERT_DIR}/fullchain.pem" ] && [ -f "${CERT_DIR}/privkey.pem" ]; then
 	# presents whichever cert is configured either way.
 	SITE_443=":443"
 	SITE_8443=":8443"
+	SITE_8888=":8888"
 else
 	echo "[eami-proxy] no customer certificate found at ${CERT_DIR} -- using Caddy's internal self-signed CA (tls internal)"
 	TLS_DIRECTIVE="tls internal"
@@ -57,9 +58,10 @@ else
 	# gives Caddy a concrete IP/name to issue the internal cert for.
 	SITE_443="${PUBLIC_HOST}:443"
 	SITE_8443="${PUBLIC_HOST}:8443"
+	SITE_8888="${PUBLIC_HOST}:8888"
 fi
 
-# Two site blocks, matching the two real backend targets:
+# Three site blocks, matching the three real backend targets:
 #   :443  -> eami-ui (the SPA + its own existing nginx proxy for /v1/* to
 #            eami-api -- confirmed unmodified, zero changes needed there)
 #   :8443 -> eami-gateway (a single port serving both the REST control API
@@ -67,6 +69,14 @@ fi
 #            registration there is genuinely only one http.Server/listener,
 #            not two; the old published 3000/7946 ports were dead, backed
 #            by no listener at all, confirmed via repo-wide grep)
+#   :8888 -> eami-collector (B-072) -- endpoint-agent report ingestion,
+#            reachable across the customer's whole internal network (not
+#            confined to the appliance's own docker network the way the
+#            other three surfaces are), the gap B-071 explicitly disclosed
+#            as still open. eami-collector's own dormant TLSCertPath/
+#            TLSKeyPath fields (cmd/collector/main.go) stay unused -- this
+#            reuses the exact same edge-termination pattern as the other
+#            three, one CA/trust mechanism instead of a second parallel one.
 #
 # `admin off`: disables Caddy's admin API (unauthenticated by default,
 # would otherwise be reachable on 2019 inside the container) -- nothing in
@@ -109,6 +119,11 @@ ${SITE_443} {
 ${SITE_8443} {
 	${TLS_DIRECTIVE}
 	reverse_proxy eami-gateway:8080
+}
+
+${SITE_8888} {
+	${TLS_DIRECTIVE}
+	reverse_proxy eami-collector:8888
 }
 EOF
 

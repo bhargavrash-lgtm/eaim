@@ -75,8 +75,9 @@ detection:
 func TestLoad_RegistryFallback_URLEmpty(t *testing.T) {
 	reg := &mockRegistry{
 		values: map[string]string{
-			`SOFTWARE\EAMI\Agent/CollectorURL`:    "http://registry-collector:8888",
-			`SOFTWARE\EAMI\Agent/CollectorAPIKey`: "reg-api-key",
+			`SOFTWARE\EAMI\Agent/CollectorURL`:        "http://registry-collector:8888",
+			`SOFTWARE\EAMI\Agent/CollectorAPIKey`:     "reg-api-key",
+			`SOFTWARE\EAMI\Agent/CollectorCACertPath`: `C:\ProgramData\EAMI\collector-ca.pem`,
 		},
 	}
 
@@ -89,6 +90,31 @@ func TestLoad_RegistryFallback_URLEmpty(t *testing.T) {
 	}
 	if cfg.Collector.APIKey != "reg-api-key" {
 		t.Errorf("APIKey from registry: got %q", cfg.Collector.APIKey)
+	}
+	if cfg.Collector.CACertPath != `C:\ProgramData\EAMI\collector-ca.pem` {
+		t.Errorf("CACertPath from registry: got %q", cfg.Collector.CACertPath)
+	}
+}
+
+// TestLoad_RegistryFallback_CACertPathOptional (B-072): a deployment using
+// a real, publicly-trusted certificate on eami-proxy has no registry value
+// for CollectorCACertPath at all -- this must not be an error, and the
+// field must stay empty (meaning "use the OS default trust store").
+func TestLoad_RegistryFallback_CACertPathOptional(t *testing.T) {
+	reg := &mockRegistry{
+		values: map[string]string{
+			`SOFTWARE\EAMI\Agent/CollectorURL`:    "http://registry-collector:8888",
+			`SOFTWARE\EAMI\Agent/CollectorAPIKey`: "reg-api-key",
+			// CollectorCACertPath deliberately absent.
+		},
+	}
+
+	cfg, err := LoadWithRegistry("/nonexistent/path.yaml", reg)
+	if err != nil {
+		t.Fatalf("LoadWithRegistry: %v", err)
+	}
+	if cfg.Collector.CACertPath != "" {
+		t.Errorf("CACertPath: want empty when unset, got %q", cfg.Collector.CACertPath)
 	}
 }
 
@@ -113,6 +139,31 @@ func TestLoad_RegistryFallback_DoesNotOverrideYAML(t *testing.T) {
 	// YAML value should win; registry fallback only applies when field is empty.
 	if cfg.Collector.URL != "http://yaml-collector:7777" {
 		t.Errorf("YAML should take precedence over registry; got %q", cfg.Collector.URL)
+	}
+}
+
+// TestLoad_RegistryFallback_DoesNotOverrideYAML_CACertPath (B-072) mirrors
+// the URL case above for the new field.
+func TestLoad_RegistryFallback_DoesNotOverrideYAML_CACertPath(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "agent.yaml")
+	content := "collector:\n  ca_cert_path: \"/etc/eami/yaml-ca.pem\"\n"
+	if err := os.WriteFile(cfgFile, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := &mockRegistry{
+		values: map[string]string{
+			`SOFTWARE\EAMI\Agent/CollectorCACertPath`: `C:\ProgramData\EAMI\registry-ca.pem`,
+		},
+	}
+
+	cfg, err := LoadWithRegistry(cfgFile, reg)
+	if err != nil {
+		t.Fatalf("LoadWithRegistry: %v", err)
+	}
+	if cfg.Collector.CACertPath != "/etc/eami/yaml-ca.pem" {
+		t.Errorf("YAML should take precedence over registry; got %q", cfg.Collector.CACertPath)
 	}
 }
 

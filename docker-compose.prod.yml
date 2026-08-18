@@ -103,6 +103,12 @@ services:
 
   # ──────────────────────────────────────────────────────────────
   # eami-collector — on-prem data collector
+  # No longer publishes a port directly (B-072) -- eami-proxy's :8888 is
+  # the only path to it now, matching the treatment eami-ui/eami-api/
+  # eami-gateway already got in B-071. This is the endpoint-agent-facing
+  # surface B-071 explicitly disclosed as still open (reachable across the
+  # customer's whole internal network, not just the appliance's own docker
+  # network) -- closed here.
   # ──────────────────────────────────────────────────────────────
   eami-collector:
     image: ghcr.io/bhargavrash-lgtm/eami-collector:v1.0.0
@@ -113,8 +119,6 @@ services:
       COLLECTOR_BUFFER_DB_PATH: /app/data/buffer.db
     volumes:
       - collector_data:/app/data
-    ports:
-      - "8888:8888"
     depends_on:
       postgres:
         condition: service_healthy
@@ -213,14 +217,17 @@ services:
     restart: unless-stopped
 
   # ──────────────────────────────────────────────────────────────
-  # eami-proxy — TLS termination at the edge (B-071)
+  # eami-proxy — TLS termination at the edge (B-071, extended B-072)
   # Fronts eami-ui (:443, which already internally proxies /v1/* to
-  # eami-api -- zero changes to its nginx.conf) and eami-gateway (:8443,
-  # one port serving both the REST control API and MCP SSE). See
-  # docker/caddy/docker-entrypoint.sh for the certificate-selection logic
-  # and BUILT.md's B-071 entry for the full topology reasoning (proxy-only,
-  # not mTLS -- ADR-020 Model A is a single-tenant appliance, not a
-  # zero-trust/multi-tenant environment).
+  # eami-api -- zero changes to its nginx.conf), eami-gateway (:8443,
+  # one port serving both the REST control API and MCP SSE), and
+  # eami-collector (:8888, B-072 -- endpoint-agent report ingestion,
+  # reachable across the customer's whole internal network, not just the
+  # appliance's own docker network). See docker/caddy/docker-entrypoint.sh
+  # for the certificate-selection logic and BUILT.md's B-071/B-072 entries
+  # for the full topology reasoning (proxy-only, not mTLS -- ADR-020
+  # Model A is a single-tenant appliance, not a zero-trust/multi-tenant
+  # environment).
   #
   # Built locally rather than a pinned ghcr.io image, a disclosed exception
   # to this file's own established all-pinned-images convention: this
@@ -253,9 +260,11 @@ services:
       - "80:80"
       - "443:443"
       - "8443:8443"
+      - "8888:8888"
     depends_on:
       - eami-ui
       - eami-gateway
+      - eami-collector
     restart: unless-stopped
 
 volumes:

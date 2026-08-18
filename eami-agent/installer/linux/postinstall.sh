@@ -6,8 +6,9 @@
 #   rpm  (as the %post scriptlet)
 #
 # Config resolution:
-#   EAMI_COLLECTOR_URL      — URL of the on-prem collector (required)
-#   EAMI_COLLECTOR_API_KEY  — API key for this endpoint (required)
+#   EAMI_COLLECTOR_URL           — URL of the on-prem collector (required)
+#   EAMI_COLLECTOR_API_KEY       — API key for this endpoint (required)
+#   EAMI_COLLECTOR_CA_CERT_PATH  — path to a CA cert file (B-072, optional)
 #
 # Set these before installing:
 #   sudo EAMI_COLLECTOR_URL=https://collector.corp.com:8888 \
@@ -18,15 +19,82 @@
 #   sudo EAMI_COLLECTOR_URL=https://collector.corp.com:8888 \
 #        EAMI_COLLECTOR_API_KEY=eami_k_abc123 \
 #        rpm -i eami-agent-1.0.0-linux-amd64.rpm
+#
+# EAMI_COLLECTOR_CA_CERT_PATH (B-072, optional): only needed when the
+# collector's TLS certificate is the appliance's own default self-signed
+# one (eami-proxy's Caddy, B-071/B-072) rather than a real, publicly-
+# trusted certificate. Points at a CA cert file already staged on this
+# machine by the deployment tool (matches the Windows MSI's
+# COLLECTOR_CA_CERT_PATH property, same reasoning: a file path, not inline
+# PEM content, since embedding multi-line content through env vars/sudo
+# has its own real quoting fragility). See appliance/README.md's "TLS
+# certificates for eami-collector" section for how to extract and stage it.
+#
+# SECURITY (a real finding from this brief's own mandatory security
+# review, fixed before shipping): stage this file somewhere NOT
+# world-writable -- e.g. wherever your deployment tool (Ansible, SCCM,
+# Intune) already places other install-time payload files, never a shared
+# directory like /tmp. This script independently verifies the source
+# file's ownership/permissions before trusting it (see below) and refuses
+# to proceed if they look wrong, but a safe staging location is still the
+# real first line of defense.
+#   sudo EAMI_COLLECTOR_URL=https://collector.corp.com:8888 \
+#        EAMI_COLLECTOR_API_KEY=eami_k_abc123 \
+#        EAMI_COLLECTOR_CA_CERT_PATH=/root/eami-collector-ca.pem \
+#        dpkg -i eami-agent-1.0.0-linux-amd64.deb
 
 set -e
 
 COLLECTOR_URL="${EAMI_COLLECTOR_URL:-http://localhost:8888}"
 COLLECTOR_API_KEY="${EAMI_COLLECTOR_API_KEY:-REPLACE_WITH_YOUR_API_KEY}"
+COLLECTOR_CA_CERT_PATH="${EAMI_COLLECTOR_CA_CERT_PATH:-}"
 
 # ── Write agent config ────────────────────────────────────────────────────────
 mkdir -p /etc/eami
 chmod 755 /etc/eami
+
+# If a CA cert was supplied, copy it into /etc/eami so it survives even if
+# the staged source path (e.g. a temp download location) is cleaned up
+# later -- agent.yaml then references this stable copy, not the original.
+#
+# SECURITY: verify ownership/permissions on the source file before
+# trusting it (a real finding from this brief's own mandatory security
+# review) -- this script runs as root, and without this check, a local
+# unprivileged attacker who can write to whatever path an admin documents
+# (e.g. a shared directory like /tmp) could pre-plant their own CA there
+# before the real install runs, and this script would silently copy and
+# permanently trust it. Requiring the source to be root-owned and not
+# world-writable means an attacker would need root already to plant it --
+# at which point they don't need this attack at all.
+CA_CERT_YAML_PATH=""
+if [ -n "$COLLECTOR_CA_CERT_PATH" ]; then
+    if [ ! -f "$COLLECTOR_CA_CERT_PATH" ]; then
+        echo "eami-agent: WARNING -- EAMI_COLLECTOR_CA_CERT_PATH=$COLLECTOR_CA_CERT_PATH does not exist, skipping (agent will use the OS default trust store)" >&2
+    else
+        # GNU stat (Linux) uses -c; BSD stat (macOS, in case this script is
+        # ever reused there) uses -f -- try GNU first, fall back to BSD.
+        owner_uid="$(stat -c '%u' "$COLLECTOR_CA_CERT_PATH" 2>/dev/null || stat -f '%u' "$COLLECTOR_CA_CERT_PATH")"
+        perm="$(stat -c '%a' "$COLLECTOR_CA_CERT_PATH" 2>/dev/null || stat -f '%Lp' "$COLLECTOR_CA_CERT_PATH")"
+        # Bitwise, not numeric-magnitude, comparison -- a mode like 624
+        # (group=write-only, no read) is numerically LESS than 644 but is
+        # still group-writable; only checking "$perm -gt 644" would have
+        # missed that. Testing bit 2 (write) on each of the group/other
+        # octal digits individually is correct regardless of what the
+        # read/execute bits are set to.
+        group_digit="${perm: -2:1}"
+        other_digit="${perm: -1:1}"
+        if [ "$owner_uid" != "0" ]; then
+            echo "eami-agent: ERROR -- EAMI_COLLECTOR_CA_CERT_PATH=$COLLECTOR_CA_CERT_PATH is not owned by root; refusing to trust it (stage the CA cert from a location only root can write to, not a shared directory like /tmp)" >&2
+        elif [ $(( group_digit & 2 )) -ne 0 ] || [ $(( other_digit & 2 )) -ne 0 ]; then
+            echo "eami-agent: ERROR -- EAMI_COLLECTOR_CA_CERT_PATH=$COLLECTOR_CA_CERT_PATH is group- or world-writable (mode $perm); refusing to trust it" >&2
+        else
+            cp "$COLLECTOR_CA_CERT_PATH" /etc/eami/collector-ca.pem
+            chmod 644 /etc/eami/collector-ca.pem
+            CA_CERT_YAML_PATH="/etc/eami/collector-ca.pem"
+            echo "eami-agent: collector CA cert copied to /etc/eami/collector-ca.pem"
+        fi
+    fi
+fi
 
 cat > /etc/eami/agent.yaml <<EOF
 agent:
@@ -37,6 +105,7 @@ agent:
 collector:
   url: "${COLLECTOR_URL}"
   api_key: "${COLLECTOR_API_KEY}"
+  ca_cert_path: "${CA_CERT_YAML_PATH}"
   timeout_seconds: 30
 
 detection:
