@@ -18,6 +18,16 @@ func ConfigProxyHandler(saasURL, serviceKey string, client *http.Client, log *sl
 			return
 		}
 
+		// B-073: same identity-binding check as IngestHandler -- a
+		// per-agent credential can only fetch its own config, never another
+		// agent's, by naming it in the URL path.
+		if authAgentID, ok := AgentIDFromContext(r.Context()); ok && authAgentID != agentID {
+			log.Warn("config proxy: rejected — agent_id does not match authenticated credential",
+				"remote", r.RemoteAddr, "authenticated_as", authAgentID, "claimed", agentID)
+			jsonError(w, "agent_id does not match authenticated credential", http.StatusForbidden)
+			return
+		}
+
 		if saasURL == "" {
 			// SaaS URL not configured — collector is running in standalone mode.
 			jsonError(w, "remote config unavailable: saas_url not configured", http.StatusServiceUnavailable)

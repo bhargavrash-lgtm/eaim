@@ -40,6 +40,19 @@ func IngestHandler(db *sql.DB, log *slog.Logger) http.HandlerFunc {
 			return
 		}
 
+		// B-073: if the credential that authenticated this request is bound
+		// to a specific agent (a per-agent DB key, not the legacy static
+		// fleet-wide key -- see AgentIDFromContext's doc comment), the
+		// report's own self-declared agent_id must match it. Without this
+		// check, per-agent credentials would be cosmetic: any agent's key
+		// could still submit a report claiming to be a different agent.
+		if authAgentID, ok := AgentIDFromContext(r.Context()); ok && authAgentID != report.AgentID {
+			log.Warn("ingest: rejected — agent_id does not match authenticated credential",
+				"remote", r.RemoteAddr, "authenticated_as", authAgentID, "claimed", report.AgentID)
+			jsonError(w, "agent_id does not match authenticated credential", http.StatusForbidden)
+			return
+		}
+
 		normalise(&report, r)
 
 		compressed, err := gzipJSON(body)

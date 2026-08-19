@@ -677,16 +677,73 @@ or prior context suggests otherwise, it is wrong; trust this line.
   against the real shared dev Postgres, test data cleaned up afterward.
   Full writeup in `BUILT.md`'s `eami-api` section and `BACKLOG.md`'s
   B-074 entry.
+- **B-073 (done, 2026-08-19):** `eami-collector`'s single shared
+  `COLLECTOR_API_KEY` replaced with real per-agent identity, closing the
+  impersonation gap B-072 disclosed (a leaked shared key let the holder
+  impersonate any agent). Re-verified B-073's own prior scoping notes
+  directly against code before building — still accurate: `api_keys` had
+  zero agent-identity linkage, `RegisterKey` had zero callers.
+  **Distribution: admin-generated key pool, not self-enrollment** — B-053/
+  B-072 already establish a per-machine install-command pattern, so a key
+  pool reuses that channel with zero new protocol; self-enrollment was
+  investigated and rejected since it would need its own new anti-abuse
+  mechanism (a bootstrap-token window or approval queue) for no real
+  benefit here. **`gateway_agents` investigated and correctly not
+  reused** — a different database (SaaS Postgres vs. `eami-collector`'s
+  on-prem SQLite) and a different concept (AI tool-calling agent vs.
+  endpoint agent), matching B-042/B-074's precedent against forcing
+  unrelated identity concepts to collide. **A finding beyond the original
+  scoping notes:** the report body's self-declared `agent_id` was never
+  checked against anything — the actual fix is rejecting a credential
+  whose bound identity doesn't match the report's claimed `agent_id`
+  (403), not just the schema change alone. **Zero installer changes
+  needed** — hostname is already the de facto agent identity on every
+  platform today.
+  New `api_keys.agent_id` + a partial unique index (active-only, so
+  revoke-then-reissue/rotation works); `RegisterKey` now agent-bound; new
+  `RevokeKey` (the real revocation path — `revoked_at` was previously
+  write-only) and `ListKeys`; `APIKeyMiddleware` resolves a DB-backed
+  key's identity into request context, falling back to the unchanged
+  legacy static-key path first (zero regression); `IngestHandler`/
+  `ConfigProxyHandler` reject an identity mismatch with 403. New CLI
+  subcommands on `cmd/collector/main.go` (`mint-key`/`revoke-key`/
+  `list-keys`) — no extra tools needed inside the minimal Alpine runtime
+  image, unlike `scripts/create_api_key.sh` (updated for parity anyway).
+  Reviewer + security passes both ran: security found zero HIGH-confidence
+  issues; code review found and fixed 2 real bugs — `resolveDBPath`
+  originally ignored the YAML config file's `buffer.db_path` (would
+  silently mint into the wrong SQLite file for a YAML-configured
+  deployment), and `revoke-key` exited 1 on a normal "nothing to revoke"
+  outcome (would abort idempotent automation). 18 new tests, real
+  on-disk SQLite via `db.Open`. **Live-verified end-to-end against the
+  real docker-compose stack, rebuilt fresh before and after the fixes:**
+  two real agents, two real distinct credentials, both reporting
+  successfully; a real impersonation attempt (Agent A's credential
+  claiming to be Agent B) rejected 403 with zero trace in either
+  `report_buffer` or `dead_letter`; the legacy static key confirmed
+  unaffected; Agent A's key revoked live, rejected 401 on the very next
+  attempt, while Agent B's key kept working (blast radius = one agent).
+  Full writeup in `BUILT.md`'s `eami-collector` section and `BACKLOG.md`'s
+  B-073 entry.
 
 ## Last updated
-2026-08-19 by Claude Code — B-074: `gateway_agents.(org_id, name)`
-uniqueness task brief's premise (no constraint exists) was re-verified
-live against the running database and found false — the constraint
-already exists and is already enforced; no migration was built. The one
-real gap found and fixed: `CreateAgent` now returns a clean `409` instead
-of a raw `500` on a duplicate name (see the Standing facts entry
-immediately above for the full summary, including why `resolveDynamicTool`
-was the wrong code path and why `registry.go` needed no changes).
+2026-08-19 by Claude Code — B-073: `eami-collector`'s shared
+`COLLECTOR_API_KEY` replaced with real per-agent identity (admin-generated
+key pool, hostname-bound, zero installer changes needed), closing the
+impersonation gap B-072 disclosed. See the Standing facts entry
+immediately above for the full summary, including the distribution-
+mechanism reasoning, why `gateway_agents` wasn't reused, and the two
+real bugs the mandatory code-review pass found and fixed.
+
+Prior entry, still accurate: 2026-08-19 by Claude Code — B-074:
+`gateway_agents.(org_id, name)` uniqueness task brief's premise (no
+constraint exists) was re-verified live against the running database and
+found false — the constraint already exists and is already enforced; no
+migration was built. The one real gap found and fixed: `CreateAgent` now
+returns a clean `409` instead of a raw `500` on a duplicate name (see the
+Standing facts entry above for the full summary, including why
+`resolveDynamicTool` was the wrong code path and why `registry.go` needed
+no changes).
 
 Prior entry, still accurate: 2026-08-18 by Claude Code — B-072: TLS added
 for eami-collector's endpoint-agent-facing traffic via eami-proxy's 4th

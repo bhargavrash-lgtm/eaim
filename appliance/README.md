@@ -270,22 +270,61 @@ API key (SCCM/Intune/GPO, all already trusted to deliver credentials to
 managed endpoints) is consistent with how those tools are already used in
 this deployment model.
 
-### eami-collector authentication — still one shared key (B-074, deferred)
+### eami-collector authentication — per-agent keys (B-073, done)
 
-B-072 closes the *transport* gap (traffic is now encrypted) but does not
-change `eami-collector`'s authentication model: every endpoint agent still
-presents the same single, static `COLLECTOR_API_KEY` value. TLS means that
-key (and the report content it protects) can no longer be read off the
-wire by passive network access — but anyone who obtains the key through
-*any other* means (a compromised endpoint's own local config/registry, an
-insider) can still impersonate any other agent to the collector.
-Investigated as part of B-072: `eami-collector` already has a *dormant*
-DB-backed per-key mechanism (`api_keys` table, `internal/api/
-middleware.go`), but it has no agent-identity linkage in its schema (just
-a free-text label) and no real key-minting mechanism (`RegisterKey` has
-zero callers anywhere) — making it real needs its own scoping pass, not a
-config flip. Logged as **B-074**, a clearly-scoped follow-up, not silently
-skipped — see `BACKLOG.md`.
+B-072 closed the *transport* gap (traffic is now encrypted); B-073 closes
+the remaining *identity* gap. Before B-073, every endpoint agent presented
+the same single, static `COLLECTOR_API_KEY` value — TLS meant that key
+(and the report content it protects) could no longer be read off the wire
+by passive network access, but anyone who obtained the key through *any
+other* means (a compromised endpoint's own local config/registry, an
+insider) could still impersonate any other agent to the collector.
+
+**Mechanism: admin-generated key pool, one key per agent, bound to the
+agent's own `agent_id` (its hostname, by default — no installer changes
+needed on any platform, since that's already the value every agent
+self-reports today).** Chosen over self-enrollment: this appliance's
+existing install flow (this section's own CA-cert distribution above,
+`COLLECTOR_URL`/`COLLECTOR_API_KEY`) already has an admin generating a
+distinct install command per machine, so minting a distinct key per
+machine at the same time is a small addition to an existing workflow —
+not a new protocol. Self-enrollment would need its own new anti-abuse
+mechanism (a time-limited bootstrap window, or an admin-approval queue)
+just to avoid *moving* the "anyone can claim to be anyone" problem into a
+different form, for no benefit here.
+
+**Minting/revoking, on the appliance itself:**
+
+```
+docker compose -f /opt/eami/docker-compose.prod.yml --env-file /data/eami/.env \
+  exec eami-collector /app/collector mint-key --agent-id workstation-42 --label "Office floor 3, workstation 42"
+
+docker compose -f /opt/eami/docker-compose.prod.yml --env-file /data/eami/.env \
+  exec eami-collector /app/collector revoke-key --agent-id workstation-42
+
+docker compose -f /opt/eami/docker-compose.prod.yml --env-file /data/eami/.env \
+  exec eami-collector /app/collector list-keys
+```
+
+The printed key is passed as the install command's existing
+`COLLECTOR_API_KEY` parameter (Windows MSI) / `EAMI_COLLECTOR_API_KEY` env
+var (Linux/macOS postinstall) — the same slot every install already uses,
+just no longer one identical value shared fleet-wide.
+
+**A per-agent credential only authenticates as the one agent it was minted
+for** — `eami-collector` now checks the report's own self-declared
+`agent_id` against the identity bound to whichever credential authenticated
+the request, and rejects a mismatch (`403`). Without this check, per-agent
+credentials alone would be cosmetic: any agent's key could still submit a
+report claiming to be a different agent.
+
+**The legacy static `COLLECTOR_API_KEY` still works, unchanged, if still
+configured** — B-073 is additive, not a breaking cutover. A deployment can
+migrate machine-by-machine: mint a real per-agent key for each endpoint as
+it's reached, and only unset `COLLECTOR_API_KEY` once every machine has
+one. A key with no bound identity (the static key) is never checked
+against a claimed `agent_id` — that check only applies to per-agent
+DB-backed keys.
 
 **Also not built this round, explicitly out of scope per B-071/B-072's own
 briefs:** public CA / Let's Encrypt automation (unrealistic default for the
