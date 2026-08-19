@@ -1,16 +1,18 @@
 package api
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/eami/api/internal/store"
 )
-
 
 // validRiskTiers is the exhaustive set of allowed risk_tier values.
 var validRiskTiers = map[string]bool{
@@ -18,6 +20,19 @@ var validRiskTiers = map[string]bool{
 }
 
 func isValidRiskTier(s string) bool { return validRiskTiers[s] }
+
+// isUniqueViolation reports whether err is a Postgres unique-constraint
+// violation (SQLSTATE 23505), mirroring workflows.go's isForeignKeyViolation
+// convention for checking pgErr.Code. gateway_agents already enforces
+// UNIQUE (org_id, name) at the schema level (confirmed live against the
+// running DB, not assumed -- see BACKLOG.md B-074) -- this only classifies
+// the resulting error so a duplicate-name CreateAgent surfaces as a clear
+// 409, not an opaque 500 with a leaked driver error string.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
 // ListAgents handles GET /v1/gateway/agents
 func (s *Server) ListAgents(w http.ResponseWriter, r *http.Request) {
 	uc := claimsFromContext(r)
@@ -121,6 +136,11 @@ func (s *Server) CreateAgent(w http.ResponseWriter, r *http.Request) {
 			CreatedBy:       pgtype.UUID{Bytes: uc.UserID, Valid: true},
 		})
 		if err != nil {
+			if isUniqueViolation(err) {
+				writeError(w, http.StatusConflict, "conflict",
+					fmt.Sprintf("an agent named %q already exists in this org", req.Name))
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}

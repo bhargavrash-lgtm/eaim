@@ -650,18 +650,53 @@ or prior context suggests otherwise, it is wrong; trust this line.
   caused an unrelated downstream `401`, not on the path this brief
   changed). Full writeup in `BUILT.md`'s Cross-cutting section and
   `BACKLOG.md`'s B-072/B-073 entries.
+- **B-074 (done, 2026-08-19):** a task brief asked for a new migration to
+  add `UNIQUE (org_id, name)` to `gateway_agents`, on the premise that no
+  such constraint existed. **Re-verified live against the running
+  database before building — the premise was wrong.** The constraint
+  already exists (`gateway_agents_org_id_name_key`, confirmed via a real
+  `\d gateway_agents` against the running Postgres container) and is
+  declared identically in `schema/schema.sql`, `schema/migrations/
+  001_init.sql`, and `schema/migrations-v2/000001_baseline.up.sql` (the
+  file B-051's real migration runner applies) — zero existing duplicate
+  rows either. The brief's cited culprit, `resolveDynamicTool`, turned
+  out to be unrelated (it resolves `gateway_tools`, not agent identity);
+  the real agent-lookup code (`eami-gateway/internal/registry/
+  registry.go`) already documents this exact constraint from B-042 and is
+  already correct — no changes needed there. Confirmed with the user
+  before building; scope corrected to no migration, no `registry.go`
+  changes. **The one real gap:** `eami-api/internal/api/agents.go`'s
+  `CreateAgent` didn't classify a Postgres unique-violation (23505) on
+  insert, so a duplicate-name attempt surfaced as a raw `500` with a
+  leaked driver error string instead of a clean error. Fixed with a new
+  `isUniqueViolation` helper (mirrors `workflows.go`'s
+  `isForeignKeyViolation`) returning `409 conflict`. Reviewer + security
+  passes both ran (security: zero findings; code review: `api/
+  openapi.yaml`'s new 409 correctly left undocumented per Architect-EAMI
+  ownership, logged in `NOTES.md`, plus 2 `gofmt` fixes). Live-verified
+  against the real shared dev Postgres, test data cleaned up afterward.
+  Full writeup in `BUILT.md`'s `eami-api` section and `BACKLOG.md`'s
+  B-074 entry.
 
 ## Last updated
-2026-08-18 by Claude Code — B-072: TLS added for eami-collector's
-endpoint-agent-facing traffic via eami-proxy's 4th site block, plus
-install-time CA-trust distribution through eami-agent's existing
-registry-fallback pattern (see the Active decision thread entry
-immediately above for the full summary, including the B-ID process
-mistake caught and fixed mid-session, the four security-review findings,
-and the self-inflicted WiX sequencing bug caught only by a real live
-install). B-073 (per-agent authentication) logged as a new, still-open,
-clearly-scoped backlog item — investigated and deliberately deferred, not
-built this session.
+2026-08-19 by Claude Code — B-074: `gateway_agents.(org_id, name)`
+uniqueness task brief's premise (no constraint exists) was re-verified
+live against the running database and found false — the constraint
+already exists and is already enforced; no migration was built. The one
+real gap found and fixed: `CreateAgent` now returns a clean `409` instead
+of a raw `500` on a duplicate name (see the Standing facts entry
+immediately above for the full summary, including why `resolveDynamicTool`
+was the wrong code path and why `registry.go` needed no changes).
+
+Prior entry, still accurate: 2026-08-18 by Claude Code — B-072: TLS added
+for eami-collector's endpoint-agent-facing traffic via eami-proxy's 4th
+site block, plus install-time CA-trust distribution through eami-agent's
+existing registry-fallback pattern (see the Standing facts entry above
+for the full summary, including the B-ID process mistake caught and fixed
+mid-session, the four security-review findings, and the self-inflicted
+WiX sequencing bug caught only by a real live install). B-073 (per-agent
+authentication) logged as a new, still-open, clearly-scoped backlog item
+— investigated and deliberately deferred, not built this session.
 
 Prior entry, still accurate: 2026-08-17 by Claude Code — B-071: TLS
 termination added for the UI, API, and gateway surfaces via a new Caddy
