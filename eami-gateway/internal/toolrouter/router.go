@@ -52,9 +52,16 @@ var ErrNotFound = errors.New("toolrouter: no matching tool found")
 // ActionPathEntry is one named action's routing mapping (B-046): the path
 // (joined onto base_url) and HTTP method to use for that action, in place
 // of the flat "always POST to base_url" default.
+//
+// InputSchema (B-075) is decode-only here -- Forward never reads it, only
+// Path/Method (dispatch is completely unchanged by its presence). It
+// exists purely so cmd/gateway/main.go's listGatewayTools can surface a
+// spec-generated action's real parameter schema via tools/list, instead of
+// B-061's original generic {"type":"object"} fallback.
 type ActionPathEntry struct {
-	Path   string `json:"path"`
-	Method string `json:"method"`
+	Path        string         `json:"path"`
+	Method      string         `json:"method"`
+	InputSchema map[string]any `json:"input_schema,omitempty"`
 }
 
 // ToolRow is the subset of gateway_tools fields dispatch needs.

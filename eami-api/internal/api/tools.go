@@ -138,9 +138,18 @@ func credentialsProvided(raw json.RawMessage) (bool, error) {
 // toolrouter.ActionPathEntry's JSON shape exactly -- kept as a separate
 // duplicate type (not shared) since the two modules cannot import each
 // other's internal packages (established B-044/B-025 constraint).
+//
+// InputSchema (B-075) is purely additive and purely descriptive -- never
+// read by toolrouter.Forward (dispatch), which only ever uses Path/Method.
+// It exists so tools/list (eami-gateway, B-061) can report the real
+// parameter shape a spec-generated action expects instead of B-061's
+// original generic {"type":"object"} fallback. A manually-defined mapping
+// (B-046, pre-dating this field) simply omits it and keeps working exactly
+// as before -- toolToResp/CreateTool/UpdateTool never require it.
 type ActionPathMapping struct {
-	Path   string `json:"path"`
-	Method string `json:"method"`
+	Path        string         `json:"path"`
+	Method      string         `json:"method"`
+	InputSchema map[string]any `json:"input_schema,omitempty"`
 }
 
 // ── AI provider connectors (Thread A Model 1) ───────────────────────────────────
@@ -199,7 +208,7 @@ func validateActionPaths(m map[string]ActionPathMapping) (map[string]ActionPathM
 		if !allowedActionPathMethods[method] {
 			return nil, fmt.Errorf("action_paths[%s]: unsupported method %q", action, entry.Method)
 		}
-		out[action] = ActionPathMapping{Path: entry.Path, Method: method}
+		out[action] = ActionPathMapping{Path: entry.Path, Method: method, InputSchema: entry.InputSchema}
 	}
 	return out, nil
 }

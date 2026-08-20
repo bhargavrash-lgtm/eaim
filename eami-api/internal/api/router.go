@@ -222,6 +222,10 @@ func (s *Server) Handler() http.Handler {
 			r.Patch("/v1/gateway/tools/{toolId}", s.UpdateTool)
 			r.Delete("/v1/gateway/tools/{toolId}", s.DeleteTool)
 			r.Post("/v1/gateway/tools/{toolId}/test", s.TestTool)
+			// OpenAPI-spec action discovery (B-075): stateless preview,
+			// writes nothing -- generated actions only ever reach
+			// gateway_tools via the existing action_paths PATCH above.
+			r.Post("/v1/gateway/openapi/discover", s.DiscoverOpenAPI)
 			// Multi-Hop Workflows (Thread B Brief 1, B-058): definition-only
 			// CRUD, no execution. Same role gating as gateway_tools -- an
 			// admin/operator can define a workflow, but nothing dispatches it.

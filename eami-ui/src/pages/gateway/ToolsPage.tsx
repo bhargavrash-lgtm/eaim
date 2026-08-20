@@ -14,8 +14,9 @@ import {
   useUpdateTool,
   useDeleteTool,
   useTestTool,
+  useDiscoverOpenAPI,
 } from '@/hooks/useTools'
-import type { ActionPathMapping, ToolAuditMode, ToolCreateWithActions, ToolProvider, ToolType, ToolUpdate, ToolWithActions } from '@/hooks/useTools'
+import type { ActionPathMapping, OpenAPIDiscoverResult, ToolAuditMode, ToolCreateWithActions, ToolProvider, ToolType, ToolUpdate, ToolWithActions } from '@/hooks/useTools'
 
 // AI provider connectors (Thread A Model 1): the full set of providers a
 // second connector could target. Only "claude" has a real gateway adapter
@@ -94,7 +95,16 @@ function TypeBadge({ type }: { type: string }) {
 // to base_url (B-044's original behavior, still the fallback for any
 // action left unmapped here).
 
-type ActionPathRow = { action: string; path: string; method: string }
+// inputSchema (B-075) travels alongside a row only when it came from
+// OpenAPI discovery -- a manually-typed row never sets it, exactly
+// matching this type's pre-B-075 shape for that case. There is
+// deliberately no separate "hasPathParams" flag on a row: a code-review
+// finding on this brief caught that a static flag set once at add-time
+// goes stale the moment an admin edits the path (either fixing a
+// discovered `{param}` by hand, or typing a brand-new row that happens to
+// contain one) -- ActionPathsEditor below derives the warning live from
+// row.path on every render instead, so it's always correct.
+type ActionPathRow = { action: string; path: string; method: string; inputSchema?: Record<string, unknown> }
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
 
@@ -109,7 +119,7 @@ function rowsToActionPaths(rows: ActionPathRow[]): Record<string, ActionPathMapp
     const action = row.action.trim()
     const path = row.path.trim()
     if (!action || !path) continue
-    out[action] = { path, method: row.method }
+    out[action] = { path, method: row.method, input_schema: row.inputSchema }
   }
   return out
 }
@@ -141,22 +151,169 @@ function ActionPathsEditor({ rows, onChange }: { rows: ActionPathRow[]; onChange
       ) : (
         <div className="space-y-2">
           {rows.map((row, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <input value={row.action} onChange={e => updateRow(i, { action: e.target.value })}
-                placeholder="action name"
-                className="w-1/3 border rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-              <select value={row.method} onChange={e => updateRow(i, { method: e.target.value })}
-                className="border rounded px-1.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                {HTTP_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-              <input value={row.path} onChange={e => updateRow(i, { path: e.target.value })}
-                placeholder="/contacts"
-                className="flex-1 border rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-              <button type="button" onClick={() => removeRow(i)} className="text-gray-400 hover:text-red-600" title="Remove mapping">
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+            <div key={i}>
+              <div className="flex items-center gap-2">
+                <input value={row.action} onChange={e => updateRow(i, { action: e.target.value })}
+                  placeholder="action name"
+                  className="w-1/3 border rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                <select value={row.method} onChange={e => updateRow(i, { method: e.target.value })}
+                  className="border rounded px-1.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  {HTTP_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <input value={row.path} onChange={e => updateRow(i, { path: e.target.value })}
+                  placeholder="/contacts"
+                  className="flex-1 border rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                <button type="button" onClick={() => removeRow(i)} className="text-gray-400 hover:text-red-600" title="Remove mapping">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {row.path.includes('{') && (
+                <p className="flex items-center gap-1 text-[11px] text-amber-700 mt-0.5 ml-0.5">
+                  <AlertCircle className="h-3 w-3 shrink-0" />
+                  Has a <code className="font-mono">{'{param}'}</code> in its path -- the gateway doesn't substitute path parameters yet, so this action won't reach the intended endpoint until you rewrite the path.
+                </p>
+              )}
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// OpenAPI-spec action discovery (B-075) -- rest_api-only, lets an admin
+// paste/upload an OpenAPI spec (or point at a URL) and turn its real
+// operations into candidate action mappings, instead of hand-typing every
+// path/method. Purely a preview: "Add selected" only ever writes into the
+// SAME actionRows state ActionPathsEditor above already manages -- nothing
+// reaches the backend until the panel's own pre-existing Save button is
+// clicked, so nothing here can silently activate an unreviewed action.
+function OpenAPIDiscoverySection({ onAddActions }: { onAddActions: (rows: ActionPathRow[]) => void }) {
+  const discover = useDiscoverOpenAPI()
+  const [mode, setMode] = useState<'url' | 'paste'>('url')
+  const [specUrl, setSpecUrl] = useState('')
+  const [specContent, setSpecContent] = useState('')
+  const [result, setResult] = useState<OpenAPIDiscoverResult | null>(null)
+  const [selected, setSelected] = useState<Record<string, boolean>>({})
+  const [error, setError] = useState<string | null>(null)
+
+  const canDiscover = mode === 'url' ? specUrl.trim().length > 0 : specContent.trim().length > 0
+
+  async function handleDiscover() {
+    setError(null)
+    setResult(null)
+    try {
+      const body = mode === 'url' ? { spec_url: specUrl.trim() } : { spec_content: specContent }
+      const res = await discover.mutateAsync(body)
+      setResult(res)
+      // Default a path-param action to UNselected -- it's real per the
+      // spec, but the gateway can't dispatch it correctly yet (see the
+      // warning shown per-action below), so the safer default is "admin
+      // has to deliberately opt in," not "silently include something that
+      // won't work."
+      const initial: Record<string, boolean> = {}
+      for (const [name, action] of Object.entries(res.actions)) {
+        initial[name] = !action.has_path_params
+      }
+      setSelected(initial)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to parse spec')
+    }
+  }
+
+  function handleAddSelected() {
+    if (!result) return
+    const rows: ActionPathRow[] = Object.entries(result.actions)
+      .filter(([name]) => selected[name])
+      .map(([name, a]) => ({
+        action: name, path: a.path, method: a.method,
+        inputSchema: a.input_schema,
+      }))
+    if (rows.length === 0) return
+    onAddActions(rows)
+    setResult(null)
+    setSpecUrl('')
+    setSpecContent('')
+  }
+
+  const actionEntries = result ? Object.entries(result.actions) : []
+  const tabClass = (active: boolean) =>
+    `px-2.5 py-1 text-xs font-medium rounded ${active ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 border'}`
+
+  return (
+    <div className="border rounded-lg p-3 bg-gray-50">
+      <label className="block text-sm font-medium text-gray-700 mb-1">Discover actions from an OpenAPI spec</label>
+      <p className="text-xs text-gray-400 mb-2">Populate action mappings automatically from a real OpenAPI 3.x spec, instead of typing each one by hand. Nothing is saved until you review the results below and click Save.</p>
+
+      <div className="flex gap-1.5 mb-2">
+        <button type="button" onClick={() => setMode('url')} className={tabClass(mode === 'url')}>URL</button>
+        <button type="button" onClick={() => setMode('paste')} className={tabClass(mode === 'paste')}>Paste spec</button>
+      </div>
+
+      {mode === 'url' ? (
+        <input value={specUrl} onChange={e => setSpecUrl(e.target.value)}
+          placeholder="https://api.example.com/openapi.json"
+          className="w-full border rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+      ) : (
+        <textarea value={specContent} onChange={e => setSpecContent(e.target.value)} rows={4}
+          placeholder="Paste an OpenAPI 3.x spec (JSON or YAML)"
+          className="w-full border rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+      )}
+
+      <button type="button" onClick={handleDiscover} disabled={!canDiscover || discover.isPending}
+        className="mt-2 text-xs bg-white border text-indigo-700 font-medium rounded px-2.5 py-1 hover:bg-indigo-50 disabled:opacity-50">
+        {discover.isPending ? 'Parsing spec...' : 'Discover actions'}
+      </button>
+
+      {error && (
+        <p className="flex items-center gap-1 text-xs text-red-600 mt-2">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          {error}
+        </p>
+      )}
+
+      {result && (
+        <div className="mt-3 border-t pt-3">
+          {(result.warnings ?? []).map((w, i) => (
+            <p key={i} className="flex items-start gap-1 text-[11px] text-amber-700 mb-1">
+              <AlertCircle className="h-3 w-3 shrink-0 mt-0.5" />
+              <span>{w}</span>
+            </p>
+          ))}
+          {actionEntries.length === 0 ? (
+            <p className="text-xs text-gray-400 italic">No actions found in this spec.</p>
+          ) : (
+            <>
+              <p className="text-xs text-gray-500 mb-2">
+                {actionEntries.length} action{actionEntries.length === 1 ? '' : 's'} found -- review and select which to add:
+              </p>
+              <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1">
+                {actionEntries.map(([name, a]) => (
+                  <label key={name} className="flex items-start gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" checked={!!selected[name]}
+                      onChange={e => setSelected(s => ({ ...s, [name]: e.target.checked }))}
+                      className="mt-0.5" />
+                    <span className="flex-1">
+                      <span className="font-mono font-medium">{name}</span>{' '}
+                      <span className="text-gray-500 font-mono">{a.method} {a.path}</span>
+                      {a.summary && <span className="block text-gray-400">{a.summary}</span>}
+                      {a.has_path_params && (
+                        <span className="flex items-center gap-1 text-amber-700 mt-0.5">
+                          <AlertCircle className="h-3 w-3 shrink-0" />
+                          Has a path parameter -- won't dispatch correctly until the gateway supports substitution.
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <button type="button" onClick={handleAddSelected}
+                disabled={!Object.values(selected).some(Boolean)}
+                className="mt-2 text-xs text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50 disabled:hover:text-indigo-600">
+                + Add selected to action mappings
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -180,6 +337,18 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
   const [actionRows, setActionRows] = useState<ActionPathRow[]>([])
   const [provider, setProvider]   = useState<ToolProvider>('claude')
   const [auditMode, setAuditMode] = useState<ToolAuditMode>('structural_metadata_only')
+
+  // Same merge as EditToolPanel's identical handler below -- discovery is
+  // stateless (POST /v1/gateway/openapi/discover needs no existing tool
+  // ID), so a brand-new tool can populate its action mappings from a spec
+  // during creation itself, not only after an extra save-then-reopen round
+  // trip (a real gap a code-review finding on this brief caught).
+  function handleAddDiscoveredActions(newRows: ActionPathRow[]) {
+    setActionRows(prev => {
+      const newNames = new Set(newRows.map(r => r.action))
+      return [...prev.filter(r => !newNames.has(r.action)), ...newRows]
+    })
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -294,6 +463,10 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
           )}
 
           {type === 'rest_api' && (
+            <OpenAPIDiscoverySection onAddActions={handleAddDiscoveredActions} />
+          )}
+
+          {type === 'rest_api' && (
             <ActionPathsEditor rows={actionRows} onChange={setActionRows} />
           )}
 
@@ -374,6 +547,18 @@ function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () =
     tool.auth_type === 'api_key' ? 'API key' :
     tool.auth_type === 'db_connection_string' ? 'Connection string' :
     null
+
+  // Merges newly-discovered rows into actionRows: a discovered action whose
+  // name matches an existing row replaces it (re-running discovery refines
+  // the same action), everything else is appended. Nothing here writes to
+  // the backend -- this is the same local state ActionPathsEditor already
+  // edits, saved only when the admin clicks this panel's own Save button.
+  function handleAddDiscoveredActions(newRows: ActionPathRow[]) {
+    setActionRows(prev => {
+      const newNames = new Set(newRows.map(r => r.action))
+      return [...prev.filter(r => !newNames.has(r.action)), ...newRows]
+    })
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -472,6 +657,10 @@ function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () =
               <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)}
                 className="w-full border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
             </div>
+          )}
+
+          {tool.type === 'rest_api' && (
+            <OpenAPIDiscoverySection onAddActions={handleAddDiscoveredActions} />
           )}
 
           {tool.type === 'rest_api' && (

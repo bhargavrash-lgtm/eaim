@@ -94,6 +94,60 @@ func TestListGatewayTools_RestAPI_OneEntryPerAction(t *testing.T) {
 	}
 }
 
+// TestListGatewayTools_InputSchema_ReflectsSpecGeneratedSchema proves B-075
+// AC3: an action_paths entry carrying a real input_schema (the shape
+// openapidiscovery.Parse produces, round-tripped through eami-api's
+// ActionPathMapping.InputSchema and stored as-is in the JSONB column) is
+// surfaced verbatim in tools/list's InputSchema field, not the generic
+// {"type":"object"} B-061 originally shipped with. A sibling action with no
+// input_schema (the B-046 manually-configured shape, unaffected by this
+// brief) proves that fallback still applies -- both cases exercised in the
+// same tool, so this also proves the two coexist correctly.
+func TestListGatewayTools_InputSchema_ReflectsSpecGeneratedSchema(t *testing.T) {
+	env := newMainTestEnv(t)
+	richSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"name": map[string]any{"type": "string", "description": "the pet's name", "in": "query"},
+		},
+		"required": []any{"name"},
+	}
+	env.insertToolWithActions(t, env.orgID, "petstore", map[string]toolrouter.ActionPathEntry{
+		"createPet": {Path: "/pets", Method: "POST", InputSchema: richSchema},
+		"legacy_action": {Path: "/legacy", Method: "GET"}, // no InputSchema -- the pre-B-075 manually-configured shape
+	})
+
+	defs, err := listGatewayTools(context.Background(), env.pool, env.orgID.String())
+	if err != nil {
+		t.Fatalf("listGatewayTools: %v", err)
+	}
+	byName := map[string]mcp.ToolDefinition{}
+	for _, d := range defs {
+		byName[d.Name] = d
+	}
+
+	rich, ok := byName["petstore/createPet"]
+	if !ok {
+		t.Fatalf("expected petstore/createPet, got %+v", defs)
+	}
+	if rich.InputSchema["type"] != "object" {
+		t.Errorf("createPet InputSchema[type] = %v, want object", rich.InputSchema["type"])
+	}
+	props, _ := rich.InputSchema["properties"].(map[string]any)
+	nameProp, _ := props["name"].(map[string]any)
+	if nameProp == nil || nameProp["description"] != "the pet's name" {
+		t.Errorf("createPet InputSchema.properties.name = %+v, want the real spec-derived schema to survive the round trip through Postgres JSONB", nameProp)
+	}
+
+	legacy, ok := byName["petstore/legacy_action"]
+	if !ok {
+		t.Fatalf("expected petstore/legacy_action, got %+v", defs)
+	}
+	if len(legacy.InputSchema) != 1 || legacy.InputSchema["type"] != "object" {
+		t.Errorf("legacy_action (no stored input_schema) InputSchema = %+v, want the honest generic {type: object} fallback unchanged from B-061", legacy.InputSchema)
+	}
+}
+
 // TestListGatewayTools_CrossOrg_NeverAppears proves AC2/org isolation: a
 // tool registered under a different org must never appear in this org's
 // tools/list result.

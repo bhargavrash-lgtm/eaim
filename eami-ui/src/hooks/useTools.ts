@@ -10,7 +10,27 @@ export type ToolCreate = components['schemas']['ToolCreate']
 // toolrouter.ActionPathEntry JSON shape exactly. method is always sent
 // explicit from the UI (defaulted to POST when a row is added) even
 // though the backend itself defaults an omitted method to POST too.
-export type ActionPathMapping = { path: string; method: string }
+//
+// input_schema (B-075) is optional and purely descriptive -- populated
+// only for an action generated from a parsed OpenAPI spec; a manually-typed
+// mapping simply omits it, exactly as before this field existed.
+export type ActionPathMapping = { path: string; method: string; input_schema?: Record<string, unknown> }
+
+// OpenAPIDiscoverAction (B-075) is one candidate action returned by
+// POST /v1/gateway/openapi/discover -- mirrors eami-api's
+// openapidiscovery.Action JSON shape.
+export type OpenAPIDiscoverAction = {
+  path: string
+  method: string
+  summary?: string
+  input_schema?: Record<string, unknown>
+  has_path_params: boolean
+}
+
+export type OpenAPIDiscoverResult = {
+  actions: Record<string, OpenAPIDiscoverAction>
+  warnings?: string[]
+}
 
 // action_paths isn't in api/openapi.yaml yet either (same undocumented-
 // route situation as ToolUpdate below) -- Tool/ToolCreate are frozen
@@ -119,6 +139,22 @@ export function useDeleteTool() {
       if (error) throw error
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tools'] }),
+  })
+}
+
+// useDiscoverOpenAPI (B-075) parses an admin-supplied OpenAPI spec (upload/
+// paste or URL) into candidate action_paths entries for review -- purely a
+// preview, writes nothing. Not a query-invalidating mutation: nothing in
+// the tools list changes until the admin separately reviews/edits the
+// result and saves it through useUpdateTool, exactly like any other
+// action_paths edit.
+export function useDiscoverOpenAPI() {
+  return useMutation({
+    mutationFn: async (body: { spec_url?: string; spec_content?: string }) => {
+      // apiFetch, not api.POST: undocumented route (same B-045 precedent
+      // as useUpdateTool above) -- api/openapi.yaml doesn't know about it.
+      return apiFetch<OpenAPIDiscoverResult>('/v1/gateway/openapi/discover', { method: 'POST', body })
+    },
   })
 }
 

@@ -725,15 +725,72 @@ or prior context suggests otherwise, it is wrong; trust this line.
   attempt, while Agent B's key kept working (blast radius = one agent).
   Full writeup in `BUILT.md`'s `eami-collector` section and `BACKLOG.md`'s
   B-073 entry.
+- **B-075 (done, 2026-08-20):** MCP Discovery Part C — OpenAPI-spec
+  auto-discovery for `rest_api` connector actions, closing the
+  "hand-type every `action_paths` entry" gap B-046 left. **Critical
+  first-step finding, investigated before any design work — B-061's
+  `tools/list` is NOT compatible with a generic external MCP client
+  (Claude Desktop or any spec-conformant SDK client) today.**
+  `eami-gateway/internal/mcp/handler.go` has zero handling for the
+  spec-mandated `initialize` handshake, and its tool-invocation method is
+  the non-standard `tool_call`, not the real spec's `tools/call` — either
+  gap alone is fatal for a real client; B-061 has only ever been exercised
+  against this codebase's own internal test harness. Per the brief's own
+  scope boundary, not fixed here — **logged as B-076, QUEUED** (needs its
+  own investigation before scoping: a real handshake, a method-name fix,
+  and a real auth model an external client's user could actually obtain a
+  credential through, since today's Bearer JWT is minted via an
+  internal-only endpoint). **A second finding**, traced before designing
+  the dispatch-facing half: `toolrouter.Forward` has no path-parameter
+  substitution and always wraps arguments in a fixed envelope — a
+  spec-generated action against a real third-party API's native shape
+  won't dispatch correctly regardless of parse quality. Disclosed via a
+  per-action warning in both the API response and the actual UI, live-
+  proven by deliberately activating and dispatching a path-param action
+  and confirming its predicted real `404`.
+  New `eami-api/internal/openapidiscovery` package (`kin-openapi`) parses
+  a spec into candidate `action_paths` with real per-action `input_schema`;
+  stateless `POST /v1/gateway/openapi/discover` writes nothing — nothing
+  activates until the admin reviews/edits and saves through the existing
+  `action_paths` PATCH. `ActionPathMapping`/`toolrouter.ActionPathEntry`
+  gained an optional, dispatch-inert `InputSchema` field; `listGatewayTools`
+  surfaces it in `tools/list` when present, else keeps B-061's honest
+  generic fallback. New UI wired into both `AddToolPanel`/`EditToolPanel`.
+  Reviewer + security passes both found and this brief fixed real issues:
+  security (MEDIUM) — `spec_content`'s size bound was enforced only after
+  the full body was already buffered, fixed with `http.MaxBytesReader`
+  ahead of decode; SSRF/YAML-bomb/recursion/injection/auth/XSS all traced
+  and ruled out with concrete evidence, not assumption. Code review (3
+  fixed) — a stale UI warning flag now derives live from the row's current
+  path; a parameter/body-property name collision that silently overwrote
+  a schema now keeps the parameter's and warns explicitly; discovery
+  wired into the Add panel too (was edit-only). Live-verified end-to-end
+  including the SSRF guard's live rejection/acceptance, a live local-file
+  `$ref` rejection, and `tools/list`/AC5 proven together in one real call
+  (new action's rich schema alongside the pre-existing `b046-live-verify`
+  connector's unchanged generic fallback). **Incidental finding during
+  test cleanup, not fixed — `DeleteAgent` 500s on any agent with real
+  episode/approval/workflow-run history (unclassified FK violation),
+  logged as B-077, QUEUED.** Full writeup in `BUILT.md`'s `eami-api`
+  section and `BACKLOG.md`'s B-075/B-076/B-077 entries.
 
 ## Last updated
-2026-08-19 by Claude Code — B-073: `eami-collector`'s shared
-`COLLECTOR_API_KEY` replaced with real per-agent identity (admin-generated
-key pool, hostname-bound, zero installer changes needed), closing the
-impersonation gap B-072 disclosed. See the Standing facts entry
-immediately above for the full summary, including the distribution-
-mechanism reasoning, why `gateway_agents` wasn't reused, and the two
-real bugs the mandatory code-review pass found and fixed.
+2026-08-20 by Claude Code — B-075: MCP Discovery Part C, OpenAPI-spec
+auto-discovery for `rest_api` connector actions. See the Standing facts
+entry immediately above for the full summary, including the critical
+first-step finding that B-061's `tools/list` is NOT compatible with a
+real external MCP client (logged as new backlog item B-076), the
+dispatch path-parameter-substitution limitation (disclosed, not fixed,
+matches B-044/046's frozen scope), and the two real security/code-review
+fixes applied before shipping.
+
+Prior entry, still accurate: 2026-08-19 by Claude Code — B-073:
+`eami-collector`'s shared `COLLECTOR_API_KEY` replaced with real
+per-agent identity (admin-generated key pool, hostname-bound, zero
+installer changes needed), closing the impersonation gap B-072 disclosed.
+See the Standing facts entry above for the full summary, including the
+distribution-mechanism reasoning, why `gateway_agents` wasn't reused, and
+the two real bugs the mandatory code-review pass found and fixed.
 
 Prior entry, still accurate: 2026-08-19 by Claude Code — B-074:
 `gateway_agents.(org_id, name)` uniqueness task brief's premise (no

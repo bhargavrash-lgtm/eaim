@@ -587,10 +587,21 @@ func listGatewayTools(ctx context.Context, pool *pgxpool.Pool, orgID string) ([]
 			continue
 		}
 		for action, entry := range actionPaths {
+			// InputSchema (B-075): use the real schema derived from an
+			// OpenAPI spec when the mapping carries one; a manually-defined
+			// mapping (B-046, no input_schema) keeps B-061's original
+			// honest fallback -- {"type":"object"} is still true (any
+			// object is technically accepted at dispatch, since
+			// toolrouter.Forward never validates parameters against a
+			// schema), just not richly descriptive.
+			schema := entry.InputSchema
+			if schema == nil {
+				schema = map[string]any{"type": "object"}
+			}
 			defs = append(defs, mcp.ToolDefinition{
 				Name:        name + "/" + action,
 				Description: fmt.Sprintf("%s %s on connector %q", entry.Method, entry.Path, name),
-				InputSchema: map[string]any{"type": "object"},
+				InputSchema: schema,
 			})
 		}
 	}
