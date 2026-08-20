@@ -167,6 +167,18 @@ var validAuditModes = map[string]bool{"full": true, "structural_metadata_only": 
 
 const defaultAuditMode = "structural_metadata_only"
 
+// validDataHandling (B-078) mirrors validAuditModes' exact shape and
+// purpose. This is a VISIBILITY designation, not a technical control --
+// EAMI cannot enforce what a third-party AI provider does with dispatched
+// data, this only records what the admin has confirmed the actual
+// commercial agreement says. "unknown" is the fail-safe default (see
+// defaultDataHandling below), not any specific retention posture -- a
+// newly created connector must never silently imply an agreement nobody
+// has actually confirmed.
+var validDataHandling = map[string]bool{"zero_retention": true, "standard_retention": true, "unknown": true}
+
+const defaultDataHandling = "unknown"
+
 var allowedActionPathMethods = map[string]bool{
 	http.MethodGet: true, http.MethodPost: true, http.MethodPut: true,
 	http.MethodPatch: true, http.MethodDelete: true,
@@ -216,25 +228,28 @@ func validateActionPaths(m map[string]ActionPathMapping) (map[string]ActionPathM
 // ── Response types ────────────────────────────────────────────────────────────
 
 type ToolResp struct {
-	ID          uuid.UUID                    `json:"id"`
-	Name        string                       `json:"name"`
-	Type        string                       `json:"type"`
-	AuthType    string                       `json:"auth_type"`
-	MCPCommand  *string                      `json:"mcp_command,omitempty"`
-	BaseURL     *string                      `json:"base_url,omitempty"`
-	Status      string                       `json:"status"`
-	LastUsed    *time.Time                   `json:"last_used,omitempty"`
-	CreatedAt   time.Time                    `json:"created_at"`
-	ActionPaths map[string]ActionPathMapping `json:"action_paths,omitempty"`
-	Provider    *string                      `json:"provider,omitempty"`
-	AuditMode   string                       `json:"audit_mode"`
+	ID                      uuid.UUID                    `json:"id"`
+	Name                    string                       `json:"name"`
+	Type                    string                       `json:"type"`
+	AuthType                string                       `json:"auth_type"`
+	MCPCommand              *string                      `json:"mcp_command,omitempty"`
+	BaseURL                 *string                      `json:"base_url,omitempty"`
+	Status                  string                       `json:"status"`
+	LastUsed                *time.Time                   `json:"last_used,omitempty"`
+	CreatedAt               time.Time                    `json:"created_at"`
+	ActionPaths             map[string]ActionPathMapping `json:"action_paths,omitempty"`
+	Provider                *string                      `json:"provider,omitempty"`
+	AuditMode               string                       `json:"audit_mode"`
+	DataHandlingDesignation string                       `json:"data_handling_designation"`
+	DataHandlingNote        *string                      `json:"data_handling_note,omitempty"`
 }
 
 func toolToResp(t store.GatewayTool) ToolResp {
 	r := ToolResp{
 		ID: t.ID, Name: t.Name, Type: t.Type,
 		AuthType: t.AuthType, Status: t.Status, CreatedAt: t.CreatedAt,
-		AuditMode: t.AuditMode,
+		AuditMode:               t.AuditMode,
+		DataHandlingDesignation: t.DataHandlingDesignation,
 	}
 	if t.MCPCommand.Valid {
 		r.MCPCommand = &t.MCPCommand.String
@@ -244,6 +259,9 @@ func toolToResp(t store.GatewayTool) ToolResp {
 	}
 	if t.Provider.Valid {
 		r.Provider = &t.Provider.String
+	}
+	if t.DataHandlingNote.Valid {
+		r.DataHandlingNote = &t.DataHandlingNote.String
 	}
 	if t.LastUsed.Valid {
 		ts := t.LastUsed.Time
@@ -285,16 +303,18 @@ func (s *Server) CreateTool(w http.ResponseWriter, r *http.Request) {
 	uc := claimsFromContext(r)
 
 	var body struct {
-		Name        string                       `json:"name"`
-		Type        string                       `json:"type"`
-		AuthType    string                       `json:"auth_type"`
-		MCPCommand  *string                      `json:"mcp_command"`
-		MCPArgs     []string                     `json:"mcp_args"`
-		BaseURL     *string                      `json:"base_url"`
-		Credentials json.RawMessage              `json:"credentials"`
-		ActionPaths map[string]ActionPathMapping `json:"action_paths"`
-		Provider    *string                      `json:"provider"`
-		AuditMode   *string                      `json:"audit_mode"`
+		Name                    string                       `json:"name"`
+		Type                    string                       `json:"type"`
+		AuthType                string                       `json:"auth_type"`
+		MCPCommand              *string                      `json:"mcp_command"`
+		MCPArgs                 []string                     `json:"mcp_args"`
+		BaseURL                 *string                      `json:"base_url"`
+		Credentials             json.RawMessage              `json:"credentials"`
+		ActionPaths             map[string]ActionPathMapping `json:"action_paths"`
+		Provider                *string                      `json:"provider"`
+		AuditMode               *string                      `json:"audit_mode"`
+		DataHandlingDesignation *string                      `json:"data_handling_designation"`
+		DataHandlingNote        *string                      `json:"data_handling_note"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
@@ -327,6 +347,14 @@ func (s *Server) CreateTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "provider can only be set on an ai_provider-type tool")
 		return
 	}
+	if body.Type != "ai_provider" && (body.DataHandlingDesignation != nil || body.DataHandlingNote != nil) {
+		// Same guard as provider immediately above, same reason (B-078):
+		// data_handling_* is only meaningful for ai_provider -- a
+		// data-retention designation on a rest_api/mcp/database connector
+		// would be misleading persisted state, not a harmless no-op.
+		writeError(w, http.StatusBadRequest, "bad_request", "data_handling_designation/data_handling_note can only be set on an ai_provider-type tool")
+		return
+	}
 	auditMode := defaultAuditMode
 	if body.AuditMode != nil {
 		if !validAuditModes[*body.AuditMode] {
@@ -334,6 +362,14 @@ func (s *Server) CreateTool(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		auditMode = *body.AuditMode
+	}
+	dataHandling := defaultDataHandling
+	if body.DataHandlingDesignation != nil {
+		if !validDataHandling[*body.DataHandlingDesignation] {
+			writeError(w, http.StatusBadRequest, "bad_request", "data_handling_designation must be \"zero_retention\", \"standard_retention\", or \"unknown\"")
+			return
+		}
+		dataHandling = *body.DataHandlingDesignation
 	}
 	ts, ok := s.toolQueries()
 	if !ok {
@@ -381,17 +417,19 @@ func (s *Server) CreateTool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	t, err := ts.CreateTool(r.Context(), store.CreateToolParams{
-		OrgID:                uc.OrgID,
-		Name:                 body.Name,
-		Type:                 body.Type,
-		AuthType:             body.AuthType,
-		MCPCommand:           body.MCPCommand,
-		MCPArgs:              body.MCPArgs,
-		BaseURL:              body.BaseURL,
-		CredentialsEncrypted: encrypted,
-		ActionPaths:          actionPathsJSON,
-		Provider:             body.Provider,
-		AuditMode:            auditMode,
+		OrgID:                   uc.OrgID,
+		Name:                    body.Name,
+		Type:                    body.Type,
+		AuthType:                body.AuthType,
+		MCPCommand:              body.MCPCommand,
+		MCPArgs:                 body.MCPArgs,
+		BaseURL:                 body.BaseURL,
+		CredentialsEncrypted:    encrypted,
+		ActionPaths:             actionPathsJSON,
+		Provider:                body.Provider,
+		AuditMode:               auditMode,
+		DataHandlingDesignation: dataHandling,
+		DataHandlingNote:        body.DataHandlingNote,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -417,14 +455,16 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name        *string                      `json:"name"`
-		MCPCommand  *string                      `json:"mcp_command"`
-		MCPArgs     []string                     `json:"mcp_args"`
-		BaseURL     *string                      `json:"base_url"`
-		Credentials json.RawMessage              `json:"credentials"`
-		ActionPaths map[string]ActionPathMapping `json:"action_paths"`
-		Provider    *string                      `json:"provider"`
-		AuditMode   *string                      `json:"audit_mode"`
+		Name                    *string                      `json:"name"`
+		MCPCommand              *string                      `json:"mcp_command"`
+		MCPArgs                 []string                     `json:"mcp_args"`
+		BaseURL                 *string                      `json:"base_url"`
+		Credentials             json.RawMessage              `json:"credentials"`
+		ActionPaths             map[string]ActionPathMapping `json:"action_paths"`
+		Provider                *string                      `json:"provider"`
+		AuditMode               *string                      `json:"audit_mode"`
+		DataHandlingDesignation *string                      `json:"data_handling_designation"`
+		DataHandlingNote        *string                      `json:"data_handling_note"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
@@ -436,6 +476,10 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.AuditMode != nil && !validAuditModes[*body.AuditMode] {
 		writeError(w, http.StatusBadRequest, "bad_request", "audit_mode must be \"full\" or \"structural_metadata_only\"")
+		return
+	}
+	if body.DataHandlingDesignation != nil && !validDataHandling[*body.DataHandlingDesignation] {
+		writeError(w, http.StatusBadRequest, "bad_request", "data_handling_designation must be \"zero_retention\", \"standard_retention\", or \"unknown\"")
 		return
 	}
 	// A present-but-empty name would otherwise pass straight through
@@ -455,14 +499,15 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// provider/audit_mode are only meaningful for ai_provider-type
-	// connectors -- reusing GetToolForTest's existing read (already in the
-	// toolStore interface, no new query added) to check the row's actual
-	// current type before honoring either field. Without this, PATCH could
-	// silently set provider="claude" on e.g. a database-type tool -- no
-	// dispatch path ever reads it there, but it produces confusing,
-	// misleading state (code review finding, this task).
-	if body.Provider != nil || body.AuditMode != nil {
+	// provider/audit_mode/data_handling_* are only meaningful for
+	// ai_provider-type connectors -- reusing GetToolForTest's existing read
+	// (already in the toolStore interface, no new query added) to check
+	// the row's actual current type before honoring any of them. Without
+	// this, PATCH could silently set provider="claude" on e.g. a
+	// database-type tool -- no dispatch path ever reads it there, but it
+	// produces confusing, misleading state (code review finding, B-047;
+	// data_handling_* extends the identical guard, B-078).
+	if body.Provider != nil || body.AuditMode != nil || body.DataHandlingDesignation != nil || body.DataHandlingNote != nil {
 		row, err := ts.GetToolForTest(r.Context(), uc.OrgID, toolID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -473,7 +518,7 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if row.Type != "ai_provider" {
-			writeError(w, http.StatusBadRequest, "bad_request", "provider/audit_mode can only be set on an ai_provider-type connector")
+			writeError(w, http.StatusBadRequest, "bad_request", "provider/audit_mode/data_handling_designation/data_handling_note can only be set on an ai_provider-type connector")
 			return
 		}
 	}
@@ -529,16 +574,18 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	t, err := ts.UpdateTool(r.Context(), store.UpdateToolParams{
-		ID:                   toolID,
-		OrgID:                uc.OrgID,
-		Name:                 body.Name,
-		MCPCommand:           body.MCPCommand,
-		MCPArgs:              body.MCPArgs,
-		ActionPaths:          actionPathsJSON,
-		BaseURL:              body.BaseURL,
-		CredentialsEncrypted: encrypted,
-		Provider:             body.Provider,
-		AuditMode:            body.AuditMode,
+		ID:                      toolID,
+		OrgID:                   uc.OrgID,
+		Name:                    body.Name,
+		MCPCommand:              body.MCPCommand,
+		MCPArgs:                 body.MCPArgs,
+		ActionPaths:             actionPathsJSON,
+		BaseURL:                 body.BaseURL,
+		CredentialsEncrypted:    encrypted,
+		Provider:                body.Provider,
+		AuditMode:               body.AuditMode,
+		DataHandlingDesignation: body.DataHandlingDesignation,
+		DataHandlingNote:        body.DataHandlingNote,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

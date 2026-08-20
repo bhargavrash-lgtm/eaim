@@ -773,16 +773,58 @@ or prior context suggests otherwise, it is wrong; trust this line.
   episode/approval/workflow-run history (unclassified FK violation),
   logged as B-077, QUEUED.** Full writeup in `BUILT.md`'s `eami-api`
   section and `BACKLOG.md`'s B-075/B-076/B-077 entries.
+- **B-078 (done, 2026-08-20):** data-handling visibility for `ai_provider`
+  connectors — a real, admin-visible, auditable designation ("Zero Data
+  Retention enabled" / "Standard retention (no ZDR)" / "Unknown/not
+  configured") recording what a third-party AI provider's actual data-
+  retention agreement is. **Explicitly a visibility feature, not a
+  technical control** — EAMI cannot enforce what Claude/Gemini/OpenAI does
+  with dispatched data once it leaves the gateway. Mirrors B-047's
+  `audit_mode` pattern exactly, per a prior investigation this session
+  re-verified directly against current code before building (confirmed
+  the migration structure, `aiprovider.ToolRow`/`main.go`'s shared
+  `auditEntry` construction, and the audit hash-chain formula all matched).
+  `gateway_tools` gains a structured enum (`NOT NULL DEFAULT 'unknown'`,
+  the fail-safe default) plus free-text note; `audit_log` gains a third,
+  deliberately unconstrained per-call snapshot column. The snapshot is
+  applied once, at the same call site `AuditMode`'s existing redaction
+  already uses, in `main.go`'s single shared `auditEntry` construction —
+  this is what makes "historical audit entries stay accurate after a
+  later designation change" a real, load-bearing property rather than an
+  aspiration. **Reviewer + security passes both came back with ZERO
+  findings** — security review's explicit, required task was independently
+  re-deriving the hash-chain-exclusion claim from the actual code (not
+  the investigation's own reasoning), confirmed true by direct read;
+  code review re-traced every SQL column list for off-by-one errors and
+  found none, calling the diff "unusually well cross-checked." **Live-
+  verified with the actual central claim proven directly, not just
+  reasoned about:** a real dispatch while designation was `unknown` wrote
+  `unknown` into a real `audit_log` row; the connector's designation was
+  then changed and a second real dispatch wrote the new value; a direct
+  `psql` read confirmed the *first* row was completely unaltered. Hash-
+  chain integrity independently re-verified in a third language (Node.js)
+  against the two real rows, byte-for-byte match against the documented
+  SHA-256 formula. Full writeup in `BUILT.md`'s `eami-api` section and
+  `BACKLOG.md`'s B-078 entry.
 
 ## Last updated
-2026-08-20 by Claude Code — B-075: MCP Discovery Part C, OpenAPI-spec
-auto-discovery for `rest_api` connector actions. See the Standing facts
-entry immediately above for the full summary, including the critical
-first-step finding that B-061's `tools/list` is NOT compatible with a
-real external MCP client (logged as new backlog item B-076), the
-dispatch path-parameter-substitution limitation (disclosed, not fixed,
-matches B-044/046's frozen scope), and the two real security/code-review
-fixes applied before shipping.
+2026-08-20 by Claude Code — B-078: data-handling visibility for
+`ai_provider` connectors (a real designation for what a provider's
+actual data-retention agreement is, visibility only, mirroring B-047's
+`audit_mode` pattern). See the Standing facts entry immediately above
+for the full summary, including the per-call audit_log snapshot
+mechanism that makes historical accuracy real, and the zero-findings
+reviewer + security passes (hash-chain-exclusion claim independently
+re-derived from code, not assumed).
+
+Prior entry, still accurate: 2026-08-20 by Claude Code — B-075: MCP
+Discovery Part C, OpenAPI-spec auto-discovery for `rest_api` connector
+actions. See the Standing facts entry above for the full summary,
+including the critical first-step finding that B-061's `tools/list` is
+NOT compatible with a real external MCP client (logged as new backlog
+item B-076), the dispatch path-parameter-substitution limitation
+(disclosed, not fixed, matches B-044/046's frozen scope), and the two
+real security/code-review fixes applied before shipping.
 
 Prior entry, still accurate: 2026-08-19 by Claude Code — B-073:
 `eami-collector`'s shared `COLLECTOR_API_KEY` replaced with real

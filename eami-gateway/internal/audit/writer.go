@@ -58,6 +58,15 @@ type Entry struct {
 	TokenIn    int
 	TokenOut   int
 	Timestamp  time.Time
+	// DataHandling (B-078) is the dispatching ai_provider connector's
+	// data_handling_designation ("zero_retention" | "standard_retention" |
+	// "unknown"), snapshotted at dispatch time by the caller -- empty for
+	// every non-ai_provider dispatch. Deliberately NOT part of the hash
+	// content below (see Write's comment): a visibility-only field, not a
+	// governance decision like Decision, adding it to the hash would gain
+	// nothing while making every historical hash-verification script that
+	// already exists (or will be written) need to know about it.
+	DataHandling string
 	// Set by Writer.Write before calling InsertEntry:
 	PrevHash string
 	Hash     string
@@ -122,6 +131,11 @@ func (w *Writer) Write(ctx context.Context, e Entry) error {
 
 	// Hash formula (must match verify-audit-log.sh):
 	//   SHA-256(prevHash || id || orgID || agentName || toolName || action || decision || timestamp)
+	// Deliberately excludes Parameters, PolicyID, ApprovalID, ApprovedBy,
+	// LatencyMS, TokenIn/Out, and DataHandling (B-078) -- these are
+	// stored columns, not part of the tamper-evidence chain, matching the
+	// scope this formula has always had (confirmed directly against this
+	// code before B-078 added DataHandling, not assumed).
 	content := w.lastHash +
 		e.ID.String() +
 		e.OrgID.String() +
@@ -181,20 +195,30 @@ func (d *pgxpoolDB) InsertEntry(ctx context.Context, e Entry) error {
 	if e.ApprovalID != "" {
 		approvalID = &e.ApprovalID
 	}
+	// data_handling_designation (B-078) has no NOT NULL/CHECK constraint on
+	// audit_log (unlike gateway_tools' own copy) -- it's a per-call
+	// snapshot, empty/NULL for every non-ai_provider dispatch and for
+	// every row written before this migration, neither of which should be
+	// coerced into looking like a real "unknown" designation nobody
+	// actually confirmed.
+	var dataHandling *string
+	if e.DataHandling != "" {
+		dataHandling = &e.DataHandling
+	}
 
 	_, dbErr := d.pool.Exec(ctx, `
 		INSERT INTO audit_log (
 			id, org_id, agent_id, agent_name, tool_name, action,
 			parameters, decision, policy_id, approval_id, approved_by,
 			latency_ms, token_in, token_out,
-			timestamp, prev_hash, hash
+			timestamp, prev_hash, hash, data_handling_designation
 		) VALUES (
-			$1,$2,$3,$4,$5,$6, $7,$8,$9,$10,$11, $12,$13,$14, $15,$16,$17
+			$1,$2,$3,$4,$5,$6, $7,$8,$9,$10,$11, $12,$13,$14, $15,$16,$17, $18
 		)`,
 		e.ID, e.OrgID, agentID, e.AgentName, e.ToolName, e.Action,
 		params, e.Decision, policyID, approvalID, e.ApprovedBy,
 		e.LatencyMS, e.TokenIn, e.TokenOut,
-		e.Timestamp, e.PrevHash, e.Hash,
+		e.Timestamp, e.PrevHash, e.Hash, dataHandling,
 	)
 	return dbErr
 }

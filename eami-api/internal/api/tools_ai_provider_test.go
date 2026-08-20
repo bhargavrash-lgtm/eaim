@@ -325,6 +325,216 @@ func TestUpdateTool_ProviderAndAuditModeOmitted_LeavesUnchanged(t *testing.T) {
 	}
 }
 
+// ─── CreateTool/UpdateTool: data_handling_designation validation (B-078) ────
+// Mirrors this file's own audit_mode validation tests exactly -- same
+// fixture, same shape, same reasoning: a visibility-only enum with a
+// fail-safe default and a type-consistency guard.
+
+func TestCreateTool_AIProvider_DefaultDataHandling_IsUnknown(t *testing.T) {
+	env := newToolsTestEnv(t, testEncryptionKeyHex)
+	token := env.adminToken(t)
+
+	resp := env.postTool(t, token, map[string]any{
+		"name":      "default-data-handling-connector",
+		"type":      "ai_provider",
+		"auth_type": "api_key",
+		"provider":  "claude",
+		// data_handling_designation deliberately omitted
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := readAllBody(resp)
+		t.Fatalf("want 201, got %d: %s", resp.StatusCode, body)
+	}
+	if env.store.created.DataHandlingDesignation != "unknown" {
+		t.Errorf("stored DataHandlingDesignation = %q, want \"unknown\" (the fail-safe default)", env.store.created.DataHandlingDesignation)
+	}
+}
+
+func TestCreateTool_AIProvider_ExplicitZeroRetention_Persisted(t *testing.T) {
+	env := newToolsTestEnv(t, testEncryptionKeyHex)
+	token := env.adminToken(t)
+
+	resp := env.postTool(t, token, map[string]any{
+		"name":                      "zdr-connector",
+		"type":                      "ai_provider",
+		"auth_type":                 "api_key",
+		"provider":                  "claude",
+		"data_handling_designation": "zero_retention",
+		"data_handling_note":        "Anthropic Enterprise Agreement dated 2026-03-01, ZDR Addendum",
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := readAllBody(resp)
+		t.Fatalf("want 201, got %d: %s", resp.StatusCode, body)
+	}
+	if env.store.created.DataHandlingDesignation != "zero_retention" {
+		t.Errorf("stored DataHandlingDesignation = %q, want zero_retention", env.store.created.DataHandlingDesignation)
+	}
+	if env.store.created.DataHandlingNote == nil || *env.store.created.DataHandlingNote != "Anthropic Enterprise Agreement dated 2026-03-01, ZDR Addendum" {
+		t.Errorf("stored DataHandlingNote = %v, want the submitted citation", env.store.created.DataHandlingNote)
+	}
+}
+
+func TestCreateTool_AIProvider_InvalidDataHandling_Rejected(t *testing.T) {
+	env := newToolsTestEnv(t, testEncryptionKeyHex)
+	token := env.adminToken(t)
+
+	resp := env.postTool(t, token, map[string]any{
+		"name":                      "bad-data-handling-connector",
+		"type":                      "ai_provider",
+		"auth_type":                 "api_key",
+		"provider":                  "claude",
+		"data_handling_designation": "fully_anonymized", // not a real value -- must not be silently accepted
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("want 400 for an unrecognized data_handling_designation, got %d", resp.StatusCode)
+	}
+	if env.store.createCalled {
+		t.Error("CreateTool must not call the store for an invalid data_handling_designation")
+	}
+}
+
+// TestCreateTool_NonAIProvider_DataHandlingRejected proves the
+// type-consistency guard covers data_handling_* too, not just provider
+// (the exact class of gap code review caught for provider/audit_mode in
+// B-047, extended here on the first pass rather than found afterward).
+func TestCreateTool_NonAIProvider_DataHandlingRejected(t *testing.T) {
+	env := newToolsTestEnv(t, testEncryptionKeyHex)
+	token := env.adminToken(t)
+
+	resp := env.postTool(t, token, map[string]any{
+		"name":                      "confused-rest-tool",
+		"type":                      "rest_api",
+		"auth_type":                 "api_key",
+		"base_url":                  "https://example.com",
+		"data_handling_designation": "zero_retention",
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("want 400 for data_handling_designation set on a non-ai_provider type, got %d", resp.StatusCode)
+	}
+	if env.store.createCalled {
+		t.Error("CreateTool must not call the store when data_handling_designation is rejected for the wrong type")
+	}
+}
+
+func TestUpdateTool_AIProvider_DataHandlingFlip_Persisted(t *testing.T) {
+	env := newToolsTestEnv(t, testEncryptionKeyHex)
+	token := env.adminToken(t)
+	toolID := "22222222-0000-0000-0000-000000000006"
+	env.store.getForTestRow = toolTestRow{Type: "ai_provider", AuthType: "api_key"}
+
+	resp := env.patchTool(t, token, toolID, map[string]any{
+		"data_handling_designation": "standard_retention",
+		"data_handling_note":        "No ZDR addendum signed as of 2026-08-20",
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := readAllBody(resp)
+		t.Fatalf("want 200, got %d: %s", resp.StatusCode, body)
+	}
+	if env.store.updated.DataHandlingDesignation == nil || *env.store.updated.DataHandlingDesignation != "standard_retention" {
+		t.Errorf("updated DataHandlingDesignation = %v, want \"standard_retention\"", env.store.updated.DataHandlingDesignation)
+	}
+	if env.store.updated.DataHandlingNote == nil || *env.store.updated.DataHandlingNote != "No ZDR addendum signed as of 2026-08-20" {
+		t.Errorf("updated DataHandlingNote = %v, want the submitted note", env.store.updated.DataHandlingNote)
+	}
+}
+
+// TestUpdateTool_DataHandlingNote_EmptyStringClears proves the UI's own
+// "clear the note" path: an explicit empty string is a real value here
+// (unlike an omitted field), so it must reach the store as a non-nil
+// pointer to "", not be treated the same as "not submitted".
+func TestUpdateTool_DataHandlingNote_EmptyStringClears(t *testing.T) {
+	env := newToolsTestEnv(t, testEncryptionKeyHex)
+	token := env.adminToken(t)
+	toolID := "22222222-0000-0000-0000-000000000007"
+	env.store.getForTestRow = toolTestRow{Type: "ai_provider", AuthType: "api_key"}
+
+	resp := env.patchTool(t, token, toolID, map[string]any{
+		"data_handling_note": "",
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := readAllBody(resp)
+		t.Fatalf("want 200, got %d: %s", resp.StatusCode, body)
+	}
+	if env.store.updated.DataHandlingNote == nil {
+		t.Fatal("DataHandlingNote should be a non-nil pointer to \"\" (an explicit clear), got nil (would be treated as \"leave unchanged\")")
+	}
+	if *env.store.updated.DataHandlingNote != "" {
+		t.Errorf("DataHandlingNote = %q, want empty string", *env.store.updated.DataHandlingNote)
+	}
+}
+
+func TestUpdateTool_AIProvider_InvalidDataHandling_Rejected(t *testing.T) {
+	env := newToolsTestEnv(t, testEncryptionKeyHex)
+	token := env.adminToken(t)
+	toolID := "22222222-0000-0000-0000-000000000008"
+
+	resp := env.patchTool(t, token, toolID, map[string]any{
+		"data_handling_designation": "not-a-real-designation",
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("want 400 for an invalid data_handling_designation, got %d", resp.StatusCode)
+	}
+	if env.store.updateCalled {
+		t.Error("UpdateTool must not call the store for an invalid data_handling_designation")
+	}
+}
+
+func TestUpdateTool_NonAIProviderType_DataHandlingRejected(t *testing.T) {
+	env := newToolsTestEnv(t, testEncryptionKeyHex)
+	token := env.adminToken(t)
+	toolID := "22222222-0000-0000-0000-000000000009"
+	env.store.getForTestRow = toolTestRow{Type: "mcp", AuthType: "oauth2"}
+
+	resp := env.patchTool(t, token, toolID, map[string]any{
+		"data_handling_designation": "zero_retention",
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := readAllBody(resp)
+		t.Fatalf("want 400 when patching data_handling_designation onto an mcp-type tool, got %d: %s", resp.StatusCode, body)
+	}
+	if env.store.updateCalled {
+		t.Error("UpdateTool must not call the store when data_handling_designation is rejected for the wrong type")
+	}
+}
+
+func TestUpdateTool_DataHandlingOmitted_LeavesUnchanged(t *testing.T) {
+	env := newToolsTestEnv(t, testEncryptionKeyHex)
+	token := env.adminToken(t)
+	toolID := "22222222-0000-0000-0000-000000000010"
+
+	resp := env.patchTool(t, token, toolID, map[string]any{
+		"name": "renamed-only-again",
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := readAllBody(resp)
+		t.Fatalf("want 200, got %d: %s", resp.StatusCode, body)
+	}
+	if env.store.updated.DataHandlingDesignation != nil {
+		t.Errorf("DataHandlingDesignation should be nil (unchanged/COALESCE) when omitted, got %v", env.store.updated.DataHandlingDesignation)
+	}
+	if env.store.updated.DataHandlingNote != nil {
+		t.Errorf("DataHandlingNote should be nil (unchanged/COALESCE) when omitted, got %v", env.store.updated.DataHandlingNote)
+	}
+}
+
 // ─── response shape ─────────────────────────────────────────────────────────
 
 func TestToolToResp_ProviderAndAuditMode_RoundTrip(t *testing.T) {
@@ -342,5 +552,41 @@ func TestToolToResp_ProviderAndAuditMode_RoundTrip(t *testing.T) {
 	}
 	if resp.AuditMode != "structural_metadata_only" {
 		t.Errorf("resp.AuditMode = %q, want structural_metadata_only", resp.AuditMode)
+	}
+}
+
+func TestToolToResp_DataHandling_RoundTrip(t *testing.T) {
+	tool := store.GatewayTool{
+		Type:                    "ai_provider",
+		AuthType:                "api_key",
+		AuditMode:               "structural_metadata_only",
+		DataHandlingDesignation: "zero_retention",
+	}
+	tool.DataHandlingNote.String, tool.DataHandlingNote.Valid = "ZDR Addendum dated 2026-03-01", true
+
+	resp := toolToResp(tool)
+	if resp.DataHandlingDesignation != "zero_retention" {
+		t.Errorf("resp.DataHandlingDesignation = %q, want zero_retention", resp.DataHandlingDesignation)
+	}
+	if resp.DataHandlingNote == nil || *resp.DataHandlingNote != "ZDR Addendum dated 2026-03-01" {
+		t.Errorf("resp.DataHandlingNote = %v, want the note", resp.DataHandlingNote)
+	}
+}
+
+func TestToolToResp_DataHandling_NotSet_OmitsNote(t *testing.T) {
+	tool := store.GatewayTool{
+		Type:                    "ai_provider",
+		AuthType:                "api_key",
+		AuditMode:               "structural_metadata_only",
+		DataHandlingDesignation: "unknown",
+		// DataHandlingNote deliberately left zero-value (pgtype.Text{Valid: false})
+	}
+
+	resp := toolToResp(tool)
+	if resp.DataHandlingDesignation != "unknown" {
+		t.Errorf("resp.DataHandlingDesignation = %q, want unknown", resp.DataHandlingDesignation)
+	}
+	if resp.DataHandlingNote != nil {
+		t.Errorf("resp.DataHandlingNote = %v, want nil (no note set)", resp.DataHandlingNote)
 	}
 }

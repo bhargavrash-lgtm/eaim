@@ -269,6 +269,17 @@ func run() error {
 		if resolvedProvider != nil && resolvedProvider.AuditMode != "full" {
 			auditEntry.Parameters = nil
 		}
+		// Data-handling visibility (B-078): snapshot the connector's
+		// data_handling_designation into this call's audit_log entry, same
+		// call site and same "applied once, covers every branch below
+		// uniformly" reasoning as AuditMode immediately above. This is
+		// what makes AC3 real: a later change to the connector's own
+		// designation only affects future dispatches' auditEntry
+		// construction (a fresh resolvedProvider read), never this
+		// already-built value for the current call.
+		if resolvedProvider != nil {
+			auditEntry.DataHandling = resolvedProvider.DataHandling
+		}
 
 		switch decision.Action {
 		case policy.ActionDeny:

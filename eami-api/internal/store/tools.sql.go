@@ -11,7 +11,7 @@ func (q *Queries) ListTools(ctx context.Context, orgID uuid.UUID) ([]GatewayTool
 	const sql = `
 SELECT id, org_id, name, type, auth_type, mcp_command, base_url,
        status, last_used, last_tested, created_at, action_paths,
-       provider, audit_mode
+       provider, audit_mode, data_handling_designation, data_handling_note
 FROM gateway_tools
 WHERE org_id = $1
 ORDER BY name ASC`
@@ -29,7 +29,7 @@ ORDER BY name ASC`
 			&t.ID, &t.OrgID, &t.Name, &t.Type, &t.AuthType,
 			&t.MCPCommand, &t.BaseURL, &t.Status,
 			&t.LastUsed, &t.LastTested, &t.CreatedAt, &t.ActionPaths,
-			&t.Provider, &t.AuditMode,
+			&t.Provider, &t.AuditMode, &t.DataHandlingDesignation, &t.DataHandlingNote,
 		); err != nil {
 			return nil, err
 		}
@@ -63,6 +63,14 @@ type CreateToolParams struct {
 	// rather than relying on the column's DB DEFAULT, since this INSERT
 	// always lists the column).
 	AuditMode string
+	// DataHandlingDesignation is "zero_retention" | "standard_retention" |
+	// "unknown" (B-078) -- like AuditMode, always set by the caller
+	// (defaulted explicitly below, not relying on the column's DB
+	// DEFAULT, since this INSERT always lists the column).
+	DataHandlingDesignation string
+	// DataHandlingNote is nil for "not set" -- unlike DataHandlingDesignation,
+	// this column has no NOT NULL/default, so nil is a real, meaningful value.
+	DataHandlingNote *string
 }
 
 // CreateTool inserts a new gateway tool and returns it. AuditMode defaults
@@ -74,12 +82,15 @@ func (q *Queries) CreateTool(ctx context.Context, p CreateToolParams) (GatewayTo
 	if p.AuditMode == "" {
 		p.AuditMode = "structural_metadata_only"
 	}
+	if p.DataHandlingDesignation == "" {
+		p.DataHandlingDesignation = "unknown"
+	}
 	const sql = `
-INSERT INTO gateway_tools (org_id, name, type, auth_type, mcp_command, mcp_args, base_url, credentials_encrypted, action_paths, provider, audit_mode)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+INSERT INTO gateway_tools (org_id, name, type, auth_type, mcp_command, mcp_args, base_url, credentials_encrypted, action_paths, provider, audit_mode, data_handling_designation, data_handling_note)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 RETURNING id, org_id, name, type, auth_type, mcp_command, base_url,
           status, last_used, last_tested, created_at, action_paths,
-          provider, audit_mode`
+          provider, audit_mode, data_handling_designation, data_handling_note`
 
 	var t GatewayTool
 	err := q.db.QueryRow(ctx, sql,
@@ -87,11 +98,12 @@ RETURNING id, org_id, name, type, auth_type, mcp_command, base_url,
 		toPgtypeText(p.MCPCommand), p.MCPArgs, toPgtypeText(p.BaseURL),
 		p.CredentialsEncrypted, p.ActionPaths,
 		toPgtypeText(p.Provider), p.AuditMode,
+		p.DataHandlingDesignation, toPgtypeText(p.DataHandlingNote),
 	).Scan(
 		&t.ID, &t.OrgID, &t.Name, &t.Type, &t.AuthType,
 		&t.MCPCommand, &t.BaseURL, &t.Status,
 		&t.LastUsed, &t.LastTested, &t.CreatedAt, &t.ActionPaths,
-		&t.Provider, &t.AuditMode,
+		&t.Provider, &t.AuditMode, &t.DataHandlingDesignation, &t.DataHandlingNote,
 	)
 	return t, err
 }
@@ -126,6 +138,17 @@ type UpdateToolParams struct {
 	// "structural_metadata_only" after creation without touching anything
 	// else.
 	AuditMode *string
+	// DataHandlingDesignation (B-078), like AuditMode, is nil to leave it
+	// unchanged (COALESCE) -- lets an admin update this independently of
+	// every other field.
+	DataHandlingDesignation *string
+	// DataHandlingNote, like Name/BaseURL/MCPCommand, is nil to leave it
+	// unchanged (COALESCE) and a non-nil pointer -- including one pointing
+	// at "" -- to overwrite it. An explicit empty string is a real,
+	// meaningful value here (not SQL NULL), so COALESCE correctly applies
+	// it rather than falling back to the existing note: this is how an
+	// admin clears a previously-set note via the UI.
+	DataHandlingNote *string
 }
 
 // UpdateTool applies a partial update to an existing tool and returns the
@@ -136,18 +159,20 @@ type UpdateToolParams struct {
 func (q *Queries) UpdateTool(ctx context.Context, p UpdateToolParams) (GatewayTool, error) {
 	const sql = `
 UPDATE gateway_tools SET
-    name                  = COALESCE($3, name),
-    mcp_command           = COALESCE($4, mcp_command),
-    mcp_args              = COALESCE($5, mcp_args),
-    base_url              = COALESCE($6, base_url),
-    credentials_encrypted = COALESCE($7, credentials_encrypted),
-    action_paths          = COALESCE($8, action_paths),
-    provider              = COALESCE($9, provider),
-    audit_mode            = COALESCE($10, audit_mode)
+    name                       = COALESCE($3, name),
+    mcp_command                = COALESCE($4, mcp_command),
+    mcp_args                   = COALESCE($5, mcp_args),
+    base_url                   = COALESCE($6, base_url),
+    credentials_encrypted      = COALESCE($7, credentials_encrypted),
+    action_paths               = COALESCE($8, action_paths),
+    provider                   = COALESCE($9, provider),
+    audit_mode                 = COALESCE($10, audit_mode),
+    data_handling_designation  = COALESCE($11, data_handling_designation),
+    data_handling_note         = COALESCE($12, data_handling_note)
 WHERE id = $1 AND org_id = $2
 RETURNING id, org_id, name, type, auth_type, mcp_command, base_url,
           status, last_used, last_tested, created_at, action_paths,
-          provider, audit_mode`
+          provider, audit_mode, data_handling_designation, data_handling_note`
 
 	var t GatewayTool
 	err := q.db.QueryRow(ctx, sql,
@@ -155,11 +180,12 @@ RETURNING id, org_id, name, type, auth_type, mcp_command, base_url,
 		toPgtypeText(p.Name), toPgtypeText(p.MCPCommand), p.MCPArgs, toPgtypeText(p.BaseURL),
 		p.CredentialsEncrypted, p.ActionPaths,
 		toPgtypeText(p.Provider), toPgtypeText(p.AuditMode),
+		toPgtypeText(p.DataHandlingDesignation), toPgtypeText(p.DataHandlingNote),
 	).Scan(
 		&t.ID, &t.OrgID, &t.Name, &t.Type, &t.AuthType,
 		&t.MCPCommand, &t.BaseURL, &t.Status,
 		&t.LastUsed, &t.LastTested, &t.CreatedAt, &t.ActionPaths,
-		&t.Provider, &t.AuditMode,
+		&t.Provider, &t.AuditMode, &t.DataHandlingDesignation, &t.DataHandlingNote,
 	)
 	return t, err
 }

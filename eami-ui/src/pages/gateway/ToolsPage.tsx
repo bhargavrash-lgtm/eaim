@@ -16,7 +16,7 @@ import {
   useTestTool,
   useDiscoverOpenAPI,
 } from '@/hooks/useTools'
-import type { ActionPathMapping, OpenAPIDiscoverResult, ToolAuditMode, ToolCreateWithActions, ToolProvider, ToolType, ToolUpdate, ToolWithActions } from '@/hooks/useTools'
+import type { ActionPathMapping, OpenAPIDiscoverResult, ToolAuditMode, ToolCreateWithActions, ToolDataHandling, ToolProvider, ToolType, ToolUpdate, ToolWithActions } from '@/hooks/useTools'
 
 // AI provider connectors (Thread A Model 1): the full set of providers a
 // second connector could target. Only "claude" has a real gateway adapter
@@ -29,6 +29,18 @@ const AI_PROVIDERS: { value: ToolProvider; label: string }[] = [
 const AUDIT_MODES: { value: ToolAuditMode; label: string; hint: string }[] = [
   { value: 'structural_metadata_only', label: 'Structural metadata only (recommended)', hint: 'Audit log records tool/action/decision/timing -- never the prompt content.' },
   { value: 'full', label: 'Full', hint: 'Audit log includes the full request, including prompt content. Use only if your compliance posture requires it.' },
+]
+
+// Data-handling visibility (B-078) -- a VISIBILITY designation only, not a
+// technical control: EAMI cannot enforce what a third-party AI provider
+// does with dispatched data, this records what the admin has confirmed
+// the actual commercial agreement says. "unknown" is listed first and is
+// the fail-safe default, deliberately not implying any particular
+// retention posture until an admin explicitly confirms one.
+const DATA_HANDLING_OPTIONS: { value: ToolDataHandling; label: string }[] = [
+  { value: 'unknown', label: 'Unknown / not configured' },
+  { value: 'zero_retention', label: 'Zero Data Retention enabled' },
+  { value: 'standard_retention', label: 'Standard retention (no ZDR)' },
 ]
 
 // Status badge
@@ -337,6 +349,8 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
   const [actionRows, setActionRows] = useState<ActionPathRow[]>([])
   const [provider, setProvider]   = useState<ToolProvider>('claude')
   const [auditMode, setAuditMode] = useState<ToolAuditMode>('structural_metadata_only')
+  const [dataHandling, setDataHandling] = useState<ToolDataHandling>('unknown')
+  const [dataHandlingNote, setDataHandlingNote] = useState('')
 
   // Same merge as EditToolPanel's identical handler below -- discovery is
   // stateless (POST /v1/gateway/openapi/discover needs no existing tool
@@ -366,6 +380,8 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
         action_paths: Object.keys(actionPaths).length > 0 ? actionPaths : undefined,
         provider: type === 'ai_provider' ? provider : undefined,
         audit_mode: type === 'ai_provider' ? auditMode : undefined,
+        data_handling_designation: type === 'ai_provider' ? dataHandling : undefined,
+        data_handling_note: type === 'ai_provider' && dataHandlingNote ? dataHandlingNote : undefined,
       }
       await create.mutateAsync(body)
       setToast('Tool added')
@@ -487,6 +503,22 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
                 </select>
                 <p className="text-xs text-gray-400 mt-1">{AUDIT_MODES.find(m => m.value === auditMode)?.hint}</p>
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Data handling</label>
+                <select value={dataHandling} onChange={e => setDataHandling(e.target.value as ToolDataHandling)}
+                  className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  {DATA_HANDLING_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  Visibility only -- EAMI cannot enforce what {AI_PROVIDERS.find(p => p.value === provider)?.label ?? 'the provider'} does with dispatched data. This records what your commercial agreement actually says.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Data handling note (optional)</label>
+                <textarea value={dataHandlingNote} onChange={e => setDataHandlingNote(e.target.value)} rows={2}
+                  className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="e.g. Anthropic Enterprise Agreement dated 2026-03-01, ZDR Addendum" />
+              </div>
             </>
           )}
 
@@ -542,6 +574,8 @@ function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () =
   )
   const [provider, setProvider]   = useState<ToolProvider>(tool.provider ?? 'claude')
   const [auditMode, setAuditMode] = useState<ToolAuditMode>(tool.audit_mode ?? 'structural_metadata_only')
+  const [dataHandling, setDataHandling] = useState<ToolDataHandling>(tool.data_handling_designation ?? 'unknown')
+  const [dataHandlingNote, setDataHandlingNote] = useState(tool.data_handling_note ?? '')
 
   const credLabel =
     tool.auth_type === 'api_key' ? 'API key' :
@@ -581,6 +615,14 @@ function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () =
         action_paths: tool.type === 'rest_api' ? rowsToActionPaths(actionRows) : undefined,
         provider: tool.type === 'ai_provider' ? provider : undefined,
         audit_mode: tool.type === 'ai_provider' ? auditMode : undefined,
+        data_handling_designation: tool.type === 'ai_provider' ? dataHandling : undefined,
+        // Deliberately NOT `|| undefined` (unlike base_url above) -- an
+        // empty string here is a real, meaningful "clear the note" value
+        // the backend distinguishes from "omitted" (see
+        // store.UpdateToolParams.DataHandlingNote's doc comment). Using
+        // `|| undefined` would make clearing an already-set note
+        // impossible through this UI.
+        data_handling_note: tool.type === 'ai_provider' ? dataHandlingNote : undefined,
       }
       // Only include `credentials` at all if the admin actually typed
       // something -- an empty/omitted object here must never reach the
@@ -683,6 +725,28 @@ function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () =
                   {AUDIT_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                 </select>
                 <p className="text-xs text-gray-400 mt-1">{AUDIT_MODES.find(m => m.value === auditMode)?.hint}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Data handling</label>
+                <select value={dataHandling} onChange={e => setDataHandling(e.target.value as ToolDataHandling)}
+                  className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  {DATA_HANDLING_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                {dataHandling === 'unknown' && (
+                  <p className="flex items-center gap-1 text-xs text-amber-700 mt-1">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    No data-handling designation confirmed for this connector yet.
+                  </p>
+                )}
+                <p className="text-xs text-gray-400 mt-1">
+                  Visibility only -- EAMI cannot enforce what {AI_PROVIDERS.find(p => p.value === provider)?.label ?? 'the provider'} does with dispatched data. This records what your commercial agreement actually says.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Data handling note (optional)</label>
+                <textarea value={dataHandlingNote} onChange={e => setDataHandlingNote(e.target.value)} rows={2}
+                  className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="e.g. Anthropic Enterprise Agreement dated 2026-03-01, ZDR Addendum" />
               </div>
             </>
           )}
@@ -801,7 +865,18 @@ export function ToolsPage() {
                   return (
                     <tr key={tool.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium text-gray-900">{tool.name}</td>
-                      <td className="px-4 py-3"><TypeBadge type={tool.type} /></td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <TypeBadge type={tool.type} />
+                          {tool.type === 'ai_provider' && (tool.data_handling_designation ?? 'unknown') === 'unknown' && (
+                            <span title="No data-handling designation confirmed for this connector -- open it to set one."
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-100 text-amber-800">
+                              <AlertCircle className="h-3 w-3" />
+                              data handling unknown
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-xs text-gray-500 font-mono">{tool.auth_type ?? '--'}</td>
                       <td className="px-4 py-3"><StatusBadge status={tool.status} /></td>
                       <td className="px-4 py-3 text-xs font-mono text-gray-500 max-w-xs truncate">

@@ -33,6 +33,15 @@ type ToolRow struct {
 	// unaffected, matching this brief's explicit scope (AC5's own
 	// wording: "audit logging" specifically).
 	AuditMode string
+	// DataHandling is "zero_retention" | "standard_retention" | "unknown"
+	// (schema/migrations-v2/000008, B-078) -- a VISIBILITY designation
+	// only, never a technical control (EAMI cannot enforce what a
+	// third-party provider does with dispatched data). Snapshotted into
+	// the audit_log entry for each call through this connector, mirroring
+	// AuditMode's own resolve-then-apply-once pattern, so a later change
+	// to this connector's designation never retroactively alters an
+	// already-written audit record.
+	DataHandling string
 }
 
 // Router resolves ai_provider gateway_tools rows and dispatches their
@@ -62,14 +71,14 @@ func New(pool *pgxpool.Pool, cipher *toolrouter.Cipher, registry map[string]Adap
 // as toolrouter's convention of a single not-found signal).
 func (r *Router) Resolve(ctx context.Context, orgID, name string) (*ToolRow, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id::text, provider, auth_type, credentials_encrypted, audit_mode
+		SELECT id::text, provider, auth_type, credentials_encrypted, audit_mode, data_handling_designation
 		FROM gateway_tools
 		WHERE org_id = $1 AND name = $2 AND type = 'ai_provider'
 	`, orgID, name)
 
 	var t ToolRow
 	var provider *string
-	if err := row.Scan(&t.ID, &provider, &t.AuthType, &t.CredentialsEncrypted, &t.AuditMode); err != nil {
+	if err := row.Scan(&t.ID, &provider, &t.AuthType, &t.CredentialsEncrypted, &t.AuditMode, &t.DataHandling); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}

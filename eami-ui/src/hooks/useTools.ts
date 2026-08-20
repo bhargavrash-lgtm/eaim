@@ -46,17 +46,29 @@ export type ToolProvider = 'claude'
 export type ToolAuditMode = 'full' | 'structural_metadata_only'
 export type ToolType = 'mcp' | 'rest_api' | 'database' | 'ai_provider'
 
+// ToolDataHandling (B-078) -- a VISIBILITY designation, not a technical
+// control: EAMI cannot enforce what a third-party AI provider does with
+// dispatched data, this records what the admin has confirmed the actual
+// commercial agreement says. "unknown" is the fail-safe default -- a
+// connector must never silently imply a retention posture nobody has
+// actually confirmed.
+export type ToolDataHandling = 'zero_retention' | 'standard_retention' | 'unknown'
+
 export type ToolWithActions = Omit<Tool, 'type'> & {
   type: ToolType
   action_paths?: Record<string, ActionPathMapping>
   provider?: ToolProvider
   audit_mode?: ToolAuditMode
+  data_handling_designation?: ToolDataHandling
+  data_handling_note?: string
 }
 export type ToolCreateWithActions = Omit<ToolCreate, 'type'> & {
   type: ToolType
   action_paths?: Record<string, ActionPathMapping>
   provider?: ToolProvider
   audit_mode?: ToolAuditMode
+  data_handling_designation?: ToolDataHandling
+  data_handling_note?: string
 }
 
 // ToolUpdate (B-045) -- PATCH /v1/gateway/tools/{toolId} isn't in
@@ -81,6 +93,8 @@ export type ToolUpdate = {
   action_paths?: Record<string, ActionPathMapping>
   provider?: ToolProvider
   audit_mode?: ToolAuditMode
+  data_handling_designation?: ToolDataHandling
+  data_handling_note?: string
 }
 
 export function useTools() {

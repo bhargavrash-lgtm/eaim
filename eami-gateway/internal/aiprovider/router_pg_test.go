@@ -102,6 +102,34 @@ func TestResolve_FindsAIProviderConnector(t *testing.T) {
 	if row.AuditMode != "full" {
 		t.Errorf("AuditMode = %q, want full", row.AuditMode)
 	}
+	// data_handling_designation (B-078) was never explicitly set on this
+	// insert -- proves Resolve reads back the real DB DEFAULT ('unknown'),
+	// not a Go-side zero-value coincidence.
+	if row.DataHandling != "unknown" {
+		t.Errorf("DataHandling = %q, want the DB default \"unknown\"", row.DataHandling)
+	}
+}
+
+// TestResolve_DataHandlingDesignation_RoundTrips proves B-078 AC1/AC2's
+// prerequisite: a connector with a real, explicitly-set designation
+// resolves it correctly, not just the default case above.
+func TestResolve_DataHandlingDesignation_RoundTrips(t *testing.T) {
+	env := newAIProviderTestEnv(t)
+	if _, err := env.pool.Exec(context.Background(), `
+		INSERT INTO gateway_tools (id, org_id, name, type, auth_type, provider, audit_mode, data_handling_designation)
+		VALUES ($1, $2, $3, 'ai_provider', 'api_key', 'claude', 'full', 'zero_retention')
+	`, uuid.New(), env.orgID, "claude-zdr"); err != nil {
+		t.Fatalf("insert connector with explicit designation: %v", err)
+	}
+
+	r := New(env.pool, nil, nil)
+	row, err := r.Resolve(context.Background(), env.orgID.String(), "claude-zdr")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if row.DataHandling != "zero_retention" {
+		t.Errorf("DataHandling = %q, want zero_retention", row.DataHandling)
+	}
 }
 
 func TestResolve_NotFound_ReturnsErrNotFound(t *testing.T) {

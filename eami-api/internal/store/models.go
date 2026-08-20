@@ -221,6 +221,19 @@ type GatewayTool struct {
 	// connector's call parameters; meaningful only for type=ai_provider
 	// but present (at its DB default) on every row.
 	AuditMode string
+	// DataHandlingDesignation is "zero_retention" | "standard_retention" |
+	// "unknown" (NOT NULL, defaults to "unknown" -- schema/migrations-v2/
+	// 000008). Visibility only, per B-078: EAMI cannot enforce what a
+	// third-party AI provider does with dispatched data, this records
+	// what the admin has confirmed the actual commercial agreement says.
+	// Meaningful only for type=ai_provider but present (at its DB
+	// default) on every row, same as AuditMode above.
+	DataHandlingDesignation string
+	// DataHandlingNote is a free-text citation of the actual agreement
+	// (e.g. "Anthropic Enterprise Agreement dated 2026-03-01, ZDR
+	// Addendum") -- nullable, since a structured designation alone may be
+	// all an admin has confirmed.
+	DataHandlingNote pgtype.Text
 }
 
 // GatewayNode mirrors the gateway_nodes table (joined with latest metrics).
