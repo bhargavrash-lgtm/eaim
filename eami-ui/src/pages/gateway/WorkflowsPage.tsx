@@ -807,18 +807,22 @@ export function WorkflowsPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {workflows.map(wf => (
-                  <tr key={wf.id} className="hover:bg-gray-50">
+                  <tr
+                    key={wf.id}
+                    className="cursor-pointer hover:bg-gray-50"
+                    onClick={() => setEditTargetId(wf.id)}
+                  >
                     <td className="px-4 py-3 font-medium text-gray-900">{wf.name}</td>
                     <td className="px-4 py-3"><StatusBadge status={wf.status} /></td>
                     <td className="px-4 py-3 text-xs text-gray-500">{wf.step_count ?? 0}</td>
                     <td className="px-4 py-3 text-xs text-gray-400">{formatDate(wf.created_at)}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-3">
-                        <button onClick={() => setEditTargetId(wf.id)}
+                        <button onClick={(e) => { e.stopPropagation(); setEditTargetId(wf.id) }}
                           className="text-gray-400 hover:text-indigo-600" title="Edit">
                           <Pencil className="h-4 w-4" />
                         </button>
-                        <button onClick={() => setDeleteTarget(wf)}
+                        <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(wf) }}
                           className="text-gray-400 hover:text-red-600" title="Delete">
                           <Trash2 className="h-4 w-4" />
                         </button>

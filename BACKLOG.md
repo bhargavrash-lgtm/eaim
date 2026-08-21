@@ -677,28 +677,19 @@ New `PATCH /v1/gateway/tools/{toolId}` (`store.UpdateTool`/`Server.UpdateTool`) 
 **Verified:** real `npm run type-check`/`npm run build` clean. Live-verified against the real stack: served module confirmed current via `curl` (zero "Serf" left), then Refresh (`GET /v1/gateway/nodes`) and Delete (`DELETE /v1/gateway/nodes/{id}`) both exercised against a real throwaway test row — both confirmed still working, no regression.
 **Dependencies:** none for this fix. **B-043** remains open, separate, future work — real multi-node registration/heartbeat was explicitly out of scope here.
 
-### B-081 — Agents list row: hover affordance implies clickability, no onClick wired
-**Objective:** `eami-ui/src/pages/gateway/AgentsPage.tsx`'s agents-table `<tr>` (`AgentsPage.tsx:221`) has `className="hover:bg-gray-50"` with no `onClick` bound anywhere on the element — only the "Configure" button opens `ConfigPanel`. Same bug class as B-079 (Tools), found by the Dead Clicks Audit.
-**Acceptance criteria:**
-- [ ] Wire the row's `onClick` to open `ConfigPanel` (matching the "Configure" button's existing behavior), or explicitly decide the row should stay non-clickable and remove `hover:bg-gray-50` instead — either is acceptable, but the current middle ground (hover implies action, nothing happens) is not
-- [ ] If wired to open the panel: the "Configure" button's own `onClick` calls `e.stopPropagation()` so it doesn't double-fire
-**Severity:** Low — real UX mismatch, not urgent, no data-correctness or security impact.
+### B-081 — Agents list row: hover affordance implies clickability, no onClick wired — **DONE, 2026-08-22**
+**Objective:** `eami-ui/src/pages/gateway/AgentsPage.tsx`'s agents-table `<tr>` had `className="hover:bg-gray-50"` with no `onClick` bound — only the "Configure" button opened `ConfigPanel`. Same bug class as B-079 (Tools), found by the Dead Clicks Audit. Fixed together with B-082/083 in one brief, standardizing all three onto the same corrected pattern rather than patching individually — see `BUILT.md` for the shared writeup.
+**Resolution:** row `<tr>` now has `cursor-pointer hover:bg-gray-50` (matching `DataTable.tsx`'s own conditional-affordance pattern: hover *and* cursor styling paired, only present when a real handler exists) plus a real `onClick={() => setConfigAgent(agent)}`. The "Configure" button's own `onClick` now calls `e.stopPropagation()` first.
 **Dependencies:** none.
 
-### B-082 — Policies list row: hover affordance implies clickability, no onClick wired
-**Objective:** `eami-ui/src/pages/gateway/PoliciesPage.tsx`'s policy-table `<tr>` (`PoliciesPage.tsx:340`) has `className="hover:bg-gray-50"` with no `onClick` bound — only the pencil/Edit icon (`:365-368`) opens the edit panel. Same bug class as B-079, found by the Dead Clicks Audit.
-**Acceptance criteria:**
-- [ ] Wire the row's `onClick` to open the edit panel (matching the pencil icon's existing behavior)
-- [ ] Pencil/trash icon buttons call `e.stopPropagation()` in their `onClick` so they don't double-fire against the new row-level handler
-**Severity:** Low — real UX mismatch, not urgent, no data-correctness or security impact.
-**Dependencies:** none. See **B-086** for a related, higher-priority finding on the same page (the drag-handle icon).
+### B-082 — Policies list row: hover affordance implies clickability, no onClick wired — **DONE, 2026-08-22**
+**Objective:** `eami-ui/src/pages/gateway/PoliciesPage.tsx`'s policy-table `<tr>` had `className="hover:bg-gray-50"` with no `onClick` bound — only the pencil/Edit icon opened the edit panel. Same bug class as B-079, found by the Dead Clicks Audit.
+**Resolution:** row `<tr>` now has `cursor-pointer hover:bg-gray-50` plus a real `onClick={() => setPanel({mode:'edit', policy})}`. All four in-row buttons (the two B-086 move-up/move-down buttons, plus pencil and trash) now call `e.stopPropagation()` first, so none of them double-fires the row's new handler.
+**Dependencies:** none. See **B-086**, already resolved, for the related higher-priority finding on the same page (the drag-handle icon).
 
-### B-083 — Workflows list row: hover affordance implies clickability, no onClick wired
-**Objective:** `eami-ui/src/pages/gateway/WorkflowsPage.tsx`'s workflow-table `<tr>` (`WorkflowsPage.tsx:810`) has `className="hover:bg-gray-50"` with no `onClick` bound — only the pencil/Edit icon (`:817`) opens `EditWorkflowPanel`. Same bug class as B-079, found by the Dead Clicks Audit.
-**Acceptance criteria:**
-- [ ] Wire the row's `onClick` to open `EditWorkflowPanel` (matching the pencil icon's existing behavior)
-- [ ] Pencil/trash icon buttons call `e.stopPropagation()` in their `onClick` so they don't double-fire against the new row-level handler
-**Severity:** Low — real UX mismatch, not urgent, no data-correctness or security impact.
+### B-083 — Workflows list row: hover affordance implies clickability, no onClick wired — **DONE, 2026-08-22**
+**Objective:** `eami-ui/src/pages/gateway/WorkflowsPage.tsx`'s workflow-table `<tr>` had `className="hover:bg-gray-50"` with no `onClick` bound — only the pencil/Edit icon opened `EditWorkflowPanel`. Same bug class as B-079, found by the Dead Clicks Audit.
+**Resolution:** row `<tr>` now has `cursor-pointer hover:bg-gray-50` plus a real `onClick={() => setEditTargetId(wf.id)}`. Pencil and trash buttons now call `e.stopPropagation()` first.
 **Dependencies:** none.
 
 ### B-084 — Audit list row: hover affordance implies clickability, but no detail view exists to open

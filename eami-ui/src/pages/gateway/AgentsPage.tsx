@@ -218,7 +218,11 @@ export function AgentsPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {agents.map(agent => (
-                <tr key={agent.id} className="hover:bg-gray-50">
+                <tr
+                  key={agent.id}
+                  className="cursor-pointer hover:bg-gray-50"
+                  onClick={() => setConfigAgent(agent)}
+                >
                   <td className="px-4 py-3 font-medium text-gray-900">{agent.name}</td>
                   <td className="px-4 py-3 font-mono text-gray-600">{agent.model}</td>
                   <td className="px-4 py-3">
@@ -230,7 +234,7 @@ export function AgentsPage() {
                   <td className="px-4 py-3 text-gray-500">{(agent as any).owner}</td>
                   <td className="px-4 py-3 text-right">
                     <button
-                      onClick={() => setConfigAgent(agent)}
+                      onClick={(e) => { e.stopPropagation(); setConfigAgent(agent) }}
                       className="text-indigo-600 hover:text-indigo-800 text-xs font-medium"
                     >
                       Configure

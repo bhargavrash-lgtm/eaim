@@ -358,11 +358,15 @@ export function PoliciesPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {policies.map((policy, idx) => (
-                  <tr key={policy.id} className="hover:bg-gray-50">
+                  <tr
+                    key={policy.id}
+                    className="cursor-pointer hover:bg-gray-50"
+                    onClick={() => setPanel({ mode: 'edit', policy })}
+                  >
                     <td className="px-3 py-3">
                       <div className="flex flex-col">
                         <button
-                          onClick={() => movePolicy(idx, -1)}
+                          onClick={(e) => { e.stopPropagation(); movePolicy(idx, -1) }}
                           disabled={idx === 0 || reorder.isPending}
                           title="Move up (higher priority)"
                           className="text-gray-400 hover:text-indigo-600 disabled:opacity-25 disabled:hover:text-gray-400"
@@ -370,7 +374,7 @@ export function PoliciesPage() {
                           <ChevronUp className="h-3.5 w-3.5" />
                         </button>
                         <button
-                          onClick={() => movePolicy(idx, 1)}
+                          onClick={(e) => { e.stopPropagation(); movePolicy(idx, 1) }}
                           disabled={idx === policies.length - 1 || reorder.isPending}
                           title="Move down (lower priority)"
                           className="text-gray-400 hover:text-indigo-600 disabled:opacity-25 disabled:hover:text-gray-400"
@@ -400,11 +404,11 @@ export function PoliciesPage() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-3">
-                        <button onClick={() => setPanel({ mode: 'edit', policy })}
+                        <button onClick={(e) => { e.stopPropagation(); setPanel({ mode: 'edit', policy }) }}
                           className="text-gray-400 hover:text-indigo-600" title="Edit">
                           <Pencil className="h-4 w-4" />
                         </button>
-                        <button onClick={() => setDeleteTarget(policy)}
+                        <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(policy) }}
                           className="text-gray-400 hover:text-red-600" title="Delete">
                           <Trash2 className="h-4 w-4" />
                         </button>

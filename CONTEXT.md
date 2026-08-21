@@ -946,14 +946,44 @@ or prior context suggests otherwise, it is wrong; trust this line.
   different real records, not a state-only proof. All seeded rows
   deleted afterward. Full writeup in `BUILT.md`'s `eami-ui` section and
   `BACKLOG.md`'s B-088 entry.
+- **B-081/082/083 (done, 2026-08-22):** standardized the row-click
+  affordance across Agents/Policies/Workflows in one brief instead of
+  three separate patches — all three had the exact B-079-class bug
+  (hover implies clickability, no `onClick`). Re-verified `DataTable
+  .tsx`'s reference pattern directly before relying on it: hover *and*
+  cursor styling are applied together, only when a real `onClick`
+  exists — the bug on all three pages was missing both halves, not just
+  the handler. Each row now opens the same edit panel its existing
+  pencil/Configure icon already opened (confirmed per-page from actual
+  code, not assumed uniform); every in-row icon button (1 on Agents, 4
+  on Policies including B-086's move buttons, 2 on Workflows) now calls
+  `e.stopPropagation()` first, closing the double-fire risk. Live-
+  verified via served-module `curl` on all three pages (the B-062
+  lesson) — real wiring confirmed deployed, `stopPropagation` call
+  counts matched exactly. `stopPropagation`'s bubbling-prevention itself
+  is standard, deterministic DOM/React behavior, disclosed as verified
+  by code inspection rather than a literal click this environment's
+  standing no-browser-automation limitation can't perform. B-084 (Audit
+  — needs a real detail view first) and B-085 (Paste Detection —
+  recommends removing the affordance, not wiring it) remain open,
+  explicitly out of this brief's scope. Full writeup in `BUILT.md`'s
+  `eami-ui` section and `BACKLOG.md`'s B-081/082/083 entries.
 
 ## Last updated
-2026-08-22 by Claude Code — B-088: fixed Approvals' "All" tab pagination,
-found to be structurally invisible (not just stuck) whenever total
-approvals exceed 25, since `DataTable`'s own pager can't work with
-server-paginated data — see the Standing facts entry immediately above
-for the full summary, including the live proof (25 seeded rows + the 7
-real ones split cleanly across two real pages).
+2026-08-22 by Claude Code — B-081/082/083: standardized the row-click
+affordance across Agents/Policies/Workflows onto the same corrected
+pattern (real onClick opening each page's existing edit panel, paired
+with cursor-pointer, every in-row icon button stopPropagation-guarded)
+in one brief rather than three separate patches. See the Standing facts
+entry immediately above for the full summary, including the per-page
+destination confirmation and the served-module verification.
+
+Prior entry, still accurate: 2026-08-22 by Claude Code — B-088: fixed
+Approvals' "All" tab pagination, found to be structurally invisible (not
+just stuck) whenever total approvals exceed 25, since `DataTable`'s own
+pager can't work with server-paginated data — see the Standing facts
+entry above for the full summary, including the live proof (25 seeded
+rows + the 7 real ones split cleanly across two real pages).
 
 Prior entry, still accurate: 2026-08-22 by Claude Code — B-086: wired
 Policies' decorative drag-handle to the real reorder endpoint, but only
