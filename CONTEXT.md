@@ -968,15 +968,42 @@ or prior context suggests otherwise, it is wrong; trust this line.
   recommends removing the affordance, not wiring it) remain open,
   explicitly out of this brief's scope. Full writeup in `BUILT.md`'s
   `eami-ui` section and `BACKLOG.md`'s B-081/082/083 entries.
+- **B-085 (done, 2026-08-22):** removed Paste Detection's decorative row
+  hover instead of wiring a click — the opposite fix from B-081/082/083,
+  correctly, per this page's own read-only-by-design nature. **Re-
+  verified before fixing, not assumed from the audit's own
+  recommendation:** traced the real data model end to end — the real
+  backend response struct (`PasteEventResp`) has exactly the six fields
+  already rendered as table columns; the two extra `paste_events` schema
+  columns (`org_id`, `source_endpoint_id`) are never exposed by the read
+  handler at all; the struct's own doc comment confirms "there is no
+  raw-content column anywhere upstream... cannot expose pasted text even
+  by accident." Conclusively nothing a click could reveal that isn't
+  already visible in the row. One-line fix: `<tr className="hover:bg-
+  gray-50">` → `<tr>`, no `onClick` added. `HashCell`'s copy button,
+  filters, and pagination completely untouched (`git diff --stat`: 1
+  file, 1 line). Live-verified via served-module `curl`: zero hover
+  class remains, row `<tr>` has no `className` at all, `HashCell` byte-
+  identical, real `GET /v1/paste-events` confirmed unaffected. Full
+  writeup in `BUILT.md`'s `eami-ui` section and `BACKLOG.md`'s B-085
+  entry.
 
 ## Last updated
-2026-08-22 by Claude Code — B-081/082/083: standardized the row-click
-affordance across Agents/Policies/Workflows onto the same corrected
-pattern (real onClick opening each page's existing edit panel, paired
-with cursor-pointer, every in-row icon button stopPropagation-guarded)
-in one brief rather than three separate patches. See the Standing facts
-entry immediately above for the full summary, including the per-page
-destination confirmation and the served-module verification.
+2026-08-22 by Claude Code — B-085: removed Paste Detection's decorative
+row hover affordance (the opposite fix from B-081/082/083 — this page is
+deliberately read-only, and the real backend response struct confirms
+there's nothing a click could reveal). See the Standing facts entry
+immediately above for the full summary, including the end-to-end data-
+model trace that confirmed "remove" over "build a detail view."
+
+Prior entry, still accurate: 2026-08-22 by Claude Code — B-081/082/083:
+standardized the row-click affordance across Agents/Policies/Workflows
+onto the same corrected pattern (real onClick opening each page's
+existing edit panel, paired with cursor-pointer, every in-row icon
+button stopPropagation-guarded) in one brief rather than three separate
+patches. See the Standing facts entry above for the full summary,
+including the per-page destination confirmation and the served-module
+verification.
 
 Prior entry, still accurate: 2026-08-22 by Claude Code — B-088: fixed
 Approvals' "All" tab pagination, found to be structurally invisible (not

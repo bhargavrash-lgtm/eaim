@@ -514,6 +514,13 @@ New `POST /v1/gateway/openapi/discover` (`openapi_discover.go`, same `requireRol
 **Test coverage:** none added — matches this repo's 0%-frontend-test-coverage baseline (`BACKLOG.md` B-006).
 **Dependencies:** none. **B-084** (Audit — needs a real detail view built first) and **B-085** (Paste Detection — recommends removing the affordance instead of wiring a click) were explicitly out of scope, separate briefs, per the task brief's own OUT OF SCOPE section.
 
+**Fix — B-085 (2026-08-22), Paste Detection's decorative row hover affordance removed rather than wired to a click.** Same bug class as B-079/081/082/083, but this page's own fix is the opposite: the Dead Clicks Audit recommended removing the misleading `hover:bg-gray-50`, not adding an `onClick`, since the page is deliberately read-only by design.
+**Re-verified before fixing, not assumed from the audit's own recommendation alone:** traced the real data model end to end, not just the frontend `PasteEvent` type. The real backend response struct (`eami-api/internal/api/types.go`'s `PasteEventResp`) has exactly the six fields already rendered as table columns — `id`, `destination_domain`, `occurred_at`, `content_length`, `content_hash`, `os_username`. The `paste_events` schema's two additional columns (`org_id`, `source_endpoint_id`) are never exposed by the read handler at all. `PasteEventResp`'s own doc comment states directly: "there is no raw-content column anywhere upstream of this struct, so it cannot expose pasted text even by accident." **Confirmed conclusively: there is nothing a row click could reveal that isn't already visible in the row** — "remove," not "build a detail view," is the correct fix, matching the task brief's own hypothesis exactly.
+**Resolution:** one-line change in `PasteEventsPage.tsx` — `<tr key={e.id} className="hover:bg-gray-50">` → `<tr key={e.id}>`. No `onClick`, no `cursor-pointer` added. `HashCell`'s copy button, the domain/date filters, Reset, and pagination are completely untouched by the diff.
+**Verified:** real `npm run type-check`/`npm run build`, both clean. `git diff --stat` confirms exactly 1 file, 1 line changed. **Live-verified via served-module `curl` (the B-062 lesson):** confirmed zero `hover:bg-gray-50` remains anywhere in the served module, the row `<tr>` renders with no `className` at all, and `HashCell`/`handleCopy` are byte-identical to before, still correctly wired to `navigator.clipboard.writeText`. The real `GET /v1/paste-events` endpoint (backing filters/pagination) confirmed live and unaffected via a direct call.
+**Test coverage:** none added — matches this repo's 0%-frontend-test-coverage baseline (`BACKLOG.md` B-006).
+**Dependencies:** none.
+
 ---
 
 ## appliance

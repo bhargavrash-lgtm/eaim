@@ -228,7 +228,7 @@ export function PasteEventsPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-100 bg-white">
                     {events.map((e) => (
-                      <tr key={e.id} className="hover:bg-gray-50">
+                      <tr key={e.id}>
                         <td className="px-4 py-3 text-xs text-gray-400 font-mono whitespace-nowrap">{formatTs(e.occurred_at)}</td>
                         <td className="px-4 py-3 font-medium text-gray-900">{e.destination_domain}</td>
                         <td className="px-4 py-3 text-gray-600">{formatBytes(e.content_length)}</td>
