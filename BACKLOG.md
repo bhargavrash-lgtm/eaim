@@ -677,4 +677,73 @@ New `PATCH /v1/gateway/tools/{toolId}` (`store.UpdateTool`/`Server.UpdateTool`) 
 **Verified:** real `npm run type-check`/`npm run build` clean. Live-verified against the real stack: served module confirmed current via `curl` (zero "Serf" left), then Refresh (`GET /v1/gateway/nodes`) and Delete (`DELETE /v1/gateway/nodes/{id}`) both exercised against a real throwaway test row — both confirmed still working, no regression.
 **Dependencies:** none for this fix. **B-043** remains open, separate, future work — real multi-node registration/heartbeat was explicitly out of scope here.
 
-## Next B-ID: B-081
+### B-081 — Agents list row: hover affordance implies clickability, no onClick wired
+**Objective:** `eami-ui/src/pages/gateway/AgentsPage.tsx`'s agents-table `<tr>` (`AgentsPage.tsx:221`) has `className="hover:bg-gray-50"` with no `onClick` bound anywhere on the element — only the "Configure" button opens `ConfigPanel`. Same bug class as B-079 (Tools), found by the Dead Clicks Audit.
+**Acceptance criteria:**
+- [ ] Wire the row's `onClick` to open `ConfigPanel` (matching the "Configure" button's existing behavior), or explicitly decide the row should stay non-clickable and remove `hover:bg-gray-50` instead — either is acceptable, but the current middle ground (hover implies action, nothing happens) is not
+- [ ] If wired to open the panel: the "Configure" button's own `onClick` calls `e.stopPropagation()` so it doesn't double-fire
+**Severity:** Low — real UX mismatch, not urgent, no data-correctness or security impact.
+**Dependencies:** none.
+
+### B-082 — Policies list row: hover affordance implies clickability, no onClick wired
+**Objective:** `eami-ui/src/pages/gateway/PoliciesPage.tsx`'s policy-table `<tr>` (`PoliciesPage.tsx:340`) has `className="hover:bg-gray-50"` with no `onClick` bound — only the pencil/Edit icon (`:365-368`) opens the edit panel. Same bug class as B-079, found by the Dead Clicks Audit.
+**Acceptance criteria:**
+- [ ] Wire the row's `onClick` to open the edit panel (matching the pencil icon's existing behavior)
+- [ ] Pencil/trash icon buttons call `e.stopPropagation()` in their `onClick` so they don't double-fire against the new row-level handler
+**Severity:** Low — real UX mismatch, not urgent, no data-correctness or security impact.
+**Dependencies:** none. See **B-086** for a related, higher-priority finding on the same page (the drag-handle icon).
+
+### B-083 — Workflows list row: hover affordance implies clickability, no onClick wired
+**Objective:** `eami-ui/src/pages/gateway/WorkflowsPage.tsx`'s workflow-table `<tr>` (`WorkflowsPage.tsx:810`) has `className="hover:bg-gray-50"` with no `onClick` bound — only the pencil/Edit icon (`:817`) opens `EditWorkflowPanel`. Same bug class as B-079, found by the Dead Clicks Audit.
+**Acceptance criteria:**
+- [ ] Wire the row's `onClick` to open `EditWorkflowPanel` (matching the pencil icon's existing behavior)
+- [ ] Pencil/trash icon buttons call `e.stopPropagation()` in their `onClick` so they don't double-fire against the new row-level handler
+**Severity:** Low — real UX mismatch, not urgent, no data-correctness or security impact.
+**Dependencies:** none.
+
+### B-084 — Audit list row: hover affordance implies clickability, but no detail view exists to open
+**Objective:** `eami-ui/src/pages/ops/AuditPage.tsx`'s audit-table `<tr>` (`AuditPage.tsx:196`) has `className="hover:bg-gray-50"` with no `onClick` bound. Found by the Dead Clicks Audit, worse than the row-click findings above: unlike Tools/Agents/Policies/Workflows, there is no existing per-row detail view/drawer anywhere in this file for a click to open — this isn't a missing handler on an existing feature, it's a hover style with nothing built behind it at all.
+**Acceptance criteria:**
+- [ ] **A real audit-entry detail view (drawer or panel) must be designed and built FIRST** — wiring an `onClick` to nothing accomplishes nothing; scope this as "build a detail view, then wire the row to it," not "add an onClick"
+- [ ] Decide what a detail view should show beyond what the table row already does (full request/response context? the full hash-chain-verifiable entry? related episode/approval links?) — needs real scoping before implementation, not just a mechanical copy of the Tools-row fix
+- [ ] Until built, an acceptable interim fix is removing `hover:bg-gray-50` so the row stops implying an action that doesn't exist
+**Severity:** Low-Medium — same misleading-affordance class as the others, but blocked on real design work rather than a one-line wiring fix.
+**Dependencies:** none, but not a quick fix — flag as needing scoping before a brief is written.
+
+### B-085 — Paste Detection list row: hover affordance implies clickability with nothing to show even if fixed
+**Objective:** `eami-ui/src/pages/ops/PasteEventsPage.tsx`'s event-table `<tr>` (`PasteEventsPage.tsx:231`) has `className="hover:bg-gray-50"` with no `onClick` bound. Found by the Dead Clicks Audit. **Recommendation, explicit: do NOT wire a click handler here — remove the hover affordance instead.** This page's own header comment states it's deliberately a read-only summary view with no raw paste content ever captured or stored (by design, privacy-motivated) — so unlike B-081/082/083, there is no meaningful detail a row click could ever reveal, even in principle. Wiring a click to open a drawer with nothing new to show would just be a second, differently-shaped version of the same bug.
+**Acceptance criteria:**
+- [ ] Remove `hover:bg-gray-50` (or equivalent) from the table row so it no longer visually implies an action
+- [ ] Confirm no other element on this page carries the same false affordance (per the Dead Clicks Audit's original pass, the only other elements are the domain/date filters, Reset, the HashCell copy button, and pagination — all already correctly classified as working/wired)
+**Severity:** Low — cosmetic-only fix, but flagged as a real (small) finding, not skipped.
+**Dependencies:** none.
+
+### B-086 — Policies drag-handle icon not wired to the real, tested reorder endpoint — governance correctness issue
+**Priority:** **HIGH — not cosmetic.** Policy evaluation order determines which rule fires first/wins on an overlapping match — an admin who drags policies expecting to change evaluation order and sees nothing happen (or worse, doesn't realize the drag never took effect at all) has a real, silent governance-correctness gap, not just a UI nit.
+**Objective:** `eami-ui/src/pages/gateway/PoliciesPage.tsx`'s `GripVertical` icon (`:341-343`), rendered in every row next to the priority ("Pri") column, strongly implies drag-to-reorder. Found by the Dead Clicks Audit: no drag library (`draggable`, `onDragStart`, `dnd-kit`, `react-beautiful-dnd`) exists anywhere in `eami-ui/src` — the icon does nothing at all. The backend capability is fully real: `useReorderPolicies()` (`usePolicies.ts:61-73`) already calls a working, tested `POST`/`PUT /v1/gateway/policies/reorder` (`router.go:217-218`) — `PoliciesPage.tsx` simply never imports or calls this hook.
+**Acceptance criteria:**
+- [ ] Wire real drag-and-drop (a small, already-common React drag library, or native HTML5 DnD) on the priority column, calling the existing `useReorderPolicies()` on drop
+- [ ] Optimistic UI update with rollback on failure, matching this codebase's existing mutation-error patterns elsewhere (e.g. Tools/Workflows panels' error toasts)
+- [ ] Until fixed, consider whether the `GripVertical` icon should be temporarily removed/disabled — an admin currently has no way to tell "reorder isn't implemented in the UI" from "I dragged it wrong"
+**Severity:** High per the priority note above — this is the audit's sharpest finding: real, tested, working backend capability with a UI affordance actively pointing at it that does nothing.
+**Dependencies:** none — the backend endpoint already exists and is already tested.
+
+### B-087 — Agents page has no create/suspend/delete UI despite real, tested backend endpoints
+**Objective:** `useCreateAgent`/`useUpdateAgent`/`useDeleteAgent` (`eami-ui/src/hooks/useAgents.ts:21-59`) all call real, implemented `eami-api` endpoints, but the Dead Clicks Audit found zero usages of any of them across every `.tsx` file in the repo — `AgentsPage.tsx` has no "Add agent" button, no delete action, no suspend toggle. The only mutation currently reachable from the UI is Configure (agent config PUT).
+**Context:** This directly explains the original discovery of **B-077** (`DeleteAgent` 500s on an agent with real episode/approval/workflow-run history) — that bug was only ever reproduced via a raw, direct API call during test-fixture cleanup, because no UI path to agent deletion exists at all today. Fixing B-087 will make B-077 concretely reachable by a real admin for the first time, the same way B-042 made B-043's revocation-broadcast gap concretely reachable — so B-077 should land before or alongside this, not after, per that precedent.
+**Acceptance criteria:**
+- [ ] Add agent creation UI (form/modal) calling `useCreateAgent`
+- [ ] Add a delete action calling `useDeleteAgent` — **must land after or alongside B-077's fix**, since today it would immediately surface B-077's raw-500 bug to a real admin
+- [ ] Decide whether "suspend" is a real product need (the `status` column already supports `suspended`/`revoked` per B-077's own scoping notes) or whether delete-only is sufficient — needs a real product decision, not just mechanical UI work
+**Severity:** Medium — a real, missing management capability (not just a decorative bug), gated on B-077 for the delete path specifically.
+**Dependencies:** **B-077** (should land first or alongside, for the delete action specifically — see reasoning above).
+
+### B-088 — Approvals "All" tab pagination is stuck on page 1
+**Objective:** `eami-ui/src/pages/ops/ApprovalsPage.tsx:212`'s `const [allPage] = useState(1)` never destructures a setter, so the "All" tab's server-side query (`useApprovals({ page: allPage, per_page: 25 })`) can never request page 2 or beyond. If an org's total approvals exceed 25, everything past the first page is silently unreachable through the UI — found by the Dead Clicks Audit while auditing the tab's Previous/Next pagination controls (themselves genuinely wired to real client-side pagination over whatever page of data was fetched, which is why this wasn't caught as a decorative-button bug — the controls work, the underlying query is just permanently pinned).
+**Acceptance criteria:**
+- [ ] Destructure and wire a real `setAllPage`, driven by the existing Previous/Next controls, so the "All" tab's server query can actually advance
+- [ ] Add a regression check (even a lightweight one, given this repo's 0%-frontend-test-coverage baseline per B-006) so this specific "declared but never wired" `useState` pattern doesn't silently recur
+**Severity:** Medium — real data-reachability bug (not just cosmetic), silent (no error, no visible indication anything is missing), scoped to orgs with >25 total approvals.
+**Dependencies:** none.
+
+## Next B-ID: B-089

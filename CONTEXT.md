@@ -853,16 +853,48 @@ or prior context suggests otherwise, it is wrong; trust this line.
   no regression. **B-043 remains open** — real multi-node registration
   is explicitly separate future work, not touched here. Full writeup in
   `BUILT.md`'s `eami-ui` section and `BACKLOG.md`'s B-079/B-080 entries.
+- **Dead Clicks Audit's remaining findings logged as B-081 through B-088
+  (2026-08-21) — investigation only, nothing built this pass.** Each
+  B-ID confirmed free before assignment (grepped `BACKLOG.md`/`BUILT.md`/
+  `CONTEXT.md` for all of B-081..B-088, zero prior references). B-081/
+  082/083 are the same hover-with-no-`onClick` row-click pattern as
+  B-079, on Agents/Policies/Workflows respectively. **B-084 (Audit
+  row) is explicitly NOT a same-shape fix** — unlike the others, no
+  per-row detail view exists anywhere to wire a click to, so its AC
+  requires designing and building a real detail view first, not just
+  adding a handler. **B-085 (Paste Detection row) explicitly recommends
+  the opposite fix from the others** — remove the hover affordance
+  rather than wire a click, since the page is deliberately read-only by
+  design with no raw content a click could ever reveal. **B-086 (Policies
+  drag-handle) flagged HIGH priority, not cosmetic** — it sits on top of
+  a fully real, tested `POST/PUT /v1/gateway/policies/reorder` backend
+  nobody calls, and policy evaluation order is a governance-correctness
+  property, not just a UI nit. **B-087 (Agents has no create/suspend/
+  delete UI) is explicitly sequenced against the already-open B-077** —
+  wiring the delete action before B-077's fix would immediately surface
+  B-077's raw-500 bug to a real admin for the first time, so B-087's AC
+  requires B-077 land first or alongside. **B-088 (Approvals "All" tab
+  pagination stuck on page 1)** is a real, silent data-reachability bug
+  (missing `useState` setter), not cosmetic. Full detail in each item's
+  own `BACKLOG.md` entry.
 
 ## Last updated
-2026-08-21 by Claude Code — B-080: removed the Nodes page's misleading
-"live Serf mesh cluster" framing, found by the same-session Dead Clicks
-Audit (a systematic 14-page/121-element UI-to-backend trace triggered by
-the B-079 Tools-row finding). See the Standing facts entries immediately
-above for the full summary of both the audit itself and B-080's fix,
-including the re-verification against current code, the honest-but-
-functional framing decision and its reasoning, and the live Refresh/
-Delete regression check.
+2026-08-21 by Claude Code — logged the Dead Clicks Audit's remaining 8
+findings as B-081 through B-088 (investigation-only session, no code
+built). See the Standing facts entry immediately above for which finding
+maps to which B-ID and the notable per-item reasoning (B-084's "build a
+detail view first" scoping, B-085's "remove the affordance, don't wire
+it" recommendation, B-086's HIGH-priority governance framing, B-087's
+sequencing against B-077).
+
+Prior entry, still accurate: 2026-08-21 by Claude Code — B-080: removed
+the Nodes page's misleading "live Serf mesh cluster" framing, found by
+the same-session Dead Clicks Audit (a systematic 14-page/121-element
+UI-to-backend trace triggered by the B-079 Tools-row finding). See the
+Standing facts entries above for the full summary of both the audit
+itself and B-080's fix, including the re-verification against current
+code, the honest-but-functional framing decision and its reasoning, and
+the live Refresh/Delete regression check.
 
 Prior entry, still accurate: 2026-08-20 by Claude Code — B-078: data-
 handling visibility for `ai_provider` connectors (a real designation for
