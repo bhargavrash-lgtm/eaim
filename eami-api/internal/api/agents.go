@@ -146,6 +146,12 @@ func (s *Server) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		// Seed default config row (no-op if trigger already created it).
 		_ = s.queries.SeedAgentConfig(r.Context(), a.ID)
+		// Best-effort lifecycle record (B-087) -- mirrors NotifyPolicyReload's
+		// established "side effect must not fail the primary action" convention
+		// elsewhere in this file's sibling handlers.
+		_ = s.queries.InsertAgentLifecycleEvent(r.Context(), store.InsertAgentLifecycleEventParams{
+			OrgID: uc.OrgID, AgentID: a.ID, AgentName: a.Name, EventType: "created", PerformedBy: uc.UserID,
+		})
 		writeJSON(w, http.StatusCreated, agentToResp(*a))
 		return
 	}
@@ -209,6 +215,26 @@ func (s *Server) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	// Best-effort lifecycle record (B-087), only for the two status
+	// transitions this brief's UI actually drives -- suspend/reactivate.
+	// Any other PATCH (scope/risk_tier/token_ttl only, or a status value
+	// this UI never sends, e.g. "revoked") intentionally logs nothing;
+	// event_type's CHECK constraint only allows the four values this
+	// codebase's own lifecycle actions produce.
+	if req.Status != nil {
+		var eventType string
+		switch *req.Status {
+		case "suspended":
+			eventType = "suspended"
+		case "active":
+			eventType = "reactivated"
+		}
+		if eventType != "" {
+			_ = s.queries.InsertAgentLifecycleEvent(r.Context(), store.InsertAgentLifecycleEventParams{
+				OrgID: uc.OrgID, AgentID: a.ID, AgentName: a.Name, EventType: eventType, PerformedBy: uc.UserID,
+			})
+		}
+	}
 	writeJSON(w, http.StatusOK, agentToResp(*a))
 }
 
@@ -221,10 +247,39 @@ func (s *Server) DeleteAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.queries != nil {
-		if err := s.queries.DeleteAgent(r.Context(), id, uc.OrgID); err != nil {
+		// Fetched first so a successful delete's lifecycle record can
+		// snapshot the agent's name -- agent_lifecycle_events.agent_id has
+		// no FK to gateway_agents (by design, see migration 000009), so
+		// this is the only chance to capture it before the row is gone.
+		existing, err := s.queries.GetAgent(r.Context(), id, uc.OrgID)
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				writeError(w, http.StatusNotFound, "not_found", "agent not found")
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
+		if err := s.queries.DeleteAgent(r.Context(), id, uc.OrgID); err != nil {
+			// B-077: episodes/approval_requests/workflow_runs.agent_id are
+			// all default NO ACTION (deliberately, not cascaded -- losing
+			// that history on agent deletion would be wrong for a
+			// compliance-relevant audit trail). Classify the resulting FK
+			// violation into a clean, actionable 409 instead of a raw 500
+			// with a leaked driver error string -- same isForeignKeyViolation
+			// helper workflows.go already established for the identical
+			// class of problem.
+			if isForeignKeyViolation(err) {
+				writeError(w, http.StatusConflict, "conflict",
+					"cannot delete an agent with existing episode, approval, or workflow-run history -- suspend it instead (this preserves its audit trail)")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		_ = s.queries.InsertAgentLifecycleEvent(r.Context(), store.InsertAgentLifecycleEventParams{
+			OrgID: uc.OrgID, AgentID: id, AgentName: existing.Name, EventType: "deleted", PerformedBy: uc.UserID,
+		})
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}

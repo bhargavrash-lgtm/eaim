@@ -987,14 +987,70 @@ or prior context suggests otherwise, it is wrong; trust this line.
   identical, real `GET /v1/paste-events` confirmed unaffected. Full
   writeup in `BUILT.md`'s `eami-ui` section and `BACKLOG.md`'s B-085
   entry.
+- **B-087 + B-077 (done, 2026-08-22):** `AgentsPage.tsx` gained real
+  create/suspend/delete UI, and the delete-with-history bug (B-077) that
+  would have immediately blocked it as soon as a real admin tried.
+  **B-077's root cause confirmed and fixed:** `DeleteAgent` issued a raw
+  `DELETE` with no FK-violation classification — `episodes`/
+  `approval_requests`/`workflow_runs`.`agent_id` are all default `NO
+  ACTION`, deliberately not cascaded. Fixed by classifying the FK
+  violation into a clean `409` pointing at suspend instead, reusing
+  `workflows.go`'s existing `isForeignKeyViolation` helper. **Suspend
+  investigated, not assumed to need new plumbing** — `gateway_agents.
+  status` already had a working `active`/`suspended`/`revoked` CHECK,
+  and suspension was already fully enforced at dispatch time
+  (`eami-gateway/internal/registry`'s `ErrAgentSuspended` → a real `403`
+  at SSE session creation, both pre-existing) — only the UI trigger was
+  missing. **A false premise in the task brief, found by investigation
+  and confirmed with the user before building:** the brief assumed
+  lifecycle actions should write to `audit_log`, "consistent with"
+  existing admin-action patterns — but grepping every existing
+  eami-api admin-action handler found zero `audit_log` writes anywhere;
+  that table is exclusively `eami-gateway`'s hash-chained dispatch-
+  decision ledger. **Resolution, confirmed with the user:** a new, small,
+  separate `agent_lifecycle_events` table (migration `000009`),
+  deliberately not a write into the hash-chained ledger — a different
+  concern, no FK to `gateway_agents` so a `deleted` event survives the
+  row it describes. **The mandatory code-review pass found and this
+  session fixed a real bug:** a blocked-delete's error message was set
+  correctly but rendered invisible behind `ConfirmDialog`'s full-screen
+  overlay — fixed by rendering it inside the dialog's own `children`
+  slot. **Two more findings disclosed, not side-patched:**
+  `ConfirmDialog.tsx`'s `isLoading` prop is declared but never actually
+  used anywhere in the component (pre-existing, affects every page
+  already passing it — Policies/Workflows/Approvals too), logged as
+  **B-091**; a page-level shared mutation instance briefly disabling
+  every row's Suspend button during any one row's request matches this
+  codebase's own already-accepted `PoliciesPage`/B-086 precedent, not a
+  new pattern. **Live-verified end-to-end against the real stack:** a
+  real agent created and immediately confirmed usable (a real SSE
+  session opened); suspended, and a fresh SSE-session attempt returned a
+  real `403` with the exact registry-level rejection text; B-077's exact
+  original scenario reproduced live (a real episode seeded against a
+  real agent) — delete returned a real `409`, not a `500`, and a clean
+  delete succeeded once the history was removed; `agent_lifecycle_events`
+  confirmed via direct `psql` to hold exactly the right rows with zero
+  spurious entries; Configure and the B-081 row-click confirmed
+  unaffected. Full writeup in `BUILT.md`'s `eami-api`/`eami-ui` sections
+  and `BACKLOG.md`'s B-077/B-087/B-091 entries.
 
 ## Last updated
-2026-08-22 by Claude Code — B-085: removed Paste Detection's decorative
-row hover affordance (the opposite fix from B-081/082/083 — this page is
-deliberately read-only, and the real backend response struct confirms
-there's nothing a click could reveal). See the Standing facts entry
-immediately above for the full summary, including the end-to-end data-
-model trace that confirmed "remove" over "build a detail view."
+2026-08-22 by Claude Code — B-087 + B-077: built real agent lifecycle UI
+(create/suspend/delete) and fixed the delete-with-history bug that would
+have immediately blocked it, plus a new small agent_lifecycle_events
+audit trail after investigation found the task brief's "write to
+audit_log" premise didn't match how any existing admin action in this
+codebase actually works. See the Standing facts entry immediately above
+for the full summary, including the false-premise investigation, the
+already-enforced suspend mechanism, and the live end-to-end proof.
+
+Prior entry, still accurate: 2026-08-22 by Claude Code — B-085: removed
+Paste Detection's decorative row hover affordance (the opposite fix from
+B-081/082/083 — this page is deliberately read-only, and the real
+backend response struct confirms there's nothing a click could reveal).
+See the Standing facts entry above for the full summary, including the
+end-to-end data-model trace that confirmed "remove" over "build a detail
+view."
 
 Prior entry, still accurate: 2026-08-22 by Claude Code — B-081/082/083:
 standardized the row-click affordance across Agents/Policies/Workflows
