@@ -209,7 +209,7 @@ const ALL_COLUMNS = [
 
 export default function ApprovalsPage() {
   const [tab, setTab] = useState<Tab>('pending')
-  const [allPage] = useState(1)
+  const [allPage, setAllPage] = useState(1)
 
   const [confirmState, setConfirmState] = useState<{
     approval: ApprovalRequest
@@ -227,6 +227,13 @@ export default function ApprovalsPage() {
   const pendingData = pendingQuery.data?.data ?? []
   const pendingTotal = pendingQuery.data?.meta?.total ?? 0
   const allData = allQuery.data?.data ?? []
+  // Server-paginated (useApprovals sends page/per_page) -- DataTable's own
+  // Previous/Next only works for client-side pagination over a fully-loaded
+  // array (it derives totalPages from data.length), so it never shows a
+  // pager here: allData is already capped at 25 rows before DataTable ever
+  // sees it. Driven by the server-reported grand total instead.
+  const allTotal = allQuery.data?.meta?.total ?? 0
+  const allTotalPages = Math.max(1, Math.ceil(allTotal / 25))
 
 
   function handleDecide(approval: ApprovalRequest, decision: 'approved' | 'denied') {
@@ -335,12 +342,37 @@ export default function ApprovalsPage() {
               description="Approval requests from agents will appear here."
             />
           ) : (
-            <DataTable
-              columns={ALL_COLUMNS}
-              data={allData}
-              loading={allQuery.isFetching}
-              pageSize={25}
-            />
+            <>
+              <DataTable
+                columns={ALL_COLUMNS}
+                data={allData}
+                loading={allQuery.isFetching}
+                pageSize={25}
+              />
+              {allTotalPages > 1 && (
+                <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-4 py-3 rounded-b-lg -mt-px">
+                  <span className="text-xs text-gray-500">
+                    Page {allPage} of {allTotalPages} ({allTotal} total)
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      disabled={allPage === 1}
+                      onClick={() => setAllPage((p) => p - 1)}
+                      className="rounded border border-gray-300 px-2 py-1 text-xs disabled:opacity-40"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      disabled={allPage === allTotalPages}
+                      onClick={() => setAllPage((p) => p + 1)}
+                      className="rounded border border-gray-300 px-2 py-1 text-xs disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </>
       )}

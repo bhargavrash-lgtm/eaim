@@ -924,17 +924,47 @@ or prior context suggests otherwise, it is wrong; trust this line.
   (B-069's DnD-library-removal history). Full writeup in `BUILT.md`'s
   `eami-api`/`eami-ui` sections and `BACKLOG.md`'s B-086/B-089/B-090
   entries.
+- **B-088 (done, 2026-08-22):** fixed Approvals' "All" tab pagination,
+  permanently stuck on page 1 (missing `useState` setter). **A
+  correction to the Dead Clicks Audit's own characterization, found by
+  re-reading `DataTable.tsx` before fixing, not assumed:** the bug
+  wasn't just a missing setter — `DataTable` computes pager visibility
+  purely from `Math.ceil(data.length / pageSize)`, built for
+  client-side pagination over a fully-loaded array; `allData` was
+  already server-paginated to at most 25 rows before `DataTable` ever
+  saw it, so its own pager was **structurally invisible**, not just
+  stuck, whenever total approvals exceeded 25 — no error, no visible
+  indication. Fixed with a real `setAllPage` plus a new, separate
+  Previous/Next control built directly in `ApprovalsPage.tsx` (outside
+  `DataTable`, which is the wrong tool for server-paginated data),
+  driven by the server's real `meta.total` — matching Audit/Paste
+  Detection's own established pattern for server-paginated pages.
+  Live-verified against the real stack: seeded 25 throwaway
+  `approval_requests` rows via `psql`, confirmed via the real API that
+  `meta.total=32`, page 1 returned the 25 seeded rows, and page 2
+  returned exactly the org's 7 real pre-existing approvals — genuinely
+  different real records, not a state-only proof. All seeded rows
+  deleted afterward. Full writeup in `BUILT.md`'s `eami-ui` section and
+  `BACKLOG.md`'s B-088 entry.
 
 ## Last updated
-2026-08-22 by Claude Code — B-086: wired Policies' decorative drag-handle
-to the real reorder endpoint, but only after finding and fixing two real
-stacked bugs blocking it (a frontend request-shape mismatch traced to a
-stale `openapi.yaml` spec, and a real backend transaction bug that made
-the "working, tested" reorder endpoint 500 on ordinary use) — both
-confirmed with the user before touching files outside the brief's
-original stated scope. See the Standing facts entry immediately above
-for the full summary, including the live enforcement-outcome proof (a
-real policy reorder flipping a real dispatch's allow/deny decision) and
+2026-08-22 by Claude Code — B-088: fixed Approvals' "All" tab pagination,
+found to be structurally invisible (not just stuck) whenever total
+approvals exceed 25, since `DataTable`'s own pager can't work with
+server-paginated data — see the Standing facts entry immediately above
+for the full summary, including the live proof (25 seeded rows + the 7
+real ones split cleanly across two real pages).
+
+Prior entry, still accurate: 2026-08-22 by Claude Code — B-086: wired
+Policies' decorative drag-handle to the real reorder endpoint, but only
+after finding and fixing two real stacked bugs blocking it (a frontend
+request-shape mismatch traced to a stale `openapi.yaml` spec, and a real
+backend transaction bug that made the "working, tested" reorder endpoint
+500 on ordinary use) — both confirmed with the user before touching
+files outside the brief's original stated scope. See the Standing facts
+entry above for the full summary, including the live enforcement-outcome
+proof (a real policy reorder flipping a real dispatch's allow/deny
+decision) and
 the two new low-priority follow-ups (B-089, B-090) logged from the
 mandatory review passes.
 
