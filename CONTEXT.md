@@ -806,13 +806,69 @@ or prior context suggests otherwise, it is wrong; trust this line.
   against the two real rows, byte-for-byte match against the documented
   SHA-256 formula. Full writeup in `BUILT.md`'s `eami-api` section and
   `BACKLOG.md`'s B-078 entry.
+- **Dead Clicks Audit (2026-08-21, no B-ID of its own — a systematic
+  investigation, not a build):** triggered by a live user report that
+  clicking a Tools-page row did nothing. First confirmed it wasn't a
+  B-062-style stale-serve issue (served module `curl`'d and matched
+  source exactly, including B-078's badge logic), then diagnosed the
+  real cause — `ToolsPage.tsx`'s table `<tr>` has `hover:bg-gray-50`
+  with no `onClick` bound in any commit ever, only the pencil icon opens
+  `EditToolPanel` — logged as **B-079**. That finding prompted a full
+  audit of all 14 `eami-ui` pages (121 interactive elements traced
+  through their hooks to a real backend call or a dead end, run as 4
+  parallel investigation passes). Found **7 total decorative elements**
+  (same hover-with-no-handler pattern, independently present on Agents,
+  Policies — both its row *and* an unwired `GripVertical` drag-handle
+  icon sitting on top of a fully working, tested `useReorderPolicies()`
+  backend nobody ever called — Workflows, Audit, and Paste Detection),
+  36 wired-but-unverified retest candidates, and two structural findings
+  that didn't fit the audit's own classification scheme: Agents has real
+  create/delete/suspend backend hooks with zero UI ever calling them
+  (directly explains why B-077 was only ever reproduced via a raw API
+  call), and the Nodes page's "Serf mesh cluster" framing is entirely
+  fabricated (see B-080 immediately below). Full 121-row report exists
+  as a published artifact and was also given to the user as complete
+  plain text on request; only B-079 and B-080 have been acted on so far
+  — the other 5 new decorative findings and the two structural findings
+  are known, disclosed, and not yet logged as their own backlog items
+  (the user has not yet asked for that).
+- **B-080 (done, 2026-08-21):** `NodesPage.tsx`'s misleading "live Serf
+  mesh cluster -- refreshes every 15 s" framing removed — a customer-
+  trust issue the Dead Clicks Audit surfaced, not a feature gap. Re-
+  verified directly before building (not assumed from the audit): zero
+  `Serf` references anywhere in `eami-gateway`/`eami-api` Go code, zero
+  INSERT/UPSERT into `gateway_nodes` outside `scripts/seed-db.sh`'s
+  static demo row — corroborated by the already-open **B-043**, which
+  found the identical false "broadcast via Serf" claim in a different
+  file's comment for a different feature (JWT-revocation propagation),
+  confirming this is a repo-wide pattern of aspirational Serf claims
+  with nothing behind them, not a one-off. **Framing decision, confirmed
+  with the user first:** honest-but-functional, not a "coming soon"
+  empty state — the real, working Refresh/Delete plumbing stays visible
+  and usable; only three copy strings changed (subtitle, empty state,
+  delete-confirm description), zero logic/hooks/backend touched.
+  Live-verified: served module confirmed current via `curl` (zero "Serf"
+  left), then Refresh and Delete both re-exercised against a real
+  throwaway test row through the real running stack — both still work,
+  no regression. **B-043 remains open** — real multi-node registration
+  is explicitly separate future work, not touched here. Full writeup in
+  `BUILT.md`'s `eami-ui` section and `BACKLOG.md`'s B-079/B-080 entries.
 
 ## Last updated
-2026-08-20 by Claude Code — B-078: data-handling visibility for
-`ai_provider` connectors (a real designation for what a provider's
-actual data-retention agreement is, visibility only, mirroring B-047's
-`audit_mode` pattern). See the Standing facts entry immediately above
-for the full summary, including the per-call audit_log snapshot
+2026-08-21 by Claude Code — B-080: removed the Nodes page's misleading
+"live Serf mesh cluster" framing, found by the same-session Dead Clicks
+Audit (a systematic 14-page/121-element UI-to-backend trace triggered by
+the B-079 Tools-row finding). See the Standing facts entries immediately
+above for the full summary of both the audit itself and B-080's fix,
+including the re-verification against current code, the honest-but-
+functional framing decision and its reasoning, and the live Refresh/
+Delete regression check.
+
+Prior entry, still accurate: 2026-08-20 by Claude Code — B-078: data-
+handling visibility for `ai_provider` connectors (a real designation for
+what a provider's actual data-retention agreement is, visibility only,
+mirroring B-047's `audit_mode` pattern). See the Standing facts entry
+above for the full summary, including the per-call audit_log snapshot
 mechanism that makes historical accuracy real, and the zero-findings
 reviewer + security passes (hash-chain-exclusion claim independently
 re-derived from code, not assumed).

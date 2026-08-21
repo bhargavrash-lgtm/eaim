@@ -167,7 +167,7 @@ export function NodesPage() {
     <div className="flex flex-col h-full">
       <PageHeader
         title="Gateway Nodes"
-        subtitle="Serf mesh cluster -- refreshes every 15 s"
+        subtitle="Nodes registered in gateway_nodes -- no gateway process registers itself automatically yet"
         actions={
           <button
             onClick={() => refetch()}
@@ -183,7 +183,7 @@ export function NodesPage() {
         {nodes.length === 0 ? (
           <EmptyState
             title="No nodes in mesh"
-            description="Start an eami-gateway instance to register it in the Serf cluster."
+            description="No gateway nodes are registered. Automatic self-registration isn't built yet -- rows here are added manually."
           />
         ) : (
           <>
@@ -219,7 +219,7 @@ export function NodesPage() {
         <ConfirmDialog
           open
           title={'Remove "' + deleteTarget.name + '" from mesh?'}
-          description="The node will be deregistered from the Serf cluster. Traffic will failover to remaining nodes. The node process itself will not be stopped."
+          description="This deletes the row from gateway_nodes. There is no automatic traffic failover -- the node process itself will not be stopped."
           confirmLabel="Remove"
           destructive
           isLoading={deleteNode.isPending}
