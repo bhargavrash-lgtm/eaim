@@ -230,11 +230,27 @@ const reorderPoliciesQuery = `-- name: ReorderPolicies :exec
 UPDATE policies SET priority = $2 WHERE id = $1 AND org_id = $3
 `
 
+// ReorderPolicies renumbers priority sequentially (1-based) from each id's
+// position in ids. Run inside a real transaction -- policies' UNIQUE
+// (org_id, priority) constraint is declared DEFERRABLE INITIALLY DEFERRED
+// (schema.sql) specifically so it's only checked at commit, not after each
+// row. Without a transaction, each Exec auto-commits individually and the
+// deferral never applies: assigning an early id the priority a
+// not-yet-updated row still currently holds -- the common case for an
+// ordinary adjacent-pair swap -- 500s with a spurious unique-violation even
+// though the final state is perfectly valid. Found live, B-086.
 func (q *Queries) ReorderPolicies(ctx context.Context, orgID uuid.UUID, ids []uuid.UUID) error {
+	tx, err := q.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) // no-op once Commit has succeeded
+
+	txq := q.WithTx(tx)
 	for i, id := range ids {
-		if _, err := q.db.Exec(ctx, reorderPoliciesQuery, toPgtypeUUID(id), int32(i+1), toPgtypeUUID(orgID)); err != nil {
+		if _, err := txq.db.Exec(ctx, reorderPoliciesQuery, toPgtypeUUID(id), int32(i+1), toPgtypeUUID(orgID)); err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit(ctx)
 }

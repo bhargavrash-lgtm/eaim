@@ -877,15 +877,74 @@ or prior context suggests otherwise, it is wrong; trust this line.
   pagination stuck on page 1)** is a real, silent data-reachability bug
   (missing `useState` setter), not cosmetic. Full detail in each item's
   own `BACKLOG.md` entry.
+- **B-086 (done, 2026-08-22):** wired the Policies page's decorative
+  drag-handle icon to the real `POST /v1/gateway/policies/reorder`
+  endpoint — but two real, previously-unknown bugs had to be fixed first,
+  neither known when B-086 was originally logged, both required for the
+  brief's own AC1/AC2 (reorder persists; reorder provably changes real
+  enforcement outcome) to be satisfiable at all. **Bug 1 (frontend):**
+  `useReorderPolicies()` sent `{order: [...]}`; the real handler expects
+  `{policy_ids: [...]}` — proven live before any fix existed (a real
+  `400` against the real endpoint). Root cause: `api/openapi.yaml` itself
+  documents `order`, out of sync with the real implementation — logged
+  separately as **B-089** (`openapi.yaml` is Architect-EAMI-owned, not
+  fixed here). **Bug 2 (backend, the one that mattered more):**
+  `ReorderPolicies` (`eami-api/internal/store/policies.sql.go`) looped
+  plain `Exec` calls with no transaction, so `policies`' `UNIQUE
+  (org_id, priority)` constraint — deliberately declared `DEFERRABLE
+  INITIALLY DEFERRED` in `schema.sql` specifically to make reordering
+  safe — was checked after every individual row instead of once at
+  commit. Reproduced live: a real adjacent-pair swap (the exact shape an
+  up/down click produces) 500'd with a genuine `SQLSTATE 23505`. **This
+  was on the task brief's explicit MUST NOT MODIFY list — stopped and
+  got the user's explicit sign-off before touching it**, same standing
+  pattern as this session's other stacked-bug fixes (`mcp/handler.go`'s
+  `context.WithoutCancel`, B-057's TOCTOU resume). Fixed by wrapping the
+  loop in a real transaction via `Queries.Begin()`/`WithTx()` — the same
+  pattern `bootstrap.go`'s setup wizard already established as this
+  codebase's only other user of it. **The mandatory security review
+  found zero findings; the mandatory code review found two real,
+  lower-severity issues in the fix itself** (a narrow concurrent-reorder
+  deadlock risk from holding row locks across N sequential updates, and
+  N round-trips instead of one batched multi-row `UPDATE`), disclosed
+  and logged as **B-090** rather than fixed in this already-scope-
+  expanded brief. **Live-verified with the actual required centerpiece
+  proof, not just "the API call succeeds":** two real throwaway
+  overlapping policies (deny priority 1000, allow priority 1001) — a
+  real dispatched `tool_call` confirmed deny won first; reordered via
+  the real fixed endpoint (the real UI's exact full-org-list request
+  shape); the identical `tool_call` dispatched again confirmed allow now
+  won — a real response came back from the real downstream target, and
+  the real `audit_log` rows recorded the flip. This is the literal proof
+  a real reorder through the real endpoint changes real enforcement.
+  Design choice: up/down buttons, not drag-and-drop — no DnD library
+  exists anywhere in `eami-ui`, and this codebase already has a working
+  precedent for reordering without one (`WorkflowsPage.tsx`'s
+  `StepsEditor`, B-065) plus a documented reason to avoid adding one
+  (B-069's DnD-library-removal history). Full writeup in `BUILT.md`'s
+  `eami-api`/`eami-ui` sections and `BACKLOG.md`'s B-086/B-089/B-090
+  entries.
 
 ## Last updated
-2026-08-21 by Claude Code — logged the Dead Clicks Audit's remaining 8
-findings as B-081 through B-088 (investigation-only session, no code
-built). See the Standing facts entry immediately above for which finding
-maps to which B-ID and the notable per-item reasoning (B-084's "build a
-detail view first" scoping, B-085's "remove the affordance, don't wire
-it" recommendation, B-086's HIGH-priority governance framing, B-087's
-sequencing against B-077).
+2026-08-22 by Claude Code — B-086: wired Policies' decorative drag-handle
+to the real reorder endpoint, but only after finding and fixing two real
+stacked bugs blocking it (a frontend request-shape mismatch traced to a
+stale `openapi.yaml` spec, and a real backend transaction bug that made
+the "working, tested" reorder endpoint 500 on ordinary use) — both
+confirmed with the user before touching files outside the brief's
+original stated scope. See the Standing facts entry immediately above
+for the full summary, including the live enforcement-outcome proof (a
+real policy reorder flipping a real dispatch's allow/deny decision) and
+the two new low-priority follow-ups (B-089, B-090) logged from the
+mandatory review passes.
+
+Prior entry, still accurate: 2026-08-21 by Claude Code — logged the Dead
+Clicks Audit's remaining 8 findings as B-081 through B-088
+(investigation-only session, no code built). See the Standing facts
+entry above for which finding maps to which B-ID and the notable
+per-item reasoning (B-084's "build a detail view first" scoping, B-085's
+"remove the affordance, don't wire it" recommendation, B-086's
+HIGH-priority governance framing, B-087's sequencing against B-077).
 
 Prior entry, still accurate: 2026-08-21 by Claude Code — B-080: removed
 the Nodes page's misleading "live Serf mesh cluster" framing, found by

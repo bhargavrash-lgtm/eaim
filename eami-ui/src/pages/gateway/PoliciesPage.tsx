@@ -1,7 +1,7 @@
 // PoliciesPage.tsx -- Gateway / Policies CRUD
 // Owned by FE-Gateway
 import { useState } from 'react'
-import { Plus, GripVertical, Pencil, Trash2 } from 'lucide-react'
+import { Plus, ChevronUp, ChevronDown, Pencil, Trash2 } from 'lucide-react'
 import {
   PageHeader,
   ConfirmDialog,
@@ -13,6 +13,7 @@ import {
   useCreatePolicy,
   useUpdatePolicy,
   useDeletePolicy,
+  useReorderPolicies,
 } from '@/hooks/usePolicies'
 import type { Policy, PolicyCreate, PolicyUpdate } from '@/hooks/usePolicies'
 
@@ -290,11 +291,26 @@ function PolicyPanel({ mode, policy, onClose }: PanelProps) {
 export function PoliciesPage() {
   const { data, isLoading, error } = usePolicies()
   const deletePolicy = useDeletePolicy()
+  const reorder = useReorderPolicies()
 
   const [panel, setPanel] = useState<{ mode: PanelMode; policy?: Policy } | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Policy | null>(null)
 
+  // Already returned in priority order (ORDER BY priority ASC) -- row
+  // position IS evaluation rank, so array index doubles as display rank.
   const policies: Policy[] = (data as any)?.data ?? []
+
+  // The reorder endpoint renumbers priority sequentially from array
+  // position for every id it's given, so a move must always submit every
+  // policy's id in its new full order -- submitting only the two swapped
+  // ids would leave the rest with stale, potentially colliding priorities.
+  function movePolicy(index: number, direction: -1 | 1) {
+    const target = index + direction
+    if (target < 0 || target >= policies.length || reorder.isPending) return
+    const orderedIds = policies.map(p => p.id)
+    ;[orderedIds[index], orderedIds[target]] = [orderedIds[target], orderedIds[index]]
+    reorder.mutate(orderedIds)
+  }
 
   if (isLoading) return <div className="p-6"><LoadingSpinner /></div>
   if (error)    return <div className="p-6 text-sm text-red-500">Failed to load policies.</div>
@@ -316,6 +332,11 @@ export function PoliciesPage() {
       />
 
       <div className="flex-1 overflow-auto p-6">
+        {reorder.isError && (
+          <div className="mb-4 px-4 py-2 rounded text-sm border bg-red-50 border-red-200 text-red-700">
+            Failed to save new policy order -- reload and try again.
+          </div>
+        )}
         {policies.length === 0 ? (
           <EmptyState
             title="No policies yet"
@@ -336,10 +357,27 @@ export function PoliciesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {policies.map(policy => (
+                {policies.map((policy, idx) => (
                   <tr key={policy.id} className="hover:bg-gray-50">
-                    <td className="px-3 py-3 text-gray-300">
-                      <GripVertical className="h-4 w-4" />
+                    <td className="px-3 py-3">
+                      <div className="flex flex-col">
+                        <button
+                          onClick={() => movePolicy(idx, -1)}
+                          disabled={idx === 0 || reorder.isPending}
+                          title="Move up (higher priority)"
+                          className="text-gray-400 hover:text-indigo-600 disabled:opacity-25 disabled:hover:text-gray-400"
+                        >
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => movePolicy(idx, 1)}
+                          disabled={idx === policies.length - 1 || reorder.isPending}
+                          title="Move down (lower priority)"
+                          className="text-gray-400 hover:text-indigo-600 disabled:opacity-25 disabled:hover:text-gray-400"
+                        >
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-gray-500 font-mono text-xs">{policy.priority}</td>
                     <td className="px-4 py-3">

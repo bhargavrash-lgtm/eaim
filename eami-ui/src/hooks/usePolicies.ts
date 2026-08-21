@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/api/client'
+import { api, apiFetch } from '@/api/client'
 import type { components } from '@/api/schema'
 
 export type Policy = components['schemas']['Policy']
@@ -62,11 +62,17 @@ export function useReorderPolicies() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (orderedIds: string[]) => {
-      const { data, error } = await api.POST('/v1/gateway/policies/reorder', {
-        body: { order: orderedIds },
+      // NOTE: the real handler (eami-api/internal/api/types.go
+      // PolicyReorderRequest) expects JSON key "policy_ids", not "order" --
+      // api/openapi.yaml documents "order", out of sync with the real
+      // implementation (flagged separately, spec is Architect-EAMI-owned).
+      // apiFetch is used instead of the generated `api` client because the
+      // generated types follow the (wrong) spec and would silently produce
+      // the same broken body.
+      return apiFetch<{ data: Policy[] }>('/v1/gateway/policies/reorder', {
+        method: 'POST',
+        body: { policy_ids: orderedIds },
       })
-      if (error) throw error
-      return data
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['policies'] }),
   })
