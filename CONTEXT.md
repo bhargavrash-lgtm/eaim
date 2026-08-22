@@ -80,7 +80,7 @@ or prior context suggests otherwise, it is wrong; trust this line.
     compose up`-based manual verification (no Docker in this
     environment) — `MemoryPage.tsx`'s correctness rests on manual
     shape-verification only.
-- **B-097 (2026-08-22): `GET /v1/finops/summary`'s persistent 500 was root-caused (not the already-fixed B-016) and fixed.** Real cause: `teamQ`'s `GROUP BY team` collided with `token_usage`'s own real, always-empty `team` column — Postgres's GROUP BY name resolution silently preferred that input column over the SELECT alias, leaving `ga.owner` ungrouped (SQLSTATE 42803). Fixed by grouping by `ga.owner` directly. **AC4 finding, worth knowing for any future FinOps/cost work:** `token_usage` genuinely is written by real dispatch activity, but every row recorded so far has zero/empty usage fields because every historical dispatch went through non-AI-provider test connectors — the extraction logic (`extractTokenUsage`) is code-level confirmed correct for a real `ai_provider`/Claude dispatch (traced the raw Anthropic response shape through undisturbed), just never yet exercised by one. Full detail in `BUILT.md`'s `eami-api` section and `BACKLOG.md`'s B-097 entry. **B-ID sequencing note:** the previously-planned "gate AI-agent token issuance via api_keys" brief (investigated and planned, not yet built as of this entry) is now **B-098**.
+- **B-097 (2026-08-22): `GET /v1/finops/summary`'s persistent 500 was root-caused (not the already-fixed B-016) and fixed.** Real cause: `teamQ`'s `GROUP BY team` collided with `token_usage`'s own real, always-empty `team` column — Postgres's GROUP BY name resolution silently preferred that input column over the SELECT alias, leaving `ga.owner` ungrouped (SQLSTATE 42803). Fixed by grouping by `ga.owner` directly. **AC4 finding, upgraded to a real live test result after explicit user direction to actually verify rather than stop at a code trace — a second, genuinely separate live bug found and flagged, not fixed:** a real dispatch to the org's real `claude` connector (approved through the real escalation flow) produced a genuine successful Anthropic response, but wrote **nothing** to `token_usage` — `extractTokenUsage`/`safeWriteTokenUsage` (`main.go:428-429`) only exists in the immediate-Allow dispatch branch; the Escalate branch returns its `Hold()` result directly and never reaches that code at all. Since the org's real Claude connector is unconditionally escalated by an active policy, **zero real AI-provider spend has ever been recorded in this org**, independent of B-097's own fix. **Logged as B-099 (QUEUED, Medium-High), not built** — flagged to the user before any fix was attempted, per explicit instruction not to expand B-097's scope. Full detail in `BUILT.md`'s `eami-api` section and `BACKLOG.md`'s B-097/B-099 entries. **B-ID sequencing note:** the previously-planned "gate AI-agent token issuance via api_keys" brief is **B-098**; the counter now stands at **B-100**.
 - **B-096 (2026-08-22): a real centralized branding mechanism (config +
   build-time colorthief/OKLCH extraction from the logo) is now live in
   `eami-ui`, with rheoARC shipped as its first instance.** Deliberately
@@ -1172,22 +1172,25 @@ preferred that input column over the SELECT alias, leaving `ga.owner`
 ungrouped (SQLSTATE 42803 on every call, any org, any date range).
 Reproduced live first (real login, real request, real error) before
 touching code; fixed by grouping by `ga.owner` directly — one line, no
-schema change, `token_usage`'s write path untouched. AC4 investigation
-confirmed `token_usage` is genuinely written by real dispatch activity
-(25 real rows in Dev Org) but every row has zero/empty usage fields
-because every historical dispatch went through non-AI-provider test
-connectors, not because the extraction logic is broken — traced the real
-`ai_provider`/Claude path and confirmed it passes Anthropic's correctly-
-shaped raw response through undisturbed; deliberately did not make a real
-paid API call to empirically confirm, since the code-level trace was
-conclusive. 3 new real-Postgres tests (`finops_pg_test.go`) prove the fix
-numerically against seeded data, not just "no error." Live-verified
-against the real redeployed stack: the exact original failing request
-now returns `200`, cross-checked byte-for-byte against a hand-written
-`psql` aggregate. See the Standing facts entry above for full detail and
-`BACKLOG.md`'s B-097 entry. **B-ID note:** the previously-planned
-token-issuance-gating brief is now B-098 (was tentatively B-097 before
-this fix took that number, per explicit user direction).
+schema change, `token_usage`'s write path untouched. 3 new real-Postgres
+tests (`finops_pg_test.go`) prove the fix numerically against seeded
+data, not just "no error." Live-verified against the real redeployed
+stack: the exact original failing request now returns `200`,
+cross-checked byte-for-byte against a hand-written `psql` aggregate.
+**AC4, upgraded from a code trace to a real live test per explicit user
+direction, surfaced a second, genuinely separate live bug — flagged, not
+fixed:** a real dispatch to the org's real `claude` connector (approved
+through the real escalation flow) produced a genuine successful Anthropic
+response but wrote nothing to `token_usage` — `extractTokenUsage`/
+`safeWriteTokenUsage` only exists in the immediate-Allow dispatch branch;
+the Escalate branch returns its `Hold()` result directly and never
+reaches that code. Since the org's real Claude connector is
+unconditionally escalated by an active policy, zero real AI-provider
+spend has ever been recorded in this org, independent of B-097's fix.
+Logged as **B-099** (QUEUED, Medium-High), not built this session. See
+the Standing facts entry above for full detail and `BACKLOG.md`'s
+B-097/B-099 entries. **B-ID note:** the previously-planned
+token-issuance-gating brief is B-098; the counter now stands at B-100.
 
 Prior entry, still accurate: 2026-08-22 by Claude Code — B-096: shipped a real centralized branding
 mechanism (logo/name/theme, `eami-ui/src/branding/`) with rheoARC as its
