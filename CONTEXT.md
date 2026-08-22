@@ -931,6 +931,42 @@ or prior context suggests otherwise, it is wrong; trust this line.
   every backend behavior each rendered label describes was independently
   proven live as above. Full writeup in `BUILT.md`'s `eami-api`/`eami-ui`
   sections and `BACKLOG.md`'s B-094 entry.
+- **B-095 logged (2026-08-22, HIGH, investigation not started) — real,
+  confirmed bug in `VerifyAuditChain`, NOT a security incident.** Found the
+  same day as B-094 shipped: B-094's "Verify chain to this entry" button
+  was the first caller ever to exercise `GET /v1/audit/verify` against real
+  multi-org, concurrently-written history (Dev Org) rather than an
+  isolated single-writer test org, and it reported Dev Org's real audit
+  history as broken. **Investigated directly, not assumed — confirmed the
+  data itself is genuinely intact:** all 39 of Dev Org's real `audit_log`
+  rows independently recompute self-consistent (0/39 mismatches), and
+  reconstructing the true chain via `hash`→`prev_hash` pointers (ignoring
+  the `timestamp` column entirely) yields one single unbroken sequence
+  covering all 39 rows, zero cycles, zero orphans. **Two distinct
+  pre-existing root causes in `VerifyAuditChain` itself** (predates B-094;
+  B-094 only calls this function, never modifies it, per its own scope
+  boundary): (1) the writer's real hash chain is global across every org
+  (`GetLastHash` has no `org_id` filter), but `VerifyAuditChain` assumes an
+  org's chronologically-first row must chain to genesis — false for any
+  org that isn't literally the first ever to write to the table; confirmed
+  Dev Org's first row's real `prev_hash` matches a real *different* org's
+  row (`b044-live-verify-agent`, B-044's live verification, same day), not
+  genesis, not tampered. (2) `VerifyAuditChain` walks by `timestamp ASC`,
+  assuming that reflects true append order — it doesn't always, since
+  `audit.Writer.Write()` captures `e.Timestamp` before its mutex-serialized
+  critical section, so concurrent near-simultaneous writes can insert (and
+  hash-chain) in a different order than their timestamps suggest; confirmed
+  on 3 real rows from B-046's live verification written ~165ms apart. Once
+  the walk hits its first break it locks `firstBroken` and stops
+  re-verifying, so every subsequent "verify to entry" call for an affected
+  org reports the identical broken row regardless of which entry is being
+  checked — explaining why it looked like a cascading tamper rather than a
+  tool bug. Logged as **B-095**, flagged HIGH (real trust-undermining
+  correctness bug in the tamper-evidence feature itself, even though no
+  actual tampering occurred) — explicitly needs its own investigation into
+  the correct fix (likely verifying the true hash-pointer-derived chain,
+  not a timestamp-ordered per-org slice) before any brief is scoped. See
+  `BACKLOG.md`'s B-095 entry for full acceptance criteria.
 - **Dead Clicks Audit's remaining findings logged as B-081 through B-088
   (2026-08-21) — investigation only, nothing built this pass.** Each
   B-ID confirmed free before assignment (grepped `BACKLOG.md`/`BUILT.md`/
@@ -1113,7 +1149,18 @@ or prior context suggests otherwise, it is wrong; trust this line.
   and `BACKLOG.md`'s B-077/B-087/B-091 entries.
 
 ## Last updated
-2026-08-22 by Claude Code — B-094: built the real Audit entry detail view
+2026-08-22 by Claude Code — B-095 logged (HIGH, investigation not
+started, not a security incident): `VerifyAuditChain` produces false
+"chain broken" reports against real, untampered `audit_log` data,
+surfaced by B-094's new verify button being the first real exercise of
+that endpoint against multi-org/concurrent-write history. Confirmed via
+independent hash-pointer reconstruction that Dev Org's real 39-row chain
+is genuinely intact end-to-end — the bug is in the verification tool's
+org-scoped-genesis and timestamp-ordering assumptions, not the data. See
+the Standing facts entry immediately above for the full root-cause
+breakdown and `BACKLOG.md`'s B-095 entry for acceptance criteria.
+
+Prior entry, still accurate: 2026-08-22 by Claude Code — B-094: built the real Audit entry detail view
 scoped by the B-084 investigation, closing B-084. Honest, two-tier
 hash-chain verification indicator (client-side self-consistency check,
 visually/textually kept separate from a real "Verify chain to this
