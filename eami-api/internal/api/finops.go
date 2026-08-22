@@ -133,8 +133,19 @@ ORDER BY cost_usd DESC`
 	}
 
 	// ── By team ───────────────────────────────────────────────────────────────
-	// team is stored in the agent's owner field via a join, or in token_usage directly.
-	// token_usage does not have a team column — derive from gateway_agents.owner.
+	// Team is derived from gateway_agents.owner via a join, not read from
+	// token_usage.team directly (that column exists in the schema but is
+	// never populated by the write path — see B-097).
+	//
+	// GROUP BY ga.owner, NOT the "team" alias (B-097): token_usage has its
+	// own real "team" column, and Postgres's GROUP BY name resolution
+	// prefers a matching INPUT column over an OUTPUT alias of the same
+	// name — "GROUP BY team" silently grouped by the wrong (always-empty)
+	// tu.team column instead of the alias, leaving ga.owner ungrouped and
+	// producing a real 500 (SQLSTATE 42803) on every call. Grouping by
+	// ga.owner directly is unambiguous and lets COALESCE(ga.owner,
+	// 'unknown') appear in the SELECT list validly, since it's a pure
+	// function of the grouped column.
 	const teamQ = `
 SELECT COALESCE(ga.owner, 'unknown') AS team,
   COALESCE(SUM(CASE WHEN tu.cost_usd IS NOT NULL THEN tu.cost_usd
@@ -149,7 +160,7 @@ LEFT JOIN model_pricing   mp ON mp.model = tu.model
 WHERE tu.org_id = $1
   AND tu.recorded_at >= $2
   AND tu.recorded_at <  $3
-GROUP BY team
+GROUP BY ga.owner
 ORDER BY cost_usd DESC`
 
 	teamRows, err := db.Query(ctx, teamQ, orgID, fromTS, toTS)

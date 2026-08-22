@@ -822,4 +822,13 @@ New `PATCH /v1/gateway/tools/{toolId}` (`store.UpdateTool`/`Server.UpdateTool`) 
 **Out of scope, per the brief:** actual display-name change, runtime/admin-editable branding UI, agent installers, appliance boot banner, browser extension manifest.
 **Dependencies:** none.
 
-## Next B-ID: B-097
+### B-097 — `GET /v1/finops/summary` 500 error, root-caused and fixed — **DONE, 2026-08-22**
+**Objective:** Diagnose and fix the persistent 500 on `GET /v1/finops/summary`, disclosed as "known, pre-existing" throughout the session but never actually diagnosed.
+**Root cause (confirmed via live reproduction, not assumed):** `FinOpsSummary`'s `teamQ` did `GROUP BY team`, an alias colliding with `token_usage`'s own real, never-populated `team TEXT` column — Postgres's GROUP BY name resolution prefers the input column over the alias, leaving `ga.owner` ungrouped: `ERROR: column "ga.owner" must appear in the GROUP BY clause ... (SQLSTATE 42803)`. A genuinely different bug from the already-fixed B-016 (nil-`s.queries` panic), confirmed still intact.
+**Fix:** `GROUP BY team` → `GROUP BY ga.owner` (`eami-api/internal/api/finops.go`) — one line, no schema change, `token_usage`'s write path untouched.
+**AC4 finding:** `token_usage` is genuinely written by real dispatch activity (25 real rows in Dev Org from past live-verification sessions), but every existing row has zero/empty usage fields — `extractTokenUsage` only populates real values from a downstream response shaped `{model, usage:{input_tokens,output_tokens}}`, and every historical dispatch went through non-AI-provider test connectors. Traced the real `ai_provider`/Claude path and confirmed it *does* return Anthropic's raw response (genuinely shaped correctly) undisturbed to `extractTokenUsage` — so this is an untested-path gap, not a second broken code path. Not fixed (nothing to fix); no live Anthropic API call made to avoid incurring real external cost without clear authorization.
+**Test coverage:** 3 new real-Postgres tests in `finops_pg_test.go` (regression + data-correctness, org isolation, empty-range). **Verified 2026-08-22: `go build`/`go vet`/`go test -count=1 ./...` clean across all of `eami-api`.**
+**Live-verified:** the exact original failing request now returns real `200`; every response field cross-checked byte-for-byte against a hand-written `psql` aggregate over the same real rows.
+**Dependencies:** none. Full detail in `BUILT.md`'s `eami-api` section.
+
+## Next B-ID: B-098

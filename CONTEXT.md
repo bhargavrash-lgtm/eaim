@@ -80,6 +80,7 @@ or prior context suggests otherwise, it is wrong; trust this line.
     compose up`-based manual verification (no Docker in this
     environment) — `MemoryPage.tsx`'s correctness rests on manual
     shape-verification only.
+- **B-097 (2026-08-22): `GET /v1/finops/summary`'s persistent 500 was root-caused (not the already-fixed B-016) and fixed.** Real cause: `teamQ`'s `GROUP BY team` collided with `token_usage`'s own real, always-empty `team` column — Postgres's GROUP BY name resolution silently preferred that input column over the SELECT alias, leaving `ga.owner` ungrouped (SQLSTATE 42803). Fixed by grouping by `ga.owner` directly. **AC4 finding, worth knowing for any future FinOps/cost work:** `token_usage` genuinely is written by real dispatch activity, but every row recorded so far has zero/empty usage fields because every historical dispatch went through non-AI-provider test connectors — the extraction logic (`extractTokenUsage`) is code-level confirmed correct for a real `ai_provider`/Claude dispatch (traced the raw Anthropic response shape through undisturbed), just never yet exercised by one. Full detail in `BUILT.md`'s `eami-api` section and `BACKLOG.md`'s B-097 entry. **B-ID sequencing note:** the previously-planned "gate AI-agent token issuance via api_keys" brief (investigated and planned, not yet built as of this entry) is now **B-098**.
 - **B-096 (2026-08-22): a real centralized branding mechanism (config +
   build-time colorthief/OKLCH extraction from the logo) is now live in
   `eami-ui`, with rheoARC shipped as its first instance.** Deliberately
@@ -1163,7 +1164,32 @@ or prior context suggests otherwise, it is wrong; trust this line.
   and `BACKLOG.md`'s B-077/B-087/B-091 entries.
 
 ## Last updated
-2026-08-22 by Claude Code — B-096: shipped a real centralized branding
+2026-08-22 by Claude Code — B-097: root-caused and fixed `GET /v1/finops/summary`'s
+persistent 500 (a genuinely different bug from the already-fixed B-016) —
+`teamQ`'s `GROUP BY team` collided with `token_usage`'s own real, always-
+empty `team` column, and Postgres's GROUP BY name resolution silently
+preferred that input column over the SELECT alias, leaving `ga.owner`
+ungrouped (SQLSTATE 42803 on every call, any org, any date range).
+Reproduced live first (real login, real request, real error) before
+touching code; fixed by grouping by `ga.owner` directly — one line, no
+schema change, `token_usage`'s write path untouched. AC4 investigation
+confirmed `token_usage` is genuinely written by real dispatch activity
+(25 real rows in Dev Org) but every row has zero/empty usage fields
+because every historical dispatch went through non-AI-provider test
+connectors, not because the extraction logic is broken — traced the real
+`ai_provider`/Claude path and confirmed it passes Anthropic's correctly-
+shaped raw response through undisturbed; deliberately did not make a real
+paid API call to empirically confirm, since the code-level trace was
+conclusive. 3 new real-Postgres tests (`finops_pg_test.go`) prove the fix
+numerically against seeded data, not just "no error." Live-verified
+against the real redeployed stack: the exact original failing request
+now returns `200`, cross-checked byte-for-byte against a hand-written
+`psql` aggregate. See the Standing facts entry above for full detail and
+`BACKLOG.md`'s B-097 entry. **B-ID note:** the previously-planned
+token-issuance-gating brief is now B-098 (was tentatively B-097 before
+this fix took that number, per explicit user direction).
+
+Prior entry, still accurate: 2026-08-22 by Claude Code — B-096: shipped a real centralized branding
 mechanism (logo/name/theme, `eami-ui/src/branding/`) with rheoARC as its
 first instance, preceded by an investigation-only session inventorying
 every EAMI branding surface repo-wide. Build-time config chosen over a
