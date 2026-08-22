@@ -186,6 +186,12 @@ type AuditEntryResp struct {
 	Timestamp  time.Time   `json:"timestamp"`
 	PrevHash   string      `json:"prev_hash"`
 	Hash       string      `json:"hash"`
+	// DataHandling (B-078) is the dispatching ai_provider connector's
+	// data_handling_designation snapshotted at dispatch time -- empty/absent
+	// for every non-ai_provider call and every row written before B-078.
+	// Added to the API response by B-094; was previously written to
+	// audit_log but never read back anywhere.
+	DataHandling *string `json:"data_handling_designation,omitempty"`
 }
 
 type AuditListResponse struct {

@@ -883,6 +883,54 @@ or prior context suggests otherwise, it is wrong; trust this line.
   endpoint); B-092 and B-093 are real, separate, larger follow-ups, correctly
   not folded into B-084 itself. Full writeup in this session's transcript;
   `BACKLOG.md`'s B-092/B-093 entries carry the acceptance criteria.
+- **B-094 (done, 2026-08-22):** real Audit entry detail view, closing B-084
+  with an honest, two-tier hash-chain verification indicator. Built directly
+  from the B-084 investigation above — most fields (`parameters`, `policy_id`,
+  `approval_id`, `prev_hash`) were already sent by `GET /v1/audit` and simply
+  never rendered; the one genuine backend gap, `data_handling_designation`
+  (B-078's column), is now selected/returned for the first time. `GET
+  /v1/audit/verify` itself was **not modified** — only called, bounded via
+  `?to=<entry timestamp>`, exactly as the investigation proposed. **The
+  CRITICAL REQUIREMENT held throughout:** an always-on, client-side-only
+  "Self-consistent (this entry only)" indicator (explicitly disclaiming the
+  full-chain guarantee, computed via `crypto.subtle.digest` against the
+  entry's own already-public fields plus the caller's own session `org_id`
+  from `useAuthStore` — zero new backend call) is visually and textually
+  kept separate from a distinct "Verify chain to this entry" button/section
+  that calls the real backend and renders only its real result. The word
+  "Verified" alone never appears on the self-consistency element. Security
+  review's explicit task was independently re-deriving this labeling
+  couldn't be misread as the full-chain guarantee — zero findings.
+  **A real spec gap found while wiring policy/approval resolution:**
+  `api/openapi.yaml` documents only `200` for `GetPolicy`/`GetApproval`, no
+  404 schema, which collapses openapi-fetch's generated error type to
+  `never` for both — worked around with `apiFetch` (same undocumented-
+  spec-mismatch escape hatch as `useReorderPolicies`), not a cast or a
+  spec edit. **Real bug found and fixed by the mandatory code-review pass:**
+  the panel had no React `key`, so switching audit rows without closing it
+  could carry a stale "Chain verified" result onto a different entry's
+  fields — exactly the failure mode the honest-labeling requirement exists
+  to prevent — fixed with `key={selected.id}` forcing a remount per entry.
+  Also fixed: an unhandled clipboard-rejection promise, and a gofmt
+  misalignment introduced in the backend's own new struct field (fixed
+  precisely, leaving the file's large pre-existing, unrelated CRLF-vs-LF
+  diff untouched). **Live-verified end-to-end against the real running
+  stack, rebuilt fresh:** a real throwaway org/admin logged in via the real
+  `/v1/auth/login`; two real, correctly hash-chained `audit_log` rows
+  inserted directly, one with `data_handling_designation` set — `GET
+  /v1/audit` confirmed it present on exactly that row and cleanly omitted
+  (never fabricated) on the other. `GET /v1/audit/verify?to=...` confirmed
+  `valid:true` against the real intact pair, then `valid:false` with the
+  correct `first_broken_at` after a real `UPDATE` simulating tampering. The
+  client-side self-consistency hash formula was independently re-derived in
+  Node.js against the real row's real API response, byte-for-byte, before
+  being trusted in the browser. **Visual/UI confirmation of the panel's
+  rendering and the two claims' label separation was explicitly deferred to
+  the user's own manual check** — no browser-automation tool was available
+  this session (the user declined the Chrome extension install mid-task);
+  every backend behavior each rendered label describes was independently
+  proven live as above. Full writeup in `BUILT.md`'s `eami-api`/`eami-ui`
+  sections and `BACKLOG.md`'s B-094 entry.
 - **Dead Clicks Audit's remaining findings logged as B-081 through B-088
   (2026-08-21) — investigation only, nothing built this pass.** Each
   B-ID confirmed free before assignment (grepped `BACKLOG.md`/`BUILT.md`/
@@ -1065,17 +1113,31 @@ or prior context suggests otherwise, it is wrong; trust this line.
   and `BACKLOG.md`'s B-077/B-087/B-091 entries.
 
 ## Last updated
-2026-08-22 by Claude Code — B-084 investigation (investigation only, no
-code changed): scoped what a real Audit Log detail view should show —
-which fields are already fetched but unrendered vs. genuinely missing
-from the API, what a per-entry hash-chain verification claim can
-honestly say and at what cost, and confirmed directly (not assumed) that
-audit_log has zero workflow_run_id linkage today. Logged two new,
-separate follow-ups with real B-IDs: **B-092** (cross-page deep-
-linking/highlighting by ID on Agents/Policies/Approvals) and **B-093**
-(workflow_run_id/step_index linkage in audit_log) — both investigation-
-not-started, not folded into B-084. See the Standing facts entry
-immediately above for the full per-part breakdown.
+2026-08-22 by Claude Code — B-094: built the real Audit entry detail view
+scoped by the B-084 investigation, closing B-084. Honest, two-tier
+hash-chain verification indicator (client-side self-consistency check,
+visually/textually kept separate from a real "Verify chain to this
+entry" call against the unmodified /v1/audit/verify) — the CRITICAL
+REQUIREMENT held throughout, confirmed by an explicit security-review
+task to independently re-derive the labeling couldn't be misread. One
+real backend gap closed (data_handling_designation now actually
+returned). A real stale-state bug found and fixed by code review before
+shipping. See the Standing facts entry immediately above for the full
+breakdown, including what's still deferred to the user's own manual
+visual check.
+
+Prior entry, still accurate: 2026-08-22 by Claude Code — B-084
+investigation (investigation only, no code changed): scoped what a real
+Audit Log detail view should show — which fields are already fetched but
+unrendered vs. genuinely missing from the API, what a per-entry
+hash-chain verification claim can honestly say and at what cost, and
+confirmed directly (not assumed) that audit_log has zero workflow_run_id
+linkage today. Logged two new, separate follow-ups with real B-IDs:
+**B-092** (cross-page deep-linking/highlighting by ID on
+Agents/Policies/Approvals) and **B-093** (workflow_run_id/step_index
+linkage in audit_log) — both investigation-not-started, not folded into
+B-084 (now B-094). See the Standing facts entry above for the full
+per-part breakdown.
 
 Prior entry, still accurate: 2026-08-22 by Claude Code — B-087 + B-077:
 built real agent lifecycle UI (create/suspend/delete) and fixed the

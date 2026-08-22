@@ -786,4 +786,14 @@ New `PATCH /v1/gateway/tools/{toolId}` (`store.UpdateTool`/`Server.UpdateTool`) 
 **Severity:** Low — real gap, no current user-facing complaint driving it; genuine schema + `eami-gateway` backend work, not a detail-view UI concern. Not scoped into B-084.
 **Dependencies:** none blocking investigation.
 
-## Next B-ID: B-094
+### B-094 — Audit entry detail view, with honest hash-chain verification — **DONE, 2026-08-22**
+**Objective:** Real detail view for Audit page rows, closing B-084 (previously correctly left unclickable per B-081/082/083's scope decision, since no detail view existed yet). Built directly from the B-084 investigation's findings.
+**What shipped:** slide-out `AuditEntryDetailPanel.tsx` opened by a real row `onClick`, showing full `parameters`/`hash`/`prev_hash`/raw ids (all already sent by `GET /v1/audit`, just never rendered), live-resolved policy/approval names via `GetPolicy`/`GetApproval`, and the newly-added `data_handling_designation` (see `eami-api` change below). Full writeup in `BUILT.md`'s `eami-api`/`eami-ui` sections.
+**The one real backend change:** `data_handling_designation` (B-078's column) added to `ListAudit`'s SELECT, `store.AuditEntry`, and `AuditEntryResp` — confirmed genuinely absent before this brief, not assumed.
+**The differentiating piece — two hash-chain claims, deliberately never blurred:** an always-on, client-side-only **"Self-consistent (this entry only)"** indicator (explicitly worded to disclaim the full-chain guarantee), and a separate **"Verify chain to this entry"** button calling the real, unmodified `GET /v1/audit/verify?to=<timestamp>`. Security review's explicit task was independently re-deriving that this labeling can't be misread as the full-chain guarantee — zero findings.
+**Real bug found and fixed by code review:** the panel lacked a React `key`, so switching rows without closing it could show a stale "Chain verified" result next to a different entry's fields — fixed with `key={selected.id}`, forcing a remount per entry.
+**Test coverage:** new `audit_pg_test.go` (real Postgres, 3 tests) proving the `data_handling_designation` round-trip and `VerifyAuditChain` called the panel's exact way against both an intact and a genuinely tampered real chain.
+**Live-verified end-to-end against the real stack:** real throwaway org/admin, real hash-chained rows, real `/v1/audit` and `/v1/audit/verify` calls (intact and post-tamper), real client-side hash formula independently re-derived in Node.js against a real row. **Visual/UI confirmation of the panel's rendering explicitly deferred to the user's own manual check** — no browser-automation tool was available this session.
+**Dependencies:** none. **B-092**/**B-093** (both logged from the B-084 investigation) remain separate, correctly not folded in.
+
+## Next B-ID: B-095

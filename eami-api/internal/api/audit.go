@@ -260,5 +260,8 @@ func auditEntryToResp(e store.AuditEntry) AuditEntryResp {
 			resp.Parameters = params
 		}
 	}
+	if e.DataHandling.Valid {
+		resp.DataHandling = &e.DataHandling.String
+	}
 	return resp
 }

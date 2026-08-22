@@ -100,6 +100,9 @@ type AuditEntry struct {
 	Timestamp  time.Time
 	PrevHash   string
 	Hash       string
+	// DataHandling (B-078 column, B-094 read path) is nullable -- unset for
+	// every non-ai_provider dispatch and every row written before B-078.
+	DataHandling pgtype.Text
 }
 
 // User mirrors the users table (auth fields only).

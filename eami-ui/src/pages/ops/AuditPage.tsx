@@ -4,10 +4,8 @@ import { useState } from 'react'
 import { Search, Shield, ShieldOff, ShieldAlert } from 'lucide-react'
 import { PageHeader, LoadingSpinner, EmptyState } from '@/components/common'
 import { useAudit } from '@/hooks/useAudit'
-import type { AuditParams } from '@/hooks/useAudit'
-import type { components } from '@/api/schema'
-
-type AuditEntry = components['schemas']['AuditEntry']
+import type { AuditParams, AuditEntry } from '@/hooks/useAudit'
+import { AuditEntryDetailPanel } from './AuditEntryDetailPanel'
 
 // Decision badge
 
@@ -40,7 +38,7 @@ function HashCell({ hash }: { hash: string }) {
     })
   }
   return (
-    <button onClick={handleCopy} title={copied ? 'Copied!' : hash}
+    <button onClick={e => { e.stopPropagation(); handleCopy() }} title={copied ? 'Copied!' : hash}
       className="font-mono text-xs text-gray-400 hover:text-indigo-600">
       {hash.slice(0, 8)}...
     </button>
@@ -76,6 +74,7 @@ export function AuditPage() {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
   const [applied, setApplied] = useState<AuditParams>({})
   const [page, setPage]       = useState(1)
+  const [selected, setSelected] = useState<AuditEntry | null>(null)
 
   function handleApply() {
     const params: AuditParams = { page: 1, per_page: PAGE_SIZE }
@@ -193,7 +192,8 @@ export function AuditPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-100 bg-white">
                   {entries.map(entry => (
-                    <tr key={entry.id} className="hover:bg-gray-50">
+                    <tr key={entry.id} onClick={() => setSelected(entry)}
+                      className="hover:bg-gray-50 cursor-pointer">
                       <td className="px-4 py-3 text-xs text-gray-400 font-mono whitespace-nowrap">
                         {formatTs(entry.timestamp)}
                       </td>
@@ -250,6 +250,16 @@ export function AuditPage() {
           </>
         )}
       </div>
+
+      {selected && (
+        // key={selected.id} forces a remount on every row change so the panel's
+        // own mutation state (the "Verify chain to this entry" result) never
+        // survives from one entry into the next -- found by code review: without
+        // it, clicking a different row while the panel is open could show a
+        // stale "Chain verified" badge next to a different entry's fields,
+        // exactly what the honest hash-labeling requirement exists to prevent.
+        <AuditEntryDetailPanel key={selected.id} entry={selected} onClose={() => setSelected(null)} />
+      )}
     </div>
   )
 }
