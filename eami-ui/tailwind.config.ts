@@ -1,5 +1,8 @@
 import type { Config } from 'tailwindcss'
+import { brand } from './src/branding/theme.generated'
 
+// brand's hex values come from scripts/generate-theme.mjs (see that
+// file's header) -- extracted from the real logo, not hand-picked here.
 const config: Config = {
   content: [
     './index.html',
@@ -8,14 +11,7 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        brand: {
-          50: '#eef2ff',
-          100: '#e0e7ff',
-          500: '#6366f1',
-          600: '#4f46e5',
-          700: '#4338ca',
-          900: '#312e81',
-        },
+        brand,
       },
     },
   },

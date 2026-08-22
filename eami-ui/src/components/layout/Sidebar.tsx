@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { NAV_ITEMS, NAV_GROUPS } from './Navigation'
 import { useUIStore } from '@/stores/uiStore'
 import { usePendingApprovalCount } from '@/hooks/useApprovals'
-import { Shield } from 'lucide-react'
+import { Logo } from './Logo'
 
 export function Sidebar() {
   const sidebarOpen = useUIStore((s) => s.sidebarOpen)
@@ -12,10 +12,11 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-full w-60 flex-col border-r border-gray-200 bg-white">
-      {/* Logo */}
-      <div className="flex h-14 items-center gap-2 border-b border-gray-200 px-4">
-        <Shield className="h-6 w-6 text-brand-600" />
-        <span className="text-sm font-bold tracking-wide text-gray-900">EAMI</span>
+      {/* Logo -- sourced entirely from branding/config.ts; the wordmark
+          image already carries the product name, so no separate name
+          text is rendered alongside it here (see BUILT.md). */}
+      <div className="flex h-14 items-center border-b border-gray-200 px-4">
+        <Logo variant="full" className="h-6 w-auto" />
       </div>
 
       {/* Nav groups */}

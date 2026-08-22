@@ -2,9 +2,9 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
-import { Shield } from 'lucide-react'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/authStore'
+import { Logo } from '@/components/layout/Logo'
 
 const loginSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -47,7 +47,7 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
       <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
         <div className="mb-6 flex flex-col items-center">
-          <Shield className="h-10 w-10 text-brand-600" />
+          <Logo variant="full" className="h-8 w-auto" />
           <h1 className="mt-3 text-xl font-bold text-gray-900">Sign in to EAMI</h1>
           <p className="mt-1 text-sm text-gray-500">Enterprise AI Governance Platform</p>
         </div>

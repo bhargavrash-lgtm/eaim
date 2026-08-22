@@ -80,6 +80,20 @@ or prior context suggests otherwise, it is wrong; trust this line.
     compose up`-based manual verification (no Docker in this
     environment) — `MemoryPage.tsx`'s correctness rests on manual
     shape-verification only.
+- **B-096 (2026-08-22): a real centralized branding mechanism (config +
+  build-time colorthief/OKLCH extraction from the logo) is now live in
+  `eami-ui`, with rheoARC shipped as its first instance.** Deliberately
+  creates a visible split, intentional not a bug: the Sidebar and Login
+  page now render the real rheoARC logo image (it bakes "rheoARC" in as
+  pixels), while `branding.displayName` — driving the browser tab title —
+  stays `'EAMI'`. The full text-name change is still the separate,
+  deferred rebrand epic this file's product-identity note already
+  protects; do not "finish the job" by changing `displayName` or any
+  other displayed EAMI string without the same explicit founder
+  instruction that note requires. The icon-only small/collapsed logo
+  variant is a generated placeholder (no icon glyph exists in the source
+  wordmark) — real design asset still needed there. Full detail in
+  `BUILT.md`'s `eami-ui` section and `BACKLOG.md`'s B-096 entry.
 
 ## Standing facts Code and PM must both know
 - Desktop app: planned future feature, not yet built. Gateway auth should
@@ -1149,7 +1163,27 @@ or prior context suggests otherwise, it is wrong; trust this line.
   and `BACKLOG.md`'s B-077/B-087/B-091 entries.
 
 ## Last updated
-2026-08-22 by Claude Code — B-095 logged (HIGH, investigation not
+2026-08-22 by Claude Code — B-096: shipped a real centralized branding
+mechanism (logo/name/theme, `eami-ui/src/branding/`) with rheoARC as its
+first instance, preceded by an investigation-only session inventorying
+every EAMI branding surface repo-wide. Build-time config chosen over a
+runtime/admin-editable version (flagged, not built — would need a DB
+table, an upload endpoint, and a Settings UI). Theme colors are real
+`colorthief`-extracted swatches from the logo, turned into an
+OKLCH-interpolated ramp (`scripts/generate-theme.mjs`), consumed by
+`tailwind.config.ts` — no hand-picked hex values. `Sidebar.tsx` and (a
+mid-session scope addition, user-directed) `LoginPage.tsx` now render the
+real logo image instead of a `Shield` icon + hardcoded "EAMI" text;
+`displayName` stays `'EAMI'` per explicit scope, still driving the tab
+title. AC5 (config change propagates without touching components) proven
+by a real temporary edit + rebuild + bundle grep, then reverted. Icon-only
+small/collapsed mark is a disclosed placeholder — no icon asset exists in
+the source wordmark. See the Standing facts entry above and `BACKLOG.md`'s
+B-096 for full detail. No browser screenshot taken this session — user
+declined the Chrome extension; verified instead via real
+`npm run build`/`type-check` and served-output inspection.
+
+Prior entry, still accurate: 2026-08-22 by Claude Code — B-095 logged (HIGH, investigation not
 started, not a security incident): `VerifyAuditChain` produces false
 "chain broken" reports against real, untampered `audit_log` data,
 surfaced by B-094's new verify button being the first real exercise of

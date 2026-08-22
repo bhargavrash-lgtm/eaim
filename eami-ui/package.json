@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "generate-client": "openapi-typescript ../api/openapi.yaml -o src/api/schema.ts",
+    "generate-branding-theme": "node scripts/generate-theme.mjs",
     "lint": "eslint src --ext ts,tsx",
     "type-check": "tsc --noEmit"
   },
@@ -32,9 +33,11 @@
     "@typescript-eslint/parser": "^8.6.0",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
+    "colorthief": "^3.5.0",
     "eslint": "^9.11.0",
     "openapi-typescript": "^7.4.1",
     "postcss": "^8.5.18",
+    "sharp": "^0.35.3",
     "tailwindcss": "^3.4.11",
     "typescript": "^5.5.3",
     "vite": "^5.4.6"
