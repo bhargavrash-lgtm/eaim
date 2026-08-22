@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/eami/gateway/internal/mcp"
 )
 
 // TestSafeWriteTokenUsage_PanicRecovered proves acceptance criterion #2 for
@@ -77,5 +81,100 @@ func TestSafeWriteTokenUsage_NoPanic_BehavesLikeBefore(t *testing.T) {
 	safeWriteTokenUsage("http://eami-api", "service-key", tokenUsagePayload{})
 	if !called {
 		t.Fatal("tokenUsageWriteFunc was not called")
+	}
+}
+
+// ─── recordTokenUsage (B-099): the shared helper both dispatch branches ───
+// ─── (immediate-Allow and escalate-then-approved) now call ────────────────
+
+// TestRecordTokenUsage_ExtractsAndWrites proves the shared helper performs
+// the exact same extract-then-write sequence the immediate-Allow branch
+// always has: a body shaped like a real ai_provider response yields a
+// correctly populated payload reaching tokenUsageWriteFunc.
+func TestRecordTokenUsage_ExtractsAndWrites(t *testing.T) {
+	orig := tokenUsageWriteFunc
+	defer func() { tokenUsageWriteFunc = orig }()
+
+	var gotPayload tokenUsagePayload
+	called := make(chan struct{})
+	tokenUsageWriteFunc = func(ctx context.Context, apiBase, serviceKey string, p tokenUsagePayload) error {
+		gotPayload = p
+		close(called)
+		return nil
+	}
+
+	body := json.RawMessage(`{"model":"claude-haiku-4-5-20251001","usage":{"input_tokens":8,"output_tokens":1}}`)
+	ac := mcp.ActionContext{OrgID: "org-1", AgentUUID: "agent-uuid-1", AgentName: "agent-alpha"}
+
+	recordTokenUsage("http://eami-api", "service-key", body, ac)
+
+	select {
+	case <-called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("recordTokenUsage never invoked tokenUsageWriteFunc")
+	}
+	if gotPayload.Model != "claude-haiku-4-5-20251001" {
+		t.Errorf("Model = %q, want claude-haiku-4-5-20251001", gotPayload.Model)
+	}
+	if gotPayload.InputTokens != 8 || gotPayload.OutputTokens != 1 {
+		t.Errorf("InputTokens/OutputTokens = %d/%d, want 8/1", gotPayload.InputTokens, gotPayload.OutputTokens)
+	}
+	if gotPayload.OrgID != "org-1" || gotPayload.AgentID != "agent-uuid-1" || gotPayload.AgentName != "agent-alpha" {
+		t.Errorf("identity fields not carried through: %+v", gotPayload)
+	}
+}
+
+// TestRecordTokenUsage_CalledTwiceIndependently proves the shared helper is
+// genuinely reusable across two call sites with independent ActionContexts
+// (standing in for the Allow branch and the escalate-then-approved branch)
+// without cross-contaminating state between calls -- the exact property
+// B-099's fix depends on, since both branches now call the same function.
+func TestRecordTokenUsage_CalledTwiceIndependently(t *testing.T) {
+	orig := tokenUsageWriteFunc
+	defer func() { tokenUsageWriteFunc = orig }()
+
+	var mu sync.Mutex
+	var got []tokenUsagePayload
+	done := make(chan struct{}, 2)
+	tokenUsageWriteFunc = func(ctx context.Context, apiBase, serviceKey string, p tokenUsagePayload) error {
+		mu.Lock()
+		got = append(got, p)
+		mu.Unlock()
+		done <- struct{}{}
+		return nil
+	}
+
+	allowBody := json.RawMessage(`{"model":"model-allow","usage":{"input_tokens":10,"output_tokens":2}}`)
+	allowAC := mcp.ActionContext{OrgID: "org-1", AgentUUID: "agent-1", AgentName: "allow-agent"}
+	escalateBody := json.RawMessage(`{"model":"model-escalate","usage":{"input_tokens":20,"output_tokens":4}}`)
+	escalateAC := mcp.ActionContext{OrgID: "org-1", AgentUUID: "agent-2", AgentName: "escalate-agent"}
+
+	recordTokenUsage("http://eami-api", "service-key", allowBody, allowAC)
+	recordTokenUsage("http://eami-api", "service-key", escalateBody, escalateAC)
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("only %d of 2 expected writes observed", i)
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 2 {
+		t.Fatalf("got %d payloads, want 2: %+v", len(got), got)
+	}
+	byAgent := map[string]tokenUsagePayload{}
+	for _, p := range got {
+		byAgent[p.AgentName] = p
+	}
+	allow, ok := byAgent["allow-agent"]
+	if !ok || allow.Model != "model-allow" || allow.InputTokens != 10 {
+		t.Errorf("allow-agent payload wrong or missing: %+v", byAgent)
+	}
+	escalate, ok := byAgent["escalate-agent"]
+	if !ok || escalate.Model != "model-escalate" || escalate.InputTokens != 20 {
+		t.Errorf("escalate-agent payload wrong or missing: %+v", byAgent)
 	}
 }

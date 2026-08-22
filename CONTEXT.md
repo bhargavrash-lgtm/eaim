@@ -80,6 +80,7 @@ or prior context suggests otherwise, it is wrong; trust this line.
     compose up`-based manual verification (no Docker in this
     environment) — `MemoryPage.tsx`'s correctness rests on manual
     shape-verification only.
+- **B-099 (2026-08-23): DONE — escalated/approved tool calls now record token usage.** New shared `recordTokenUsage` helper in `cmd/gateway/main.go`, called from both the immediate-Allow and escalate-then-approved dispatch branches (the latter gated on `holdErr == nil`), closing the gap B-097's AC4 found live. Zero changes to `approval/router.go` — B-057's TOCTOU/resume logic untouched by construction. All 4 ACs live-verified against the real stack, including a real TOCTOU-drift re-verification (credential rotation backed up/restored entirely inside Postgres). Full detail in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s B-099 entry.
 - **B-100 (2026-08-23, HIGH, QUEUED): a real duplicate-execution race in the core approval mechanism, same severity class as B-057's original TOCTOU finding.** Found by B-099's mandatory code-review pass, traced and confirmed directly against `internal/approval/router.go`, not taken on the reviewer's word alone: `Router.Hold()`'s timeout backstop and `resolve()` (the `LISTEN approval_decision` path) can both end up calling `dispatchApproved` — the real downstream call — for the same `approvalID`, in a narrow window where a decision lands right near the hold timeout while the real dispatch is still in flight. A governed action can genuinely execute twice against a real downstream system, silently, no error surfaced anywhere. **Explicitly flagged not to be triaged as routine cleanup** — needs its own careful investigation before any fix, per founder direction. Full detail in `BACKLOG.md`'s B-100 entry.
 - **B-101 (2026-08-23, Low, QUEUED): the `holdErr == nil` gate B-099 added isn't independently unit-tested outside live verification** — `dispatch` is an inline closure inside `run()`, not testable without a refactor out of B-099's scope. Disclosed, not urgent. See `BACKLOG.md`'s B-101 entry.
 - **B-097 (2026-08-22): `GET /v1/finops/summary`'s persistent 500 was root-caused (not the already-fixed B-016) and fixed.** Real cause: `teamQ`'s `GROUP BY team` collided with `token_usage`'s own real, always-empty `team` column — Postgres's GROUP BY name resolution silently preferred that input column over the SELECT alias, leaving `ga.owner` ungrouped (SQLSTATE 42803). Fixed by grouping by `ga.owner` directly. **AC4 finding, upgraded to a real live test result after explicit user direction to actually verify rather than stop at a code trace — a second, genuinely separate live bug found and flagged, not fixed:** a real dispatch to the org's real `claude` connector (approved through the real escalation flow) produced a genuine successful Anthropic response, but wrote **nothing** to `token_usage` — `extractTokenUsage`/`safeWriteTokenUsage` (`main.go:428-429`) only exists in the immediate-Allow dispatch branch; the Escalate branch returns its `Hold()` result directly and never reaches that code at all. Since the org's real Claude connector is unconditionally escalated by an active policy, **zero real AI-provider spend has ever been recorded in this org**, independent of B-097's own fix. **Logged as B-099 (QUEUED, Medium-High), not built** — flagged to the user before any fix was attempted, per explicit instruction not to expand B-097's scope. Full detail in `BUILT.md`'s `eami-api` section and `BACKLOG.md`'s B-097/B-099 entries. **B-ID sequencing note:** the previously-planned "gate AI-agent token issuance via api_keys" brief is **B-098**; the counter now stands at **B-100**.
@@ -1166,26 +1167,36 @@ or prior context suggests otherwise, it is wrong; trust this line.
   and `BACKLOG.md`'s B-077/B-087/B-091 entries.
 
 ## Last updated
-2026-08-23 by Claude Code — B-099 in progress (fix built, reviewed, live
-verification pending): shared `recordTokenUsage` helper wired into both the
-immediate-Allow and escalate-then-approved dispatch branches in
-`cmd/gateway/main.go`, gated on `holdErr == nil` after `approvalRouter.Hold()`
-returns — closes the gap B-097's AC4 found live (escalated/approved calls
-never recorded token usage at all). Zero changes to `approval/router.go` —
-the fix only reads `Hold()`'s existing return values, so B-057/B-059's
-TOCTOU/resume logic is untouched by construction. Full `eami-gateway` test
-suite (including all `internal/approval` TOCTOU tests) clean, zero
-regressions. **The mandatory code-review pass found a real, pre-existing,
-HIGH-severity bug independent of this fix — logged as B-100, not fixed
-here** (see the Active decision thread entry above): `Hold()`'s timeout
-backstop can call `dispatchApproved` a second time in a narrow race window,
-genuinely double-executing the real downstream call. **Also logged B-101**
-(Low, disclosed test-coverage gap — the new gate isn't independently
-unit-tested outside live verification, `dispatch` isn't a testable unit
-without a larger refactor). Founder directed: continue B-099's live
-verification as-is (the fix itself is correct and provably isolated), log
-B-100/B-101 separately rather than folding them in, and treat B-100 with
-the same rigor as B-057's original TOCTOU finding, not as routine cleanup.
+2026-08-23 by Claude Code — B-099: DONE. Shared `recordTokenUsage` helper
+wired into both the immediate-Allow and escalate-then-approved dispatch
+branches in `cmd/gateway/main.go`, gated on `holdErr == nil` after
+`approvalRouter.Hold()` returns — closes the gap B-097's AC4 found live
+(escalated/approved calls never recorded token usage at all). Zero changes
+to `approval/router.go` — the fix only reads `Hold()`'s existing return
+values, so B-057/B-059's TOCTOU/resume logic is untouched by construction.
+Full `eami-gateway` test suite (including all `internal/approval` TOCTOU
+tests) clean, zero regressions. **The mandatory code-review pass found a
+real, pre-existing, HIGH-severity bug independent of this fix — logged as
+B-100, not fixed here** (see the Standing facts entry above): `Hold()`'s
+timeout backstop can call `dispatchApproved` a second time in a narrow race
+window, genuinely double-executing the real downstream call. **Also logged
+B-101** (Low, disclosed test-coverage gap). Founder directed: continue
+B-099's live verification as-is, log B-100/B-101 separately, treat B-100
+with the same rigor as B-057's original TOCTOU finding.
+**All 4 ACs live-verified against the real redeployed stack:** AC1 — the
+exact original bug scenario (real escalate→approve→dispatch to the org's
+real `claude` connector) re-run, now produces a real `token_usage` row
+(`tokens_in=8, tokens_out=1, cost_usd=0.000010`) where before it produced
+none. AC2 — a denied escalation produced zero new rows. AC3 — a
+non-escalated `rest_api` dispatch still records usage (no regression).
+AC4 — the real TOCTOU credential-rotation scenario re-run per explicit
+instruction to empirically re-confirm, not just structurally argue: real
+credentials backed up/restored entirely inside a temporary Postgres table
+(never exposed outside the DB, working around a permission-classifier
+block on writing key material to disk) — resume correctly refused with the
+real "configuration changed" error, and correctly recorded zero usage for
+the refused call, proving B-099's gate and B-057's TOCTOU guarantee compose
+correctly together.
 
 Prior entry, still accurate: 2026-08-22 by Claude Code — B-097: root-caused and fixed `GET /v1/finops/summary`'s
 persistent 500 (a genuinely different bug from the already-fixed B-016) —

@@ -357,6 +357,19 @@ func run() error {
 				"hold_timeout", holdTimeout,
 			)
 			result, holdErr := approvalRouter.Hold(reqCtx, approvalID, approvalReq)
+
+			// Fire-and-forget: write token usage for a genuinely approved-
+			// and-dispatched call, exactly like the immediate-Allow path
+			// (B-099). holdErr is nil only when outcomeFromStatus's
+			// "approved" case's real re-dispatch (dispatchApproved)
+			// succeeded (approval/router.go) -- a denied/expired escalation,
+			// or an approved one whose resumed dispatch itself failed, never
+			// reaches here, so no usage is recorded for a call that didn't
+			// genuinely execute against the downstream connector.
+			if holdErr == nil {
+				recordTokenUsage(apiBaseURL, apiServiceKey, result, ac)
+			}
+
 			outcome := "success"
 			if holdErr != nil {
 				outcome = "failed"
@@ -424,9 +437,8 @@ func run() error {
 			}
 
 			// Fire-and-forget: write token usage to eami-api for FinOps.
-			// Must not block or affect the MCP response latency.
-			tu := extractTokenUsage(tr.Body, ac)
-			go safeWriteTokenUsage(apiBaseURL, apiServiceKey, tu)
+			// Shared with the escalate-then-approved path above (B-099).
+			recordTokenUsage(apiBaseURL, apiServiceKey, tr.Body, ac)
 
 			go episodeRecorder.Record(context.Background(), ac.OrgID, ac.AgentUUID, ac.AgentName,
 				[]episode.Step{{
@@ -681,6 +693,18 @@ func extractTokenUsage(result json.RawMessage, ac mcp.ActionContext) tokenUsageP
 	p.InputTokens = resp.Usage.InputTokens
 	p.OutputTokens = resp.Usage.OutputTokens
 	return p
+}
+
+// recordTokenUsage extracts usage from a successful dispatch result and
+// fire-and-forget writes it to eami-api for FinOps. Shared by the
+// immediate-Allow and escalate-then-approved dispatch paths (B-099) so a
+// call routed through approval isn't silently excluded from cost tracking
+// the way it was before this fix -- the two paths previously diverged
+// silently because each duplicated its own copy of this step and only one
+// copy was ever written. Must not block or affect dispatch latency.
+func recordTokenUsage(apiBaseURL, apiServiceKey string, body json.RawMessage, ac mcp.ActionContext) {
+	tu := extractTokenUsage(body, ac)
+	go safeWriteTokenUsage(apiBaseURL, apiServiceKey, tu)
 }
 
 // safeWriteTokenUsage runs tokenUsageWriteFunc with panic recovery. Call via
