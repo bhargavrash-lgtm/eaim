@@ -766,4 +766,24 @@ New `PATCH /v1/gateway/tools/{toolId}` (`store.UpdateTool`/`Server.UpdateTool`) 
 **Severity:** Low-Medium — real double-submit risk on every destructive confirm dialog in the product, not just a cosmetic gap, but each caller's underlying mutation is already idempotent-safe in practice (a second delete/decide call 404s or no-ops rather than corrupting data).
 **Dependencies:** none. Touches a shared component (`ConfirmDialog.tsx`) used by multiple pages — scope it as its own small brief rather than a side-fix, given the blast radius.
 
-## Next B-ID: B-092
+### B-092 — Cross-page deep-linking/highlighting by ID (Agents/Policies/Approvals) — investigation not started
+**Objective:** Let a link from elsewhere in the app (e.g. a future Audit detail panel's `agent_id`/`policy_id`/`approval_id` references) land on and highlight the specific row it points to, not just navigate to the list page.
+**Context:** Found during the B-084 (Audit Log detail-view) investigation (2026-08-22). Checked directly: only `SettingsPage.tsx` and `AlertsPage.tsx` use `useSearchParams`/`useParams` today, both for unrelated purposes — `AgentsPage.tsx`, `PoliciesPage.tsx`, and `ApprovalsPage.tsx` have no mechanism to open on, scroll to, or highlight a specific row by ID via URL. `GetAgent`/`GetPolicy`/`GetApproval` by-ID endpoints already exist and work (`eami-api/internal/api/agents.go:75`, `policies.go:48`, `approvals.go:152`), so a detail panel can already *resolve* an ID to a human-readable name without this item — this item is specifically about *navigating to and highlighting* the row on the destination page, which today has nowhere to land.
+**Acceptance criteria:**
+- [ ] Investigate a consistent pattern (e.g. `?highlight=<id>` query param read on mount) across all three pages
+- [ ] Each page opens/scrolls to and visually highlights the matching row when the param is present
+- [ ] No regression to each page's existing row-click behavior (B-081/082/083)
+**Severity:** Low-Medium — not blocking today (nothing links to these pages by ID yet), but needed before any future Audit detail-panel's related-entity links are more than a promise. Real, contained, separate UI work across 3 pages.
+**Dependencies:** none blocking investigation. Feeds any future B-084 (Audit detail view) implementation brief, which would otherwise have related-entity links with nowhere useful to go.
+
+### B-093 — `workflow_run_id`/`step_index` linkage in `audit_log` — investigation not started
+**Objective:** Let an `audit_log` row indicate whether (and where) it was part of a multi-hop workflow run, so the audit trail can show a governed call's workflow context instead of looking identical to a standalone call.
+**Context:** Found during the B-084 (Audit Log detail-view) investigation (2026-08-22), which set out to verify a Part-C premise citing B-063 and found it false. **Confirmed via direct grep across `schema/schema.sql`, every file under `schema/migrations/`, and every file under `schema/migrations-v2/`: `audit_log` has no `workflow_run_id` or `step_index` column anywhere.** Workflow execution tracking lives entirely in `workflow_run_steps` (`schema/migrations-v2/000007_workflow_execution.up.sql:48-66`), a separate table with no FK to or from `audit_log` in either direction. Today there is no way, from an `audit_log` row, to tell it was part of a workflow run at all.
+**Acceptance criteria:**
+- [ ] Investigate: new nullable `workflow_run_id` (+ optionally `step_index`) column(s) on `audit_log`, populated at write time
+- [ ] Trace how a workflow run's ID would actually reach the `auditEntry` construction in `eami-gateway/cmd/gateway/main.go` from the workflow executor (`eami-gateway/internal/workflow/executor.go`) — the executor reuses the same shared `dispatch()`/audit-write call site as a standalone call, per `000007_workflow_execution.up.sql`'s own doc comment, so this is a real plumbing question, not just a schema add
+- [ ] Confirm whether this new column should participate in the hash-chain formula or stay excluded like `data_handling_designation` (B-078) — likely excluded, matching that precedent, but not yet decided
+**Severity:** Low — real gap, no current user-facing complaint driving it; genuine schema + `eami-gateway` backend work, not a detail-view UI concern. Not scoped into B-084.
+**Dependencies:** none blocking investigation.
+
+## Next B-ID: B-094

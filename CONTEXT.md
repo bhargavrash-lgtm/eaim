@@ -853,6 +853,36 @@ or prior context suggests otherwise, it is wrong; trust this line.
   no regression. **B-043 remains open** — real multi-node registration
   is explicitly separate future work, not touched here. Full writeup in
   `BUILT.md`'s `eami-ui` section and `BACKLOG.md`'s B-079/B-080 entries.
+- **B-084 investigation (2026-08-22, no B-ID of its own — investigation only,
+  no code changed):** scoped what a real Audit Log detail view should show.
+  **Part A:** `ListAudit`'s SQL and `AuditEntryResp` already carry `parameters`,
+  `policy_id`, `approval_id`, and `prev_hash` all the way to the typed frontend
+  response (`eami-ui/src/api/schema.ts:3616-3641`) — `AuditPage.tsx` just never
+  renders them, so a detail panel showing those is pure frontend work, zero
+  backend change. `data_handling_designation` (B-078) is genuinely absent from
+  `ListAudit`'s SELECT and `AuditEntryResp` despite being written at insert
+  time — a real, small (3-line) backend gap. **Part B:** `GET /v1/audit/verify`
+  already exists and does a real, honest full hash-chain walk from genesis
+  (`eami-api/internal/store/verify.go`) — reusable as-is via `?to=<entry's
+  timestamp>` for a real "verified to this entry" action, at the same O(rows
+  so far) cost the shipped full-log verify already accepts. A cheap O(1)
+  per-entry self-consistency check (recompute this row's hash from already-
+  fetched fields) is real but proves only local linkage, not full-chain
+  integrity — flagged explicitly so a future build doesn't mislabel it as
+  "chain verified." **Part C:** `GetAgent`/`GetPolicy`/`GetApproval` by-ID
+  endpoints already exist for resolving raw IDs to human-readable labels
+  in-panel, but no page supports landing on/highlighting a specific row by ID
+  for true click-through navigation — logged as **B-092**. Directly
+  re-verified (not assumed from B-063) that `audit_log` has zero
+  `workflow_run_id`/`step_index` linkage anywhere in `schema.sql` or either
+  migrations directory — workflow-run tracking lives only in
+  `workflow_run_steps`, no FK either direction — logged as **B-093**.
+  **Part D recommendation:** a real v1 stays small (slide-out panel on
+  already-fetched fields + the `data_handling_designation` backend addition +
+  the cheap self-consistency check + a button wired to the existing verify
+  endpoint); B-092 and B-093 are real, separate, larger follow-ups, correctly
+  not folded into B-084 itself. Full writeup in this session's transcript;
+  `BACKLOG.md`'s B-092/B-093 entries carry the acceptance criteria.
 - **Dead Clicks Audit's remaining findings logged as B-081 through B-088
   (2026-08-21) — investigation only, nothing built this pass.** Each
   B-ID confirmed free before assignment (grepped `BACKLOG.md`/`BUILT.md`/
@@ -1035,14 +1065,27 @@ or prior context suggests otherwise, it is wrong; trust this line.
   and `BACKLOG.md`'s B-077/B-087/B-091 entries.
 
 ## Last updated
-2026-08-22 by Claude Code — B-087 + B-077: built real agent lifecycle UI
-(create/suspend/delete) and fixed the delete-with-history bug that would
-have immediately blocked it, plus a new small agent_lifecycle_events
-audit trail after investigation found the task brief's "write to
-audit_log" premise didn't match how any existing admin action in this
-codebase actually works. See the Standing facts entry immediately above
-for the full summary, including the false-premise investigation, the
-already-enforced suspend mechanism, and the live end-to-end proof.
+2026-08-22 by Claude Code — B-084 investigation (investigation only, no
+code changed): scoped what a real Audit Log detail view should show —
+which fields are already fetched but unrendered vs. genuinely missing
+from the API, what a per-entry hash-chain verification claim can
+honestly say and at what cost, and confirmed directly (not assumed) that
+audit_log has zero workflow_run_id linkage today. Logged two new,
+separate follow-ups with real B-IDs: **B-092** (cross-page deep-
+linking/highlighting by ID on Agents/Policies/Approvals) and **B-093**
+(workflow_run_id/step_index linkage in audit_log) — both investigation-
+not-started, not folded into B-084. See the Standing facts entry
+immediately above for the full per-part breakdown.
+
+Prior entry, still accurate: 2026-08-22 by Claude Code — B-087 + B-077:
+built real agent lifecycle UI (create/suspend/delete) and fixed the
+delete-with-history bug that would have immediately blocked it, plus a
+new small agent_lifecycle_events audit trail after investigation found
+the task brief's "write to audit_log" premise didn't match how any
+existing admin action in this codebase actually works. See the Standing
+facts entry above for the full summary, including the false-premise
+investigation, the already-enforced suspend mechanism, and the live
+end-to-end proof.
 
 Prior entry, still accurate: 2026-08-22 by Claude Code — B-085: removed
 Paste Detection's decorative row hover affordance (the opposite fix from
