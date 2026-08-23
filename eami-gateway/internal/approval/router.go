@@ -117,6 +117,42 @@ type decisionResult struct {
 type pendingEntry struct {
 	ch  chan decisionResult // buffered(1); sender never blocks
 	req Request             // kept so resolve() can call proxy.Forward on approval
+
+	// once/result close a real double-dispatch race (B-100): resolve()
+	// (the LISTEN/NOTIFY path) and Hold()'s own timeout backstop can both
+	// reach outcomeFromStatus for the same approvalID when a decision
+	// lands right at the hold deadline while the real dispatch triggered
+	// by resolve() is still in flight -- without this guard, both calls
+	// would independently call dispatchApproved, genuinely hitting the
+	// downstream connector twice. once.Do ensures exactly one of the two
+	// competing callers actually runs outcomeFromStatus (and, if
+	// approved, the real dispatchApproved call); the other blocks inside
+	// Do() until the first completes, then both read the identical
+	// cached result -- sync.Once's documented happens-before guarantee
+	// (the winner's write to result happens-before Do() returns for any
+	// caller) makes this read race-free with no extra locking. This is
+	// correct specifically because this race is provably intra-process
+	// (resolve() only ever acts on a LOCAL pendingEntry -- see resolve()'s
+	// own doc comment -- so a different node can never compete for the
+	// same *pendingEntry); no DB-level lock is needed.
+	//
+	// A deliberate, already-existing trade-off, not a new one introduced
+	// here (B-100's own mandatory review flagged this, verified before
+	// accepting it): the LOSING caller's block inside Do() is bounded by
+	// the WINNING caller's dispatch duration -- itself bounded only by
+	// the downstream HTTP client's own ~30s default timeout (matched
+	// across internal/proxy, internal/toolrouter, internal/aiprovider),
+	// not by holdTimeout or the loser's own ctx cancellation. This is not
+	// a regression: pre-fix, the loser ran its OWN full duplicate
+	// dispatchApproved call in exactly this same branch, using the same
+	// uncancellable ctx (cmd/gateway/main.go's dispatch closure always
+	// receives ctx via mcp/handler.go's context.WithoutCancel(r.Context())
+	// -- Hold() has exactly one production caller, and it was never
+	// cancellable by client disconnect even before this fix) and was
+	// equally unbounded by holdTimeout -- this fix changes WHICH
+	// in-flight call the loser waits on, not whether it's bounded.
+	once   sync.Once
+	result decisionResult
 }
 
 // Router manages escalation approvals via Postgres LISTEN/NOTIFY.
@@ -347,8 +383,14 @@ func (r *Router) Hold(ctx context.Context, approvalID string, req Request) (json
 				if fetchErr := r.pool.QueryRow(bg, `
 					SELECT status, COALESCE(decision_reason, '') FROM approval_requests WHERE id = $1
 				`, approvalID).Scan(&status, &decisionReason); fetchErr == nil {
-					res := r.outcomeFromStatus(ctx, approvalID, req, status, decisionReason)
-					return res.data, res.err
+					// B-100: guard against resolve() having already
+					// started (or being about to start) the real dispatch
+					// for this exact approvalID concurrently -- see
+					// pendingEntry's once/result doc comment.
+					entry.once.Do(func() {
+						entry.result = r.outcomeFromStatus(ctx, approvalID, req, status, decisionReason)
+					})
+					return entry.result.data, entry.result.err
 				}
 			}
 			slog.Warn("approval: failed to record timeout", "approval_id", approvalID, "err", err)
@@ -468,7 +510,14 @@ func (r *Router) resolve(ctx context.Context, approvalID string) {
 		return
 	}
 
-	entry.ch <- r.outcomeFromStatus(ctx, approvalID, entry.req, status, decisionReason)
+	// B-100: guard against Hold()'s own timeout backstop having already
+	// started (or being about to start) the real dispatch for this exact
+	// approvalID concurrently -- see pendingEntry's once/result doc
+	// comment.
+	entry.once.Do(func() {
+		entry.result = r.outcomeFromStatus(ctx, approvalID, entry.req, status, decisionReason)
+	})
+	entry.ch <- entry.result
 }
 
 // outcomeFromStatus converts a fetched approval_requests status into a
