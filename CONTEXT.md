@@ -80,6 +80,9 @@ or prior context suggests otherwise, it is wrong; trust this line.
     compose up`-based manual verification (no Docker in this
     environment) — `MemoryPage.tsx`'s correctness rests on manual
     shape-verification only.
+- **B-101 (2026-08-24): DONE — resolved as a direct consequence of B-102, not a separate fix.** See B-102's entry immediately below.
+- **B-102 (2026-08-24): DONE — `dispatch` extracted into a testable `Dispatcher` type (`cmd/gateway/dispatcher.go`) with a branch-convergence hook mechanism, closing B-101 and structurally closing B-099's bug class.** Every branch (Deny/Escalate-Submit-failure/Escalate-resumed/Allow-proxy-failure/Allow-success) now converges on one shared exit via a typed `DispatchOutcome` struct that runs a literal, explicit two-hook list (`recordTokenUsageHook`, `recordEpisodeHook`) — no pub/sub registry, no event bus, no channels, mirroring B-057's `aiprovider.Router`'s explicit `map[string]Adapter`, exactly as the 2026-08-23 investigation (below) recommended. `internal/workflow`/`internal/approval/router.go` untouched — `dispatcher.Dispatch` has the identical `mcp.DecisionHandler` signature the old closure did. **Mandatory code-review pass (general-purpose subagent, "high" effort) caught 4 real findings, all fixed before shipping** — most importantly, the Escalate branch's own `Submit()`-failure case still `return`ed independently in the first draft, bypassing the hook list entirely (the exact bug class this brief exists to eliminate, reintroduced inside the fix itself); also: the mechanism was added inline into `main.go` instead of its own file (moved to `dispatcher.go`), `DispatchOutcome.Dispatched` was redundantly set per-branch instead of computed once from `Err == nil`, and four `episode.Step` literals were duplicated instead of using a shared constructor. Security review: zero findings. 7 new real-Postgres integration tests (`cmd/gateway/dispatcher_test.go`), including a regression test for the code-review finding and the central AC4 proof (a test-only hook added only via a construction-time `extraHooks` seam fires for all three decision types with zero branch-specific code change). **Verified 2026-08-24: `go build`/`go vet`/`go test -count=1 ./...` clean across the entire `eami-gateway` module against a real Postgres**, including every pre-existing TOCTOU/`dispatchApproved`/B-100-race/workflow test — zero regressions. Full detail in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s B-101/B-102 entries.
+- **Extensibility-mechanism investigation (2026-08-23, no B-ID — investigation only, nothing built).** Investigated a disciplined Go mechanism to close B-099's bug class (a cross-cutting step manually wired into some but not all of `dispatch`'s parallel branches) without over-engineering into a generic framework. **Key finding: an exhaustive inventory of `eami-gateway`/`eami-api` turned up exactly ONE site with the multi-branch-fan-out shape this bug class needs** — the `dispatch` closure's 3-way policy switch (`cmd/gateway/main.go:284-456`, Deny/Escalate/Allow). Workflow step completion isn't a separate site: `workflow/executor.go` calls `dispatch` itself, once per step, unmodified (B-058/B-059's own design) — fixing `dispatch` covers workflows for free. Agent/tool/policy CRUD in `eami-api` are single linear handlers with nothing to fan out across — this bug class structurally cannot occur there today. `approval/router.go`'s `outcomeFromStatus` already converges every branch to one `decisionResult{data, err}` struct before returning — an existing in-repo precedent for the fix, not a place needing more machinery. **Recommended mechanism: no pub/sub registry, no event bus, no channels** — restructure `dispatch`'s three branches to converge on one shared exit (a small typed `dispatchOutcome` struct) with a short, explicit, literal slice of post-dispatch hook functions built at `dispatch`'s own construction site, mirroring B-057's `aiprovider.Router`'s explicit `map[string]Adapter` (passed via `New()`, never global/init-time registration). Traced concretely: this WOULD have prevented B-099, specifically conditioned on eliminating the branches' independent `return` statements, not merely bolting a registry on alongside them. It would NOT have prevented B-100 (a `Hold()`/`resolve()` concurrency race — orthogonal to the fan-out problem, not this mechanism's target). **Real sizing dependency: this fix inherits B-101's already-logged gap** — `dispatch` is an inline closure inside `run()`, not independently testable — so the honest sequencing is (1) extract `dispatch` into a testable function/type first (closes B-101 as a side effect), THEN (2) do the branch-convergence fix, so the new mechanism is provable by real Go integration tests from day one instead of inheriting B-101's live-verification-only limitation. Separately confirmed B-057's `Adapter` interface/registry (`aiprovider/types.go:59`) is the right, already-proven answer for a genuinely different problem — new integration TYPES (future AI providers, Skills, A2A agents) — recommended for documentation as a standing convention, explicitly not conflated with the hook-mechanism work above (new TYPE vs. new cross-cutting reaction to an existing call, two different problems). UI-adjacent finding (static-code-only, no browser verification, flagged per this pass's own scope): `DataTable.tsx`'s existing `onRowClick`-conditional hover (line 109) already correctly centralizes the row-click pattern — B-081/082/083 happened because `AgentsPage.tsx`/`PoliciesPage.tsx`/`WorkflowsPage.tsx` hand-roll their own `<tr>` instead of using it (only `ApprovalsPage.tsx`/`AlertsPage.tsx` actually use `DataTable`); the real fix there is page-level `DataTable` adoption, not a new abstraction. **Founder confirmed proceeding with real B-IDs the same session** — `BACKLOG.md`'s counter (`B-102`) checked directly first, no other reservation found in-file: logged as **B-102** (dispatch extraction + convergence/hook mechanism, closes B-101 as a side effect, QUEUED Medium), **B-103** (B-057 Adapter pattern docs, QUEUED Low, independent), **B-104** (DataTable adoption on Agents/Policies/Workflows, QUEUED Low, independent). Counter now stands at **B-105**. Full acceptance criteria in `BACKLOG.md`.
 - **B-099 (2026-08-23): DONE — escalated/approved tool calls now record token usage.** New shared `recordTokenUsage` helper in `cmd/gateway/main.go`, called from both the immediate-Allow and escalate-then-approved dispatch branches (the latter gated on `holdErr == nil`), closing the gap B-097's AC4 found live. Zero changes to `approval/router.go` — B-057's TOCTOU/resume logic untouched by construction. All 4 ACs live-verified against the real stack, including a real TOCTOU-drift re-verification (credential rotation backed up/restored entirely inside Postgres). Full detail in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s B-099 entry.
 - **B-100 (2026-08-23): DONE — the approval double-dispatch race is closed.** New `sync.Once`-guarded `pendingEntry.result` shared between `Hold()`'s timeout backstop and `resolve()`, ensuring `dispatchApproved` fires at most once per approval regardless of which path wins the race. Chosen over a DB-level lock since the race is provably intra-process. Reproduced deterministically (5/5) before building, and proven closed by reverting the fix and confirming the adversarial test correctly fails (`hitCount=2`) before restoring it. The mandatory code-review pass's finding (loser's block no longer bounded by its own `holdTimeout`) was investigated and its specific premise found factually inaccurate for this codebase (`Hold()`'s one production caller already uses `context.WithoutCancel`, per B-039) — documented explicitly in code as a pre-existing, non-worsened property, not silently dismissed. All 6 ACs verified (AC1/AC2 at the Go level, AC3-AC6 live against the real stack, including a TOCTOU-drift re-verification). Full detail in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s B-100 entry.
 - **B-101 (2026-08-23, Low, QUEUED): the `holdErr == nil` gate B-099 added isn't independently unit-tested outside live verification** — `dispatch` is an inline closure inside `run()`, not testable without a refactor out of B-099's scope. Disclosed, not urgent. See `BACKLOG.md`'s B-101 entry.
@@ -1167,7 +1170,74 @@ or prior context suggests otherwise, it is wrong; trust this line.
   and `BACKLOG.md`'s B-077/B-087/B-091 entries.
 
 ## Last updated
-2026-08-23 by Claude Code — B-100: DONE. Closed the approval double-dispatch
+2026-08-24 by Claude Code — B-102: DONE (and B-101 resolved as a direct
+consequence). `dispatch` (`cmd/gateway/main.go`'s inline closure) is now
+`Dispatcher.Dispatch` in new file `cmd/gateway/dispatcher.go` -- every
+branch converges on one shared exit via a typed `DispatchOutcome` struct
+that runs a literal two-hook list (`recordTokenUsageHook`,
+`recordEpisodeHook`), no pub/sub registry/event bus/channels, mirroring
+B-057's `aiprovider.Router` `map[string]Adapter` convention, exactly per
+the 2026-08-23 investigation below. **Mandatory code review caught 4 real
+findings before shipping**, most importantly the Escalate branch's own
+`Submit()`-failure case still `return`ing independently in the first
+draft -- bypassing the entire hook list, the exact bug class this brief
+exists to eliminate, reintroduced inside the fix itself; fixed (converges
+via `break`) and regression-tested. Also fixed: mechanism moved out of
+`main.go` into its own file, `Dispatched` computed once centrally instead
+of redundantly per-branch, four duplicated `episode.Step` literals
+extracted into a shared helper. Security review: zero findings (pure
+structural refactor, `approval/router.go` untouched). 7 new real-Postgres
+tests in `dispatcher_test.go`. **Verified 2026-08-24: `go build`/`go
+vet`/`go test -count=1 ./...` clean across all of `eami-gateway` against
+a real Postgres**, including every pre-existing TOCTOU/`dispatchApproved`/
+B-100-race/workflow test -- zero regressions. Full detail in `BUILT.md`'s
+`eami-gateway` section and `BACKLOG.md`'s B-101/B-102 entries.
+
+Prior entry, still accurate: 2026-08-23 by Claude Code — extensibility-mechanism investigation, then
+three real B-IDs logged to `BACKLOG.md` on explicit founder confirmation:
+**B-102** (dispatch extraction + branch-convergence hook mechanism,
+closes B-101 as a side effect, QUEUED Medium), **B-103** (B-057 Adapter
+pattern documentation, QUEUED Low, independent), **B-104** (DataTable
+adoption on Agents/Policies/Workflows, QUEUED Low, independent).
+`BACKLOG.md`'s counter checked directly before assigning (`B-102` was
+free, no other in-file reservation found); counter now stands at
+**B-105**. Nothing built yet — these are QUEUED, not DONE. Investigated
+a disciplined Go mechanism
+to close B-099's bug class (a step manually wired into some but not all of
+`dispatch`'s parallel branches) while explicitly avoiding a generic
+pub/sub framework nobody asked for. **Exhaustive inventory of
+`eami-gateway`/`eami-api` found exactly one site with the shape this
+problem needs**: `cmd/gateway/main.go`'s `dispatch` closure's 3-way
+Deny/Escalate/Allow switch (lines 284-456). Workflow steps aren't a
+second site — `workflow/executor.go` reuses `dispatch` unmodified, once
+per step. Agent/tool/policy CRUD handlers in `eami-api` are single linear
+functions with nothing to fan out across. `approval/router.go`'s
+`outcomeFromStatus` already converges every branch to one
+`decisionResult` struct before returning — a real in-repo precedent for
+the fix. **Recommendation: no event bus, no channels, no registry
+abstraction** — restructure `dispatch`'s three branches to converge on
+one exit (a small typed `dispatchOutcome` struct) with a short, explicit,
+literal slice of post-dispatch hooks built at `dispatch`'s own
+construction site, mirroring B-057's `aiprovider.Router`'s explicit
+`map[string]Adapter`. Traced concretely that this would have prevented
+B-099 specifically because it removes the branches' independent `return`
+statements (not because a registry alone would have helped) — and
+explicitly would NOT have prevented B-100 (an unrelated concurrency
+race). **Load-bearing sizing finding: this work depends on B-101's
+already-logged gap** (`dispatch` is an inline closure inside `run()`, not
+independently testable) — recommended sequencing is extract-then-fix, so
+the mechanism is Go-integration-test-provable from day one rather than
+inheriting B-101's live-verification-only limitation. Confirmed B-057's
+`Adapter` pattern is the right, separate answer for new integration TYPES
+(future AI providers, Skills, A2A agents) and recommended documenting it
+as a standing convention. UI-adjacent, static-code-only finding: B-081/
+082/083 happened because three list pages hand-roll `<tr>` markup instead
+of using `DataTable.tsx`, which already centralizes the row-click/hover
+pattern correctly — the fix there is page-level adoption, not a new
+abstraction. No B-ID assigned; needs founder sign-off first. Full report
+delivered to the user in-session, not written to a file.
+
+Prior entry, still accurate: 2026-08-23 by Claude Code — B-100: DONE. Closed the approval double-dispatch
 race B-099's code review found: `sync.Once`-guarded `pendingEntry.result`
 shared between `Hold()`'s timeout backstop and `resolve()`, ensuring
 `dispatchApproved` fires at most once per approval. Chosen over a DB-level

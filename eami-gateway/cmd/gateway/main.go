@@ -21,7 +21,6 @@ import (
 
 	_ "net/http/pprof" // registers /debug/pprof/* handlers on http.DefaultServeMux
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"gopkg.in/yaml.v3"
 
@@ -194,279 +193,45 @@ func run() error {
 		}()
 	}
 
-	// Capture API config for the dispatch closure.
+	// Capture API config for the dispatcher.
 	apiBaseURL := cfg.API.BaseURL
 	apiServiceKey := cfg.API.ServiceKey
 
-	dispatch := func(reqCtx context.Context, ac mcp.ActionContext) (json.RawMessage, error) {
-		start := time.Now()
+	// B-102: dispatch used to be an inline closure here -- not
+	// independently constructable by any test (B-101), and its three
+	// policy branches (plus Allow's own proxy-failure case, four return
+	// points in total) each repeated their own copy of the post-dispatch
+	// steps, which is exactly how B-099 happened (one return point simply
+	// never got recordTokenUsage). Dispatcher.Dispatch (below,
+	// package-level so it's testable from dispatcher_test.go without the
+	// full server running) now converges every branch on one exit that
+	// runs an explicit, literal hook list -- see Dispatcher's doc comment.
+	dispatcher := NewDispatcher(
+		toolRouter,
+		aiProviderRouter,
+		pLoader.Evaluator(),
+		auditWriter,
+		episodeRecorder,
+		approvalRouter,
+		fwdProxy,
+		apiBaseURL,
+		apiServiceKey,
+		holdTimeout,
+	)
 
-		// Resolve ac.Tool against gateway_tools, org-scoped, before policy
-		// evaluation (B-044) -- so a rule can target the resolved
-		// gateway_tools.id via ToolServerID, and so the ActionAllow branch
-		// below already knows whether to dynamically dispatch.
-		resolvedTool := resolveDynamicTool(reqCtx, toolRouter, ac.OrgID, ac.Tool)
-		// AI Provider Connector: identical resolution, a separate lookup
-		// against gateway_tools' type='ai_provider' rows (Thread A Model 1).
-		// A tool name resolves to at most one of resolvedTool/resolvedProvider
-		// -- gateway_tools' UNIQUE(org_id, name) means at most one row can
-		// ever match ac.Tool for a given org, regardless of type. Only
-		// queried when the first lookup didn't already find a match (code
-		// review finding, this task): the common case -- an already-
-		// registered rest_api tool, the vast majority of real traffic --
-		// pays exactly one DB round trip on the hot dispatch path, exactly
-		// as it did before this brief.
-		var resolvedProvider *aiprovider.ToolRow
-		if resolvedTool == nil {
-			resolvedProvider = resolveAIProviderTool(reqCtx, aiProviderRouter, ac.OrgID, ac.Tool)
-		}
-
-		pc := ac.ToPolicyContext()
-		switch {
-		case resolvedTool != nil:
-			pc.ToolServerID = resolvedTool.ID
-		case resolvedProvider != nil:
-			pc.ToolServerID = resolvedProvider.ID
-		}
-		decision, evalErr := pLoader.Evaluator().Evaluate(reqCtx, pc)
-		if evalErr != nil {
-			// Semantic evaluation errors are non-fatal; log and default to allow.
-			slog.Warn("policy eval error — defaulting to allow", "err", evalErr)
-			decision.Action = policy.ActionAllow
-		}
-		latencyMS := time.Since(start).Milliseconds()
-
-		// PolicyID is *string in Decision; dereference once for the audit entry.
-		policyID := ""
-		if decision.PolicyID != nil {
-			policyID = *decision.PolicyID
-		}
-
-		orgID, _ := uuid.Parse(ac.OrgID)
-		agentID, _ := uuid.Parse(ac.AgentUUID)
-		auditEntry := audit.Entry{
-			OrgID:      orgID,
-			AgentID:    agentID,
-			AgentName:  ac.AgentName,
-			ToolName:   ac.Tool,
-			Action:     ac.Action,
-			Parameters: ac.Parameters,
-			LatencyMS:  latencyMS,
-			PolicyID:   policyID,
-			Timestamp:  ac.ReceivedAt,
-		}
-		// AI Provider Connector: per-connector audit logging mode
-		// (schema/migrations-v2/000004). Applied once, here, so it covers
-		// every branch below uniformly (denied/escalated/allowed) --
-		// scoped strictly to the audit_log write; approval_requests
-		// (B-039, frozen) and episodes keep showing full parameters,
-		// unchanged, since a human reviewer needs full visibility to make
-		// a real approve/deny decision (Thread A investigation, Part 0 §6
-		// and §7). Default for a newly created connector is
-		// "structural_metadata_only" (DB DEFAULT, schema/migrations-v2/
-		// 000004) -- a new ai_provider connector never logs raw prompt
-		// content into audit_log until an admin explicitly opts into "full".
-		if resolvedProvider != nil && resolvedProvider.AuditMode != "full" {
-			auditEntry.Parameters = nil
-		}
-		// Data-handling visibility (B-078): snapshot the connector's
-		// data_handling_designation into this call's audit_log entry, same
-		// call site and same "applied once, covers every branch below
-		// uniformly" reasoning as AuditMode immediately above. This is
-		// what makes AC3 real: a later change to the connector's own
-		// designation only affects future dispatches' auditEntry
-		// construction (a fresh resolvedProvider read), never this
-		// already-built value for the current call.
-		if resolvedProvider != nil {
-			auditEntry.DataHandling = resolvedProvider.DataHandling
-		}
-
-		switch decision.Action {
-		case policy.ActionDeny:
-			auditEntry.Decision = "denied"
-			_ = auditWriter.Write(reqCtx, auditEntry)
-			go episodeRecorder.Record(context.Background(), ac.OrgID, ac.AgentUUID, ac.AgentName,
-				[]episode.Step{{
-					ToolName:  ac.Tool,
-					Action:    ac.Action,
-					Params:    ac.Parameters,
-					Decision:  "blocked",
-					Timestamp: ac.ReceivedAt,
-				}},
-				"blocked",
-			)
-			// Return a typed error so the MCP handler builds a structured -32600 response.
-			return nil, &mcp.PolicyDeniedError{
-				Reason:   decision.Reason,
-				PolicyID: policyID,
-			}
-
-		case policy.ActionEscalate:
-			// Write "escalated" audit entry before blocking on the approval waiter.
-			auditEntry.Decision = "escalated"
-			_ = auditWriter.Write(reqCtx, auditEntry)
-
-			approvalReq := approval.Request{
-				OrgID:      ac.OrgID,
-				AgentID:    ac.AgentUUID,
-				AgentName:  ac.AgentName,
-				Tool:       ac.Tool,
-				Action:     ac.Action,
-				Parameters: ac.Parameters,
-				SessionID:  ac.SessionID,
-			}
-			// Pin the resolved connector's identity + config fingerprint at
-			// the exact moment it was resolved for policy evaluation -- what
-			// the human approver's review is actually based on. Submit()
-			// persists both; dispatchApproved re-verifies neither changed
-			// before resuming, closing a real TOCTOU gap found live during
-			// this brief's own verification (see approval.Request's doc
-			// comment): without this, a lower-privileged admin/operator role
-			// could edit the connector while the escalation was pending and
-			// silently redirect the approved call to a different destination
-			// than the approver reviewed.
-			switch {
-			case resolvedProvider != nil:
-				approvalReq.ResolvedToolID = resolvedProvider.ID
-				approvalReq.ResolvedConfigHash = approval.ComputeConfigHash("ai_provider", resolvedProvider.Provider, resolvedProvider.CredentialsEncrypted, nil)
-			case resolvedTool != nil:
-				baseURL := ""
-				if resolvedTool.BaseURL != nil {
-					baseURL = *resolvedTool.BaseURL
-				}
-				// action_paths is security-relevant, not cosmetic: it
-				// determines which sub-path/method a given action actually
-				// dispatches to (toolrouter.Forward), so it must be part of
-				// the pinned fingerprint too -- found live by this brief's
-				// own mandatory security review (see ComputeConfigHash's
-				// doc comment for the exact gap this closes).
-				var actionPathsJSON []byte
-				if len(resolvedTool.ActionPaths) > 0 {
-					actionPathsJSON, _ = json.Marshal(resolvedTool.ActionPaths)
-				}
-				approvalReq.ResolvedToolID = resolvedTool.ID
-				approvalReq.ResolvedConfigHash = approval.ComputeConfigHash("rest_api", baseURL, resolvedTool.CredentialsEncrypted, actionPathsJSON)
-			}
-			approvalID, submitErr := approvalRouter.Submit(reqCtx, approvalReq)
-			if submitErr != nil {
-				return nil, fmt.Errorf("approval submit: %w", submitErr)
-			}
-			slog.Info("dispatch: holding for approval decision",
-				"approval_id", approvalID,
-				"agent", ac.AgentName,
-				"hold_timeout", holdTimeout,
-			)
-			result, holdErr := approvalRouter.Hold(reqCtx, approvalID, approvalReq)
-
-			// Fire-and-forget: write token usage for a genuinely approved-
-			// and-dispatched call, exactly like the immediate-Allow path
-			// (B-099). holdErr is nil only when outcomeFromStatus's
-			// "approved" case's real re-dispatch (dispatchApproved)
-			// succeeded (approval/router.go) -- a denied/expired escalation,
-			// or an approved one whose resumed dispatch itself failed, never
-			// reaches here, so no usage is recorded for a call that didn't
-			// genuinely execute against the downstream connector.
-			if holdErr == nil {
-				recordTokenUsage(apiBaseURL, apiServiceKey, result, ac)
-			}
-
-			outcome := "success"
-			if holdErr != nil {
-				outcome = "failed"
-			}
-			go episodeRecorder.Record(context.Background(), ac.OrgID, ac.AgentUUID, ac.AgentName,
-				[]episode.Step{{
-					ToolName:  ac.Tool,
-					Action:    ac.Action,
-					Params:    ac.Parameters,
-					Result:    result,
-					Decision:  "escalated",
-					Timestamp: ac.ReceivedAt,
-				}},
-				outcome,
-			)
-			return result, holdErr
-
-		default: // policy.ActionAllow
-			toolReq := proxy.ToolRequest{
-				ToolName:  ac.Tool,
-				Action:    ac.Action,
-				Params:    ac.Parameters,
-				SessionID: ac.SessionID,
-			}
-			var tr proxy.ToolResponse
-			var proxyErr error
-			switch {
-			case resolvedProvider != nil:
-				// AI Provider Connector: dispatch to the resolved ai_provider
-				// connector's real provider adapter (Claude first). Converted
-				// into proxy.ToolResponse's shape so every line below this
-				// switch (token-usage extraction, episode recording, the
-				// final return) handles an ai_provider call exactly like any
-				// other tool call, unchanged.
-				var presp aiprovider.Response
-				presp, proxyErr = aiProviderRouter.Dispatch(reqCtx, resolvedProvider, ac.Action, ac.Parameters)
-				tr = proxy.ToolResponse{Status: presp.StatusCode, Body: presp.Body}
-			case resolvedTool != nil:
-				// B-044: dynamically dispatch to this org's registered
-				// rest_api tool's real base_url/credentials, instead of the
-				// static fwdProxy every other call below still uses
-				// unchanged.
-				tr, proxyErr = toolRouter.Forward(reqCtx, resolvedTool, toolReq)
-			default:
-				tr, proxyErr = fwdProxy.Forward(reqCtx, toolReq)
-			}
-			if proxyErr != nil {
-				auditEntry.Decision = "denied"
-				_ = auditWriter.Write(reqCtx, auditEntry)
-				go episodeRecorder.Record(context.Background(), ac.OrgID, ac.AgentUUID, ac.AgentName,
-					[]episode.Step{{
-						ToolName:  ac.Tool,
-						Action:    ac.Action,
-						Params:    ac.Parameters,
-						Decision:  "allowed",
-						Timestamp: ac.ReceivedAt,
-					}},
-					"failed",
-				)
-				return nil, fmt.Errorf("proxy error: %w", proxyErr)
-			}
-			auditEntry.Decision = "allowed"
-			if writeErr := auditWriter.Write(reqCtx, auditEntry); writeErr != nil {
-				slog.Error("audit write failed", "err", writeErr)
-			}
-
-			// Fire-and-forget: write token usage to eami-api for FinOps.
-			// Shared with the escalate-then-approved path above (B-099).
-			recordTokenUsage(apiBaseURL, apiServiceKey, tr.Body, ac)
-
-			go episodeRecorder.Record(context.Background(), ac.OrgID, ac.AgentUUID, ac.AgentName,
-				[]episode.Step{{
-					ToolName:  ac.Tool,
-					Action:    ac.Action,
-					Params:    ac.Parameters,
-					Result:    tr.Body,
-					Decision:  "allowed",
-					Timestamp: ac.ReceivedAt,
-				}},
-				"success",
-			)
-
-			return tr.Body, nil
-		}
-	}
-
-	mcpHandler := mcp.NewHandler(idManager, agentRegistry, dispatch, func(ctx context.Context, orgID string) ([]mcp.ToolDefinition, error) {
+	mcpHandler := mcp.NewHandler(idManager, agentRegistry, dispatcher.Dispatch, func(ctx context.Context, orgID string) ([]mcp.ToolDefinition, error) {
 		return listGatewayTools(ctx, pool, orgID)
 	})
 	// agentRegistry (*registry.Registry) satisfies identity.AgentResolver structurally.
 	revokeHandler := identity.NewRevokeHandler(idManager, agentRegistry, cfg.API.TokenRevokeServiceKey)
 
 	// Multi-Hop Workflows Brief 2 (B-059): executes a B-058-defined workflow
-	// by calling `dispatch` (the exact same closure above, unmodified) once
-	// per step, in order -- reusing policy/TOCTOU-pinning/audit/episode
-	// logic completely as-is. See internal/workflow's package doc.
-	workflowExecutor := workflow.New(pool, dispatch, pLoader.Evaluator())
+	// by calling dispatcher.Dispatch (the exact same Dispatcher above,
+	// unmodified -- B-102 only changed dispatch from a closure to a method
+	// value with the identical mcp.DecisionHandler signature) once per
+	// step, in order -- reusing policy/TOCTOU-pinning/audit/episode logic
+	// completely as-is. See internal/workflow's package doc.
+	workflowExecutor := workflow.New(pool, dispatcher.Dispatch, pLoader.Evaluator())
 	// agentRegistry (*registry.Registry) satisfies workflow.AgentResolver structurally.
 	workflowHTTP := workflow.NewHTTPHandler(idManager, agentRegistry, workflowExecutor)
 	slog.Info("workflow executor ready")
