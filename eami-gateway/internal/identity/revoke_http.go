@@ -71,14 +71,17 @@ type RevokeHandler struct {
 	identity   *Manager
 	resolver   AgentResolver
 	serviceKey string
+	events     TokenEventStore
 }
 
 // NewRevokeHandler returns a RevokeHandler. serviceKey is
 // api.token_revoke_service_key / GATEWAY_TOKEN_REVOKE_SERVICE_KEY —
 // deliberately separate from ServiceKey/EpisodeReadServiceKey so a leak of
-// one does not also grant the others.
-func NewRevokeHandler(idm *Manager, resolver AgentResolver, serviceKey string) *RevokeHandler {
-	return &RevokeHandler{identity: idm, resolver: resolver, serviceKey: serviceKey}
+// one does not also grant the others. events records this handler's
+// successful revocations to ai_token_events (B-098), the same table
+// IssueHandler writes issuance events to.
+func NewRevokeHandler(idm *Manager, resolver AgentResolver, serviceKey string, events TokenEventStore) *RevokeHandler {
+	return &RevokeHandler{identity: idm, resolver: resolver, serviceKey: serviceKey, events: events}
 }
 
 type revokeRequest struct {
@@ -144,6 +147,13 @@ func (h *RevokeHandler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 		slog.Error("identity: revoke request failed to persist", "jti", jti, "agent", req.AgentName, "err", err)
 		http.Error(w, "internal error: revocation could not be persisted", http.StatusInternalServerError)
 		return
+	}
+
+	if err := h.events.RecordRevoked(r.Context(), req.OrgID, rec.ID, req.AgentName, jti); err != nil {
+		// Revocation already succeeded and took effect (Revoke() above
+		// updated the in-memory set regardless) -- a logging failure
+		// shouldn't undo that, but must not be silent.
+		slog.Error("identity: failed to record token revocation event", "jti", jti, "agent", req.AgentName, "err", err)
 	}
 
 	w.WriteHeader(http.StatusNoContent)

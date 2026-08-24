@@ -50,6 +50,17 @@ type UserResp struct {
 type CreateAPIKeyRequest struct {
 	Name   string   `json:"name"`
 	Scopes []string `json:"scopes"`
+	// ExpiresAt is optional, RFC3339 or YYYY-MM-DD (B-098 -- schema always
+	// had this column, this request never accepted it until now).
+	ExpiresAt string `json:"expires_at,omitempty"`
+	// AgentID optionally scopes this key to one gateway_agents row (B-098),
+	// required for the key to authorize POST /v1/gateway/tokens for that
+	// agent. Deviates from api/openapi.yaml's current CreateAPIKeyRequest
+	// shape, which doesn't document either new field yet -- logged as a
+	// new B-ID for Architect-EAMI rather than edited here (openapi.yaml is
+	// out of this session's file boundary per BOUNDARIES.md), same
+	// disclosed-not-silent precedent as B-086's usePolicies.ts deviation.
+	AgentID string `json:"agent_id,omitempty"`
 }
 
 type APIKeyResp struct {
@@ -59,6 +70,8 @@ type APIKeyResp struct {
 	Scopes    []string   `json:"scopes"`
 	CreatedAt time.Time  `json:"created_at"`
 	LastUsed  *time.Time `json:"last_used,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	AgentID   *string    `json:"agent_id,omitempty"`
 }
 
 type CreateAPIKeyResponse struct {

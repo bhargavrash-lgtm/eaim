@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -181,6 +182,24 @@ func (s *Server) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"data": resp})
 }
 
+// parseAPIKeyExpiresAt parses an optional expires_at request field as
+// RFC3339 or date-only (YYYY-MM-DD) -- same dual-format convention as
+// finops.go's parseDateParam, applied here to a request-body field instead
+// of a query param. Empty input is valid (no expiry) and returns a zero,
+// invalid pgtype.Timestamptz.
+func parseAPIKeyExpiresAt(v string) (pgtype.Timestamptz, error) {
+	if v == "" {
+		return pgtype.Timestamptz{}, nil
+	}
+	if t, err := time.Parse(time.RFC3339, v); err == nil {
+		return pgtype.Timestamptz{Time: t.UTC(), Valid: true}, nil
+	}
+	if t, err := time.Parse("2006-01-02", v); err == nil {
+		return pgtype.Timestamptz{Time: t.UTC(), Valid: true}, nil
+	}
+	return pgtype.Timestamptz{}, errors.New("expires_at must be RFC3339 or YYYY-MM-DD")
+}
+
 func (s *Server) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	uc := claimsFromContext(r)
 	var req CreateAPIKeyRequest
@@ -188,6 +207,46 @@ func (s *Server) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "name is required")
 		return
 	}
+
+	expiresAt, err := parseAPIKeyExpiresAt(req.ExpiresAt)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+
+	// AgentID, if given, is resolved against a real gateway_agents row
+	// scoped to the caller's own org (B-098) -- never trusted as opaque
+	// input, same principle as eami-gateway's own agent resolution for
+	// this feature.
+	var agentUUID pgtype.UUID
+	if req.AgentID != "" {
+		id, parseErr := uuid.Parse(req.AgentID)
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "agent_id must be a valid UUID")
+			return
+		}
+		agent, agentErr := s.queries.GetAgent(r.Context(), id, uc.OrgID)
+		if agentErr != nil {
+			if agentErr == pgx.ErrNoRows {
+				writeError(w, http.StatusBadRequest, "bad_request", "agent_id does not refer to an agent in this org")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "internal_error", agentErr.Error())
+			return
+		}
+		// Reject up front rather than minting a key that could never
+		// authorize issuance anyway -- IssueHandler re-checks status at
+		// issuance time regardless (fail-closed either way), but a key
+		// bound to an already-suspended/revoked agent with no warning here
+		// is a silent inconsistency an operator has no way to notice
+		// (code-review finding, B-098).
+		if agent.Status != "active" {
+			writeError(w, http.StatusBadRequest, "bad_request", "agent_id refers to an agent that is not active (status: "+agent.Status+")")
+			return
+		}
+		agentUUID = pgtype.UUID{Bytes: id, Valid: true}
+	}
+
 	rawKey, prefix, keyHash, err := authpkg.APIKeyFromRaw()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "could not generate key")
@@ -204,6 +263,8 @@ func (s *Server) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		Prefix:    prefix,
 		Scopes:    scopes,
 		CreatedBy: pgtype.UUID{Bytes: uc.UserID, Valid: true},
+		ExpiresAt: expiresAt,
+		AgentID:   agentUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -240,6 +301,13 @@ func apiKeyToResp(k store.APIKey) APIKeyResp {
 	}
 	if k.LastUsed.Valid {
 		resp.LastUsed = &k.LastUsed.Time
+	}
+	if k.ExpiresAt.Valid {
+		resp.ExpiresAt = &k.ExpiresAt.Time
+	}
+	if k.AgentID.Valid {
+		id := uuid.UUID(k.AgentID.Bytes).String()
+		resp.AgentID = &id
 	}
 	return resp
 }

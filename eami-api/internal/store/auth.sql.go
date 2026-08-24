@@ -91,7 +91,7 @@ func (q *Queries) RevokeRefreshToken(ctx context.Context, id uuid.UUID) error {
 }
 
 const listAPIKeys = `-- name: ListAPIKeys :many
-SELECT id, org_id, name, prefix, scopes, created_by, created_at, last_used, revoked
+SELECT id, org_id, name, prefix, scopes, created_by, created_at, last_used, expires_at, agent_id, revoked
 FROM api_keys
 WHERE org_id = $1 AND revoked = FALSE
 ORDER BY created_at DESC
@@ -109,7 +109,7 @@ func (q *Queries) ListAPIKeys(ctx context.Context, orgID uuid.UUID) ([]APIKey, e
 		var k APIKey
 		if err := rows.Scan(
 			&k.ID, &k.OrgID, &k.Name, &k.Prefix, &k.Scopes,
-			&k.CreatedBy, &k.CreatedAt, &k.LastUsed, &k.Revoked,
+			&k.CreatedBy, &k.CreatedAt, &k.LastUsed, &k.ExpiresAt, &k.AgentID, &k.Revoked,
 		); err != nil {
 			return nil, err
 		}
@@ -125,22 +125,24 @@ type CreateAPIKeyParams struct {
 	Prefix    string
 	Scopes    []string
 	CreatedBy pgtype.UUID
+	ExpiresAt pgtype.Timestamptz
+	AgentID   pgtype.UUID
 }
 
 const createAPIKey = `-- name: CreateAPIKey :one
-INSERT INTO api_keys (org_id, name, key_hash, prefix, scopes, created_by)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, org_id, name, prefix, scopes, created_by, created_at, last_used, revoked
+INSERT INTO api_keys (org_id, name, key_hash, prefix, scopes, created_by, expires_at, agent_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, org_id, name, prefix, scopes, created_by, created_at, last_used, expires_at, agent_id, revoked
 `
 
 func (q *Queries) CreateAPIKey(ctx context.Context, p CreateAPIKeyParams) (*APIKey, error) {
 	row := q.db.QueryRow(ctx, createAPIKey,
-		toPgtypeUUID(p.OrgID), p.Name, p.KeyHash, p.Prefix, p.Scopes, p.CreatedBy,
+		toPgtypeUUID(p.OrgID), p.Name, p.KeyHash, p.Prefix, p.Scopes, p.CreatedBy, p.ExpiresAt, p.AgentID,
 	)
 	var k APIKey
 	err := row.Scan(
 		&k.ID, &k.OrgID, &k.Name, &k.Prefix, &k.Scopes,
-		&k.CreatedBy, &k.CreatedAt, &k.LastUsed, &k.Revoked,
+		&k.CreatedBy, &k.CreatedAt, &k.LastUsed, &k.ExpiresAt, &k.AgentID, &k.Revoked,
 	)
 	if err != nil {
 		return nil, err
@@ -158,9 +160,9 @@ func (q *Queries) RevokeAPIKey(ctx context.Context, id, orgID uuid.UUID) error {
 }
 
 const getAPIKeyByHash = `-- name: GetAPIKeyByHash :one
-SELECT id, org_id, name, prefix, scopes, created_by, created_at, last_used, revoked
+SELECT id, org_id, name, prefix, scopes, created_by, created_at, last_used, expires_at, agent_id, revoked
 FROM api_keys
-WHERE key_hash = $1 AND revoked = FALSE
+WHERE key_hash = $1 AND revoked = FALSE AND (expires_at IS NULL OR expires_at > NOW())
 LIMIT 1
 `
 
@@ -169,7 +171,7 @@ func (q *Queries) GetAPIKeyByHash(ctx context.Context, keyHash string) (*APIKey,
 	var k APIKey
 	err := row.Scan(
 		&k.ID, &k.OrgID, &k.Name, &k.Prefix, &k.Scopes,
-		&k.CreatedBy, &k.CreatedAt, &k.LastUsed, &k.Revoked,
+		&k.CreatedBy, &k.CreatedAt, &k.LastUsed, &k.ExpiresAt, &k.AgentID, &k.Revoked,
 	)
 	if err != nil {
 		return nil, err

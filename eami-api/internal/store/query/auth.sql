@@ -24,21 +24,21 @@ LIMIT 1;
 UPDATE refresh_tokens SET revoked = TRUE WHERE id = $1;
 
 -- name: ListAPIKeys :many
-SELECT id, org_id, name, prefix, scopes, created_by, created_at, last_used, revoked
+SELECT id, org_id, name, prefix, scopes, created_by, created_at, last_used, expires_at, agent_id, revoked
 FROM api_keys
 WHERE org_id = $1 AND revoked = FALSE
 ORDER BY created_at DESC;
 
 -- name: CreateAPIKey :one
-INSERT INTO api_keys (org_id, name, key_hash, prefix, scopes, created_by)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, org_id, name, prefix, scopes, created_by, created_at, last_used, revoked;
+INSERT INTO api_keys (org_id, name, key_hash, prefix, scopes, created_by, expires_at, agent_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, org_id, name, prefix, scopes, created_by, created_at, last_used, expires_at, agent_id, revoked;
 
 -- name: RevokeAPIKey :exec
 UPDATE api_keys SET revoked = TRUE WHERE id = $1 AND org_id = $2;
 
 -- name: GetAPIKeyByHash :one
-SELECT id, org_id, name, prefix, scopes, created_by, created_at, last_used, revoked
+SELECT id, org_id, name, prefix, scopes, created_by, created_at, last_used, expires_at, agent_id, revoked
 FROM api_keys
-WHERE key_hash = $1 AND revoked = FALSE
+WHERE key_hash = $1 AND revoked = FALSE AND (expires_at IS NULL OR expires_at > NOW())
 LIMIT 1;

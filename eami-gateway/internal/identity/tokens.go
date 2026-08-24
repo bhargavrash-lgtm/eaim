@@ -75,6 +75,12 @@ type IssueRequest struct {
 type IssueResponse struct {
 	Token     string    `json:"token"`
 	ExpiresAt time.Time `json:"expires_at"`
+	// JTI is the issued token's jti claim, additive (not part of the
+	// openapi.yaml-documented shape yet -- see BACKLOG.md's B-098 entry).
+	// Not new information: it's already embedded in Token itself once
+	// decoded. Exposed so callers (IssueHandler's ai_token_events write)
+	// don't need to re-parse the JWT just to log what they minted.
+	JTI string `json:"jti,omitempty"`
 }
 
 // ─── Revocation store ────────────────────────────────────────────────────────
@@ -276,7 +282,7 @@ func (m *Manager) Issue(req IssueRequest) (*IssueResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("identity: sign token: %w", err)
 	}
-	return &IssueResponse{Token: signed, ExpiresAt: exp}, nil
+	return &IssueResponse{Token: signed, ExpiresAt: exp, JTI: jti}, nil
 }
 
 // Validate parses and validates a Bearer token string.
@@ -341,27 +347,6 @@ func (m *Manager) PublicKeyPEM() ([]byte, error) {
 		return nil, err
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER}), nil
-}
-
-// HandleIssue is the HTTP handler for POST /v1/gateway/tokens.
-func (m *Manager) HandleIssue(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var req IssueRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	resp, err := m.Issue(req)
-	if err != nil {
-		slog.Error("token issuance failed", "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // HandleJWKS serves the public key at GET /.well-known/gateway-jwks.json.

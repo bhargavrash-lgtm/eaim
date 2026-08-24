@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS ai_token_events;
+DROP INDEX IF EXISTS idx_api_keys_agent;
+ALTER TABLE api_keys DROP COLUMN IF EXISTS agent_id;

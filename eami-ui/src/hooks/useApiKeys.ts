@@ -18,7 +18,7 @@ export function useApiKeys() {
 export function useCreateApiKey() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (body: { name: string; scopes?: string[]; expires_at?: string }) => {
+    mutationFn: async (body: { name: string; scopes?: string[]; expires_at?: string; agent_id?: string }) => {
       const { data, error } = await api.POST('/v1/auth/api-keys', { body })
       if (error) throw error
       return data

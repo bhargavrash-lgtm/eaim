@@ -68,7 +68,7 @@ func TestRevokeHandler_HappyPath_RevokesRealToken(t *testing.T) {
 	}
 
 	reg := registry.New(env.pool)
-	handler := NewRevokeHandler(m, reg, "the-real-service-key")
+	handler := NewRevokeHandler(m, reg, "the-real-service-key", NewPostgresTokenEventStore(env.pool))
 	mux := newRevokeTestMux(handler)
 
 	req := revokeRequestJSON(t, claims.ID, "the-real-service-key", "identity-token-test-agent", env.orgID.String())
@@ -103,7 +103,7 @@ func TestRevokeHandler_WrongServiceKey_Returns401(t *testing.T) {
 	}
 
 	reg := registry.New(env.pool)
-	handler := NewRevokeHandler(m, reg, "the-real-service-key")
+	handler := NewRevokeHandler(m, reg, "the-real-service-key", NewPostgresTokenEventStore(env.pool))
 	mux := newRevokeTestMux(handler)
 
 	for _, tc := range []struct {
@@ -149,7 +149,7 @@ func TestRevokeHandler_UnknownAgent_Returns403(t *testing.T) {
 	}
 
 	reg := registry.New(env.pool)
-	handler := NewRevokeHandler(m, reg, "the-real-service-key")
+	handler := NewRevokeHandler(m, reg, "the-real-service-key", NewPostgresTokenEventStore(env.pool))
 	mux := newRevokeTestMux(handler)
 
 	req := revokeRequestJSON(t, claims.ID, "the-real-service-key", "an-agent-name-that-does-not-exist", env.orgID.String())
@@ -199,7 +199,7 @@ func TestRevokeHandler_CrossOrgAgentName_Returns403(t *testing.T) {
 	})
 
 	reg := registry.New(env.pool)
-	handler := NewRevokeHandler(m, reg, "the-real-service-key")
+	handler := NewRevokeHandler(m, reg, "the-real-service-key", NewPostgresTokenEventStore(env.pool))
 	mux := newRevokeTestMux(handler)
 
 	// Same real agent_name, but claiming the wrong org.
@@ -258,7 +258,7 @@ func TestRevokeHandler_PersistenceFailure_Returns500NotSilent204(t *testing.T) {
 		Name:   "ghost-agent",
 		Status: "active",
 	}}
-	handler := NewRevokeHandler(m, fake, "the-real-service-key")
+	handler := NewRevokeHandler(m, fake, "the-real-service-key", NewPostgresTokenEventStore(env.pool))
 	mux := newRevokeTestMux(handler)
 
 	req := revokeRequestJSON(t, claims.ID, "the-real-service-key", "ghost-agent", env.orgID.String())

@@ -10,6 +10,7 @@ unrelated framework the founder uses elsewhere. If any file, commit message,
 or prior context suggests otherwise, it is wrong; trust this line.
 
 ## Active decision thread (update every time one moves)
+- **B-098 (2026-08-24): DONE — `POST /v1/gateway/tokens` (previously zero-auth, could mint a valid AI-agent token for any existing agent name) is now gated by real, scoped `api_keys` rows.** New `eami-gateway/internal/identity/issue_http.go` (`IssueHandler`, replacing the deleted insecure `Manager.HandleIssue`) requires a real, unrevoked, unexpired, agent-scoped API key (`X-API-Key`), resolves the requested agent via `registry.LookupByNameAndOrg` scoped to the **validated key's own org** (never client input), and rejects unless the resolved agent's UUID equals the key's bound `agent_id` — the actual cross-agent scoping proof, live-verified against the real running gateway (a key scoped to agent A requesting agent B's token → real 403; requesting its own agent → real 200 with a real signed JWT). New `schema/migrations-v2/000010`: `api_keys.agent_id` (nullable FK to `gateway_agents`, `ON DELETE SET NULL`) + new `ai_token_events` table (org-cascaded, snapshot columns with no FK on `agent_id`/`agent_name`/`api_key_id`, mirroring B-087's `agent_lifecycle_events` reasoning — both `issued` and `revoked` events confirmed recorded live). `eami-api`'s `CreateAPIKey` now accepts `agent_id` (org-scoped validation, rejects a non-`active` agent) and `expires_at` (existed in schema since migration 002, never settable at the API layer until now); `eami-ui`'s Settings API Keys tab gained an agent selector. **Mandatory reviewer + security subagent passes both ran and both found real issues, all fixed before shipping:** security review (independent fork, full adversarial trace) found zero HIGH-confidence findings but the same investigation independently caught a same-org agent-name-enumeration oracle (two different 403 messages) — unified, live-reverified. Code review (general-purpose subagent, "high" effort) found and this session fixed: `eami-api`'s pre-existing `GetAPIKeyByHash` didn't filter `expires_at` (inconsistent with the gateway's own new validator for the identical row), `CreateAPIKey` didn't reject binding to a suspended agent, and the new UI column fell back to a raw UUID instead of a short placeholder. **Disclosed, not fixed (out of this security-fix brief's scope):** `HandleIssue` now costs 3-4 serial Postgres round trips per issuance versus the previous single in-process sign — logged as **B-107**, QUEUED Low-Medium, real only if issuance becomes a high-frequency path. `api/openapi.yaml` doesn't yet document the new fields (Architect-EAMI-owned, disclosed not silently edited, same B-086 precedent) — logged as **B-106**, QUEUED Low. **Verified 2026-08-24: `go build`/`go vet`/`go test -count=1 ./...` clean across both `eami-gateway` and `eami-api` against a real Postgres, zero regressions; the new migration verified via the full `schema/migrationtest` suite (fresh/incremental parity, idempotent re-run); real `tsc`/`vite build` clean.** All 6 acceptance criteria live-proven against the real running containerized stack (rebuilt/restarted before and after the code-review fixes), including the centerpiece cross-agent rejection; all live-verification fixtures cleaned up afterward. Full detail in `BUILT.md`'s `eami-gateway`/`eami-api`/`eami-ui` sections and `BACKLOG.md`'s B-098/B-106/B-107 entries.
 - ADR-019: RESOLVED, Accepted — 2026-07-22. Full episode content stays
   on-prem; eami-api never serves it. See DECISIONS.md ADR-019 (now a full
   formal entry, same number — the informal Pending-table row it replaces
@@ -1172,7 +1173,43 @@ or prior context suggests otherwise, it is wrong; trust this line.
   and `BACKLOG.md`'s B-077/B-087/B-091 entries.
 
 ## Last updated
-2026-08-24 by Claude Code — B-104: DONE. `AgentsPage.tsx`/`PoliciesPage.tsx`/
+2026-08-24 by Claude Code — B-098: DONE. `POST /v1/gateway/tokens` (previously
+zero-auth) is now gated by real, scoped `api_keys` rows -- the live,
+unauthenticated token-minting gap this brief existed to close. New
+`eami-gateway/internal/identity/issue_http.go` (`IssueHandler`, replacing the
+deleted insecure `Manager.HandleIssue`): validates `X-API-Key` against a
+real, unrevoked, unexpired, agent-scoped `api_keys` row; resolves the
+requested agent via `registry.LookupByNameAndOrg` scoped to the **validated
+key's own org**, never client input; rejects unless the resolved agent's
+real UUID equals the key's bound `agent_id` -- live-verified against the
+real running gateway (cross-agent request -> real 403; own-agent request ->
+real 200 with a real signed JWT). New migration
+`schema/migrations-v2/000010`: `api_keys.agent_id` (nullable FK, `ON DELETE
+SET NULL`) + new `ai_token_events` table (org-cascaded, snapshot columns,
+mirroring B-087's `agent_lifecycle_events` reasoning), both `issued`/
+`revoked` events confirmed recorded live. `eami-api`'s `CreateAPIKey` now
+accepts `agent_id` (org-scoped, rejects non-`active` agents) and
+`expires_at` (existed in schema since migration 002, never settable until
+now); `eami-ui` Settings gained an agent selector. **Mandatory reviewer +
+security subagent passes both ran and both found real issues, all fixed:**
+security review (independent fork) found zero HIGH-confidence findings but
+caught a same-org agent-name-enumeration oracle (unified into one 403
+message, live-reverified); code review (general-purpose, "high" effort)
+found `GetAPIKeyByHash` didn't filter `expires_at` (fixed), `CreateAPIKey`
+didn't reject a suspended `agent_id` (fixed), and a UI raw-UUID fallback
+(fixed) -- each now covered by a new real-Postgres or real-build test.
+**Disclosed, not fixed:** 3-4 serial DB round trips per issuance (logged as
+**B-107**), `openapi.yaml` doc gap (logged as **B-106**, Architect-EAMI-owned).
+**Verified: `go build`/`go vet`/`go test -count=1 ./...` clean across both
+Go modules against a real Postgres**, the new migration verified via the
+full `schema/migrationtest` suite, real `tsc`/`vite build` clean. All 6
+acceptance criteria live-proven against the real running containerized
+stack, rebuilt/restarted before and after the code-review fixes; all
+live-verification fixtures cleaned up afterward. Full detail in `BUILT.md`'s
+`eami-gateway`/`eami-api`/`eami-ui` sections and `BACKLOG.md`'s
+B-098/B-106/B-107 entries.
+
+Prior entry, still accurate: 2026-08-24 by Claude Code — B-104: DONE. `AgentsPage.tsx`/`PoliciesPage.tsx`/
 `WorkflowsPage.tsx` migrated onto the shared `DataTable` component
 (`eami-ui/src/components/common/DataTable.tsx`), closing the root cause
 behind B-081/082/083's row-click bug class -- a fourth page can no longer

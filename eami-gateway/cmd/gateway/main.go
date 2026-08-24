@@ -222,8 +222,15 @@ func run() error {
 	mcpHandler := mcp.NewHandler(idManager, agentRegistry, dispatcher.Dispatch, func(ctx context.Context, orgID string) ([]mcp.ToolDefinition, error) {
 		return listGatewayTools(ctx, pool, orgID)
 	})
+	// B-098: api_keys (previously org-scoped only, enforced nowhere --
+	// GetAPIKeyByHash had zero callers) now gates POST /v1/gateway/tokens.
+	// Same Postgres pool as everything else above -- api_keys lives in the
+	// same DB, not a new cross-service dependency.
+	apiKeyValidator := identity.NewPostgresAPIKeyValidator(pool)
+	tokenEvents := identity.NewPostgresTokenEventStore(pool)
 	// agentRegistry (*registry.Registry) satisfies identity.AgentResolver structurally.
-	revokeHandler := identity.NewRevokeHandler(idManager, agentRegistry, cfg.API.TokenRevokeServiceKey)
+	issueHandler := identity.NewIssueHandler(idManager, agentRegistry, apiKeyValidator, tokenEvents)
+	revokeHandler := identity.NewRevokeHandler(idManager, agentRegistry, cfg.API.TokenRevokeServiceKey, tokenEvents)
 
 	// Multi-Hop Workflows Brief 2 (B-059): executes a B-058-defined workflow
 	// by calling dispatcher.Dispatch (the exact same Dispatcher above,
@@ -237,7 +244,7 @@ func run() error {
 	slog.Info("workflow executor ready")
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/gateway/tokens", idManager.HandleIssue)
+	mux.HandleFunc("/v1/gateway/tokens", issueHandler.HandleIssue)
 	mux.HandleFunc("POST /v1/gateway/tokens/{jti}/revoke", revokeHandler.HandleRevoke)
 	mux.HandleFunc("/.well-known/gateway-jwks.json", idManager.HandleJWKS)
 	// MCP SSE transport (ADR-004):

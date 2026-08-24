@@ -13,6 +13,7 @@ import { useOrgSettings, useUpdateOrgSettings } from '@/hooks/useOrgSettings'
 import { useUsers, useInviteUser, useChangeUserRole, useRevokeUser, type UserRole } from '@/hooks/useUsers'
 import { useNotificationSettings, useUpdateNotificationSettings, useTestNotification } from '@/hooks/useNotificationSettings'
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from '@/hooks/useApiKeys'
+import { useAgents, type Agent } from '@/hooks/useAgents'
 import type { components } from '@/api/schema'
 
 type OrgUser = components['schemas']['OrgUser']
@@ -503,11 +504,13 @@ function NotificationsTab() {
 const apiKeySchema = z.object({
   name: z.string().min(1, 'Key name is required'),
   expires_at: z.string().optional(),
+  agent_id: z.string().optional(),
 })
 type ApiKeyFormValues = z.infer<typeof apiKeySchema>
 
 function ApiKeysTab() {
   const { data, isLoading } = useApiKeys()
+  const { data: agentsData } = useAgents()
   const createKey = useCreateApiKey()
   const revokeKey = useRevokeApiKey()
 
@@ -518,19 +521,33 @@ function ApiKeysTab() {
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<ApiKeyFormValues>({
     resolver: zodResolver(apiKeySchema),
-    defaultValues: { name: '', expires_at: '' },
+    defaultValues: { name: '', expires_at: '', agent_id: '' },
   })
 
   async function onCreate(values: ApiKeyFormValues) {
     const result = await createKey.mutateAsync({
       name: values.name,
       ...(values.expires_at ? { expires_at: values.expires_at } : {}),
+      ...(values.agent_id ? { agent_id: values.agent_id } : {}),
     })
     if (result?.key) setNewKey(result.key)
     reset()
   }
 
   const keys: ApiKey[] = data?.data ?? []
+  // agent_id isn't yet declared on ApiKey's generated openapi type (B-098 --
+  // logged as a spec-doc gap for Architect-EAMI, same disclosed-not-silent
+  // precedent as B-086's usePolicies.ts deviation) -- present in the real
+  // API response regardless.
+  const agents: Agent[] = (agentsData as any)?.data ?? []
+  // Falls back to a short id fragment (not the full raw UUID) when the
+  // agents list hasn't loaded yet or the agent was since deleted -- found
+  // during code review: the agents/keys queries load independently, so a
+  // full raw UUID could otherwise flash or persist in this column.
+  const agentName = (agentId: string | undefined) => {
+    if (!agentId) return undefined
+    return agents.find((a) => a.id === agentId)?.name ?? `Unknown agent (${agentId.slice(0, 8)}…)`
+  }
 
   return (
     <div className="space-y-5">
@@ -553,7 +570,7 @@ function ApiKeysTab() {
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50">
               <tr>
-                {['Name', 'Prefix', 'Created', 'Last used', ''].map((h, i) => (
+                {['Name', 'Prefix', 'Scoped agent', 'Created', 'Last used', ''].map((h, i) => (
                   <th key={i} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{h}</th>
                 ))}
               </tr>
@@ -563,6 +580,9 @@ function ApiKeysTab() {
                 <tr key={k.id}>
                   <td className="px-4 py-3 font-medium text-gray-900">{k.name}</td>
                   <td className="px-4 py-3 font-mono text-xs text-gray-500">{k.prefix.slice(0, 7)}…</td>
+                  <td className="px-4 py-3 text-gray-500 text-xs">
+                    {(k as { agent_id?: string }).agent_id ? agentName((k as { agent_id?: string }).agent_id) : <span className="text-gray-300">Org-wide</span>}
+                  </td>
                   <td className="px-4 py-3 text-gray-400 text-xs">{new Date(k.created_at).toLocaleDateString()}</td>
                   <td className="px-4 py-3 text-gray-400 text-xs">
                     {k.last_used ? new Date(k.last_used).toLocaleDateString() : '—'}
@@ -618,6 +638,21 @@ function ApiKeysTab() {
                 <div>
                   <Label>Expiry date (optional)</Label>
                   <Input type="date" {...register('expires_at')} min={new Date().toISOString().split('T')[0]} />
+                </div>
+                <div>
+                  <Label>Scope to agent (optional)</Label>
+                  <select
+                    {...register('agent_id')}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  >
+                    <option value="">Org-wide (not scoped to an agent)</option>
+                    {agents.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-gray-400">
+                    Required for this key to authorize AI token issuance for that agent.
+                  </p>
                 </div>
                 <div className="flex justify-end gap-3">
                   <button type="button" onClick={() => setShowCreate(false)}

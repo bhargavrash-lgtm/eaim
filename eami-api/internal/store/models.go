@@ -135,6 +135,8 @@ type APIKey struct {
 	CreatedBy pgtype.UUID
 	CreatedAt time.Time
 	LastUsed  pgtype.Timestamptz
+	ExpiresAt pgtype.Timestamptz
+	AgentID   pgtype.UUID
 	Revoked   bool
 }
 
