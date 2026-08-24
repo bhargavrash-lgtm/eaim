@@ -80,6 +80,7 @@ or prior context suggests otherwise, it is wrong; trust this line.
     compose up`-based manual verification (no Docker in this
     environment) — `MemoryPage.tsx`'s correctness rests on manual
     shape-verification only.
+- **B-104 (2026-08-24): DONE — `AgentsPage.tsx`/`PoliciesPage.tsx`/`WorkflowsPage.tsx` migrated onto the shared `DataTable` component, closing the root cause behind B-081/082/083's bug class.** `DataTable.tsx` itself untouched (investigated, confirmed unnecessary). **Real complication found before building:** neither `ApprovalsPage.tsx` nor `AlertsPage.tsx` — offered as "the reference" — actually uses `onRowClick`; both are read-only `DataTable` usages, so this is the first real row-click + action-buttons instance. **Real design problem solved:** Policies' reorder buttons need each row's true array index, which `Column.render(row)` doesn't receive — solved via `policies.indexOf(policy)` inside `render` (valid because no column here is `sortable`), zero `DataTable.tsx` change. All three pages pass `pageSize={1000}` to keep `DataTable`'s own pager from engaging, preserving today's unpaginated "show everything" behavior. Real `tsc && vite build` clean via the established `docker build --target builder` path. **Live browser click-through not performed** — seeded dev users have a placeholder password hash, no real login reachable; verified instead via the real running dev container serving the current code with the old hover-without-click pattern confirmed gone. Also flagged, not fixed: `DashboardPage.tsx`/`DiscoverPage.tsx` have the identical pattern, out of this brief's scope. Full detail in `BUILT.md`'s `eami-ui` section and `BACKLOG.md`'s B-104 entry.
 - **B-103 (2026-08-24): DONE — B-057's `aiprovider.Adapter` pattern is now a documented standing convention.** No code changed. **Real judgment call, investigated before writing:** the brief offered `ARCHITECTURE.md`/a new ADR as candidate locations, but `BOUNDARIES.md`'s own ownership table assigns both to Architect-EAMI/PM-EAMI, outside this session's boundary per that doc's "Golden Rule." Documented instead as a new bullet in `CLAUDE.md`'s `## Conventions` section (not owned by anyone per `BOUNDARIES.md`, read by every future session) — confirmed with the user before writing. States the rule (new backend TYPE → small interface, one new file, explicit `map[string]Adapter` registry, never global/`init()`-time), cites `aiprovider/types.go`/`router.go`/`ClaudeAdapter` as the working example, and explicitly distinguishes this from B-102's mechanism so the two aren't conflated. **Also flagged, not fixed:** `ARCHITECTURE.md` §3.3 is missing `internal/aiprovider` from its package list — same staleness pattern `ADR-020`/`B-080` already found elsewhere in that file; outside this brief's boundary, left for its actual owner. Full detail in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s B-103 entry.
 - **B-101 (2026-08-24): DONE — resolved as a direct consequence of B-102, not a separate fix.** See B-102's entry immediately below.
 - **B-102 (2026-08-24): DONE — `dispatch` extracted into a testable `Dispatcher` type (`cmd/gateway/dispatcher.go`) with a branch-convergence hook mechanism, closing B-101 and structurally closing B-099's bug class.** Every branch (Deny/Escalate-Submit-failure/Escalate-resumed/Allow-proxy-failure/Allow-success) now converges on one shared exit via a typed `DispatchOutcome` struct that runs a literal, explicit two-hook list (`recordTokenUsageHook`, `recordEpisodeHook`) — no pub/sub registry, no event bus, no channels, mirroring B-057's `aiprovider.Router`'s explicit `map[string]Adapter`, exactly as the 2026-08-23 investigation (below) recommended. `internal/workflow`/`internal/approval/router.go` untouched — `dispatcher.Dispatch` has the identical `mcp.DecisionHandler` signature the old closure did. **Mandatory code-review pass (general-purpose subagent, "high" effort) caught 4 real findings, all fixed before shipping** — most importantly, the Escalate branch's own `Submit()`-failure case still `return`ed independently in the first draft, bypassing the hook list entirely (the exact bug class this brief exists to eliminate, reintroduced inside the fix itself); also: the mechanism was added inline into `main.go` instead of its own file (moved to `dispatcher.go`), `DispatchOutcome.Dispatched` was redundantly set per-branch instead of computed once from `Err == nil`, and four `episode.Step` literals were duplicated instead of using a shared constructor. Security review: zero findings. 7 new real-Postgres integration tests (`cmd/gateway/dispatcher_test.go`), including a regression test for the code-review finding and the central AC4 proof (a test-only hook added only via a construction-time `extraHooks` seam fires for all three decision types with zero branch-specific code change). **Verified 2026-08-24: `go build`/`go vet`/`go test -count=1 ./...` clean across the entire `eami-gateway` module against a real Postgres**, including every pre-existing TOCTOU/`dispatchApproved`/B-100-race/workflow test — zero regressions. Full detail in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s B-101/B-102 entries.
@@ -1171,7 +1172,39 @@ or prior context suggests otherwise, it is wrong; trust this line.
   and `BACKLOG.md`'s B-077/B-087/B-091 entries.
 
 ## Last updated
-2026-08-24 by Claude Code — B-103: DONE. B-057's `aiprovider.Adapter`
+2026-08-24 by Claude Code — B-104: DONE. `AgentsPage.tsx`/`PoliciesPage.tsx`/
+`WorkflowsPage.tsx` migrated onto the shared `DataTable` component
+(`eami-ui/src/components/common/DataTable.tsx`), closing the root cause
+behind B-081/082/083's row-click bug class -- a fourth page can no longer
+reintroduce it by hand-rolling its own `<tr>`. `DataTable.tsx` itself
+untouched, confirmed unnecessary to extend. **Real complication found
+before building**: neither `ApprovalsPage.tsx` nor `AlertsPage.tsx`, both
+offered as "the reference," actually demonstrates `onRowClick` -- both
+use `DataTable` read-only, so this migration constructs the row-click +
+in-row-action-buttons combination for the first time (mechanically
+low-risk, same `stopPropagation()` pattern each page's old `<tr>` already
+used). **Real design problem solved**: Policies' up/down reorder needs
+each row's true index in the priority-ordered array, which
+`Column.render(row)` doesn't receive -- solved via `policies.indexOf(policy)`
+inside `render`, correct regardless of `DataTable`'s pagination since no
+column here is `sortable`, zero `DataTable.tsx` change needed. All three
+pages pass `pageSize={1000}` so `DataTable`'s own pager never engages,
+preserving today's unpaginated "show everything" behavior exactly.
+**Verified**: real `tsc && vite build` clean via the established
+`docker build --target builder -f eami-ui/Dockerfile .` path. Live
+browser click-through **not performed and disclosed as such** -- the
+seeded dev users (`scripts/seed-db.sh`) carry a placeholder bcrypt hash,
+not a real password, so no authenticated browser session was reachable;
+verified instead via the real running `eami-ui` dev container (rebuilt,
+restarted, bind-mounted source), confirming the served module is the
+current code for all three pages and that the old hand-rolled
+hover-without-click string is gone from all three. **Also discovered,
+flagged, not fixed**: `DashboardPage.tsx`/`DiscoverPage.tsx` still have
+the identical pattern -- out of this brief's scope ("any other page"),
+not touched. Full detail in `BUILT.md`'s `eami-ui` section and
+`BACKLOG.md`'s B-104 entry.
+
+Prior entry, still accurate: 2026-08-24 by Claude Code — B-103: DONE. B-057's `aiprovider.Adapter`
 pattern is now a documented standing convention (docs only, no code
 changed). **Real judgment call worth knowing about**: the brief offered
 `ARCHITECTURE.md`/a new ADR as locations, but `BOUNDARIES.md`'s own

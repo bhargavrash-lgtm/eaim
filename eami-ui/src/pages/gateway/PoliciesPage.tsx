@@ -7,7 +7,9 @@ import {
   ConfirmDialog,
   EmptyState,
   LoadingSpinner,
+  DataTable,
 } from '@/components/common'
+import type { Column } from '@/components/common'
 import {
   usePolicies,
   useCreatePolicy,
@@ -315,6 +317,87 @@ export function PoliciesPage() {
   if (isLoading) return <div className="p-6"><LoadingSpinner /></div>
   if (error)    return <div className="p-6 text-sm text-red-500">Failed to load policies.</div>
 
+  // B-104: shared DataTable (closes the row-click bug class B-081/082/083
+  // found). policies.indexOf(policy) recovers each row's true position in
+  // the priority-ordered array from inside a Column.render callback (which
+  // only receives the row, not an index) -- correct regardless of
+  // DataTable's own pagination, and safe specifically because no column
+  // here is marked sortable, so DataTable never reorders `policies` itself.
+  // pageSize is set high enough to never engage DataTable's own pager,
+  // matching this page's existing "show every policy" behavior.
+  const policyColumns: Column<Policy>[] = [
+    {
+      key: 'reorder',
+      header: '',
+      className: 'w-8',
+      render: (policy) => {
+        const idx = policies.indexOf(policy)
+        return (
+          <div className="flex flex-col">
+            <button
+              onClick={(e) => { e.stopPropagation(); movePolicy(idx, -1) }}
+              disabled={idx === 0 || reorder.isPending}
+              title="Move up (higher priority)"
+              className="text-gray-400 hover:text-indigo-600 disabled:opacity-25 disabled:hover:text-gray-400"
+            >
+              <ChevronUp className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); movePolicy(idx, 1) }}
+              disabled={idx === policies.length - 1 || reorder.isPending}
+              title="Move down (lower priority)"
+              className="text-gray-400 hover:text-indigo-600 disabled:opacity-25 disabled:hover:text-gray-400"
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )
+      },
+    },
+    { key: 'priority', header: 'Pri', render: (policy) => <span className="text-gray-500 font-mono text-xs">{policy.priority}</span> },
+    {
+      key: 'name',
+      header: 'Name',
+      render: (policy) => (
+        <>
+          <div className="font-medium text-gray-900">{policy.name}</div>
+          {policy.description && (
+            <div className="text-xs text-gray-400 truncate max-w-xs">{policy.description}</div>
+          )}
+        </>
+      ),
+    },
+    { key: 'conditions', header: 'Conditions', render: (policy) => <ConditionSummary conditions={policy.conditions} /> },
+    {
+      key: 'action',
+      header: 'Action',
+      render: (policy) => (
+        <>
+          <ActionBadge action={policy.action} />
+          {policy.alert && <span className="ml-1.5 text-xs text-amber-600">+ alert</span>}
+        </>
+      ),
+    },
+    { key: 'status', header: 'Status', render: (policy) => <StatusBadge status={policy.status} /> },
+    {
+      key: 'actions',
+      header: '',
+      className: 'text-right',
+      render: (policy) => (
+        <div className="flex items-center justify-end gap-3">
+          <button onClick={(e) => { e.stopPropagation(); setPanel({ mode: 'edit', policy }) }}
+            className="text-gray-400 hover:text-indigo-600" title="Edit">
+            <Pencil className="h-4 w-4" />
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(policy) }}
+            className="text-gray-400 hover:text-red-600" title="Delete">
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+      ),
+    },
+  ]
+
   return (
     <div className="flex flex-col h-full">
       <PageHeader
@@ -343,82 +426,12 @@ export function PoliciesPage() {
             description="Create your first policy to start governing gateway traffic."
           />
         ) : (
-          <div className="rounded-lg border border-gray-200 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
-                <tr>
-                  <th className="w-8 px-3 py-3"></th>
-                  <th className="px-4 py-3 text-left">Pri</th>
-                  <th className="px-4 py-3 text-left">Name</th>
-                  <th className="px-4 py-3 text-left">Conditions</th>
-                  <th className="px-4 py-3 text-left">Action</th>
-                  <th className="px-4 py-3 text-left">Status</th>
-                  <th className="px-4 py-3 text-right"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {policies.map((policy, idx) => (
-                  <tr
-                    key={policy.id}
-                    className="cursor-pointer hover:bg-gray-50"
-                    onClick={() => setPanel({ mode: 'edit', policy })}
-                  >
-                    <td className="px-3 py-3">
-                      <div className="flex flex-col">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); movePolicy(idx, -1) }}
-                          disabled={idx === 0 || reorder.isPending}
-                          title="Move up (higher priority)"
-                          className="text-gray-400 hover:text-indigo-600 disabled:opacity-25 disabled:hover:text-gray-400"
-                        >
-                          <ChevronUp className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); movePolicy(idx, 1) }}
-                          disabled={idx === policies.length - 1 || reorder.isPending}
-                          title="Move down (lower priority)"
-                          className="text-gray-400 hover:text-indigo-600 disabled:opacity-25 disabled:hover:text-gray-400"
-                        >
-                          <ChevronDown className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-gray-500 font-mono text-xs">{policy.priority}</td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-gray-900">{policy.name}</div>
-                      {policy.description && (
-                        <div className="text-xs text-gray-400 truncate max-w-xs">{policy.description}</div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <ConditionSummary conditions={policy.conditions} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <ActionBadge action={policy.action} />
-                      {policy.alert && (
-                        <span className="ml-1.5 text-xs text-amber-600">+ alert</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={policy.status} />
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-3">
-                        <button onClick={(e) => { e.stopPropagation(); setPanel({ mode: 'edit', policy }) }}
-                          className="text-gray-400 hover:text-indigo-600" title="Edit">
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(policy) }}
-                          className="text-gray-400 hover:text-red-600" title="Delete">
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={policyColumns}
+            data={policies}
+            onRowClick={(policy) => setPanel({ mode: 'edit', policy })}
+            pageSize={1000}
+          />
         )}
       </div>
 

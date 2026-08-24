@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ConfirmDialog } from '@/components/common'
+import { ConfirmDialog, DataTable } from '@/components/common'
+import type { Column } from '@/components/common'
 import {
   useAgents,
   useAgentConfig,
@@ -345,6 +346,46 @@ export function AgentsPage() {
     return <div className="p-6 text-sm text-red-500">Failed to load agents.</div>
   }
 
+  // B-104: shared DataTable (closes the row-click bug class B-081 found --
+  // hover/cursor styling only applies here because a real onRowClick is
+  // passed below). pageSize is set high enough to never engage DataTable's
+  // own pager, matching this page's existing "show every agent" behavior.
+  const agentColumns: Column<Agent>[] = [
+    { key: 'name', header: 'Name', render: (agent) => <span className="font-medium text-gray-900">{agent.name}</span> },
+    { key: 'model', header: 'Model', render: (agent) => <span className="font-mono text-gray-600">{agent.model}</span> },
+    { key: 'risk_tier', header: 'Risk', render: (agent) => <RiskBadge tier={(agent as any).risk_tier} /> },
+    { key: 'status', header: 'Status', render: (agent) => <StatusBadge status={(agent as any).status} /> },
+    { key: 'owner', header: 'Owner', render: (agent) => <span className="text-gray-500">{(agent as any).owner}</span> },
+    {
+      key: 'actions',
+      header: 'Actions',
+      className: 'text-right',
+      render: (agent) => (
+        <div className="flex items-center justify-end gap-3">
+          <button
+            onClick={(e) => { e.stopPropagation(); setConfigAgent(agent) }}
+            className="text-indigo-600 hover:text-indigo-800 text-xs font-medium"
+          >
+            Configure
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleToggleSuspend(agent) }}
+            disabled={updateAgent.isPending}
+            className="text-amber-600 hover:text-amber-800 text-xs font-medium disabled:opacity-50"
+          >
+            {(agent as any).status === 'suspended' ? 'Reactivate' : 'Suspend'}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setActionError(null); setDeleteTarget(agent) }}
+            className="text-red-600 hover:text-red-800 text-xs font-medium"
+          >
+            Delete
+          </button>
+        </div>
+      ),
+    },
+  ]
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-4">
@@ -367,62 +408,7 @@ export function AgentsPage() {
       {agents.length === 0 ? (
         <p className="text-sm text-gray-400">No agents registered yet.</p>
       ) : (
-        <div className="overflow-x-auto rounded border border-gray-200">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
-              <tr>
-                <th className="px-4 py-3 text-left">Name</th>
-                <th className="px-4 py-3 text-left">Model</th>
-                <th className="px-4 py-3 text-left">Risk</th>
-                <th className="px-4 py-3 text-left">Status</th>
-                <th className="px-4 py-3 text-left">Owner</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {agents.map(agent => (
-                <tr
-                  key={agent.id}
-                  className="cursor-pointer hover:bg-gray-50"
-                  onClick={() => setConfigAgent(agent)}
-                >
-                  <td className="px-4 py-3 font-medium text-gray-900">{agent.name}</td>
-                  <td className="px-4 py-3 font-mono text-gray-600">{agent.model}</td>
-                  <td className="px-4 py-3">
-                    <RiskBadge tier={(agent as any).risk_tier} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={(agent as any).status} />
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">{(agent as any).owner}</td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-3">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setConfigAgent(agent) }}
-                        className="text-indigo-600 hover:text-indigo-800 text-xs font-medium"
-                      >
-                        Configure
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleToggleSuspend(agent) }}
-                        disabled={updateAgent.isPending}
-                        className="text-amber-600 hover:text-amber-800 text-xs font-medium disabled:opacity-50"
-                      >
-                        {(agent as any).status === 'suspended' ? 'Reactivate' : 'Suspend'}
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setActionError(null); setDeleteTarget(agent) }}
-                        className="text-red-600 hover:text-red-800 text-xs font-medium"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable columns={agentColumns} data={agents} onRowClick={setConfigAgent} pageSize={1000} />
       )}
 
       {/* Config slide-out panel */}

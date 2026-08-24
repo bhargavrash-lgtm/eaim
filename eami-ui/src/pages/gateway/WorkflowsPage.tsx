@@ -18,7 +18,9 @@ import {
   ConfirmDialog,
   EmptyState,
   LoadingSpinner,
+  DataTable,
 } from '@/components/common'
+import type { Column } from '@/components/common'
 import { apiFetch } from '@/api/client'
 import {
   useWorkflows,
@@ -773,6 +775,33 @@ export function WorkflowsPage() {
   if (isLoading) return <div className="p-6"><LoadingSpinner /></div>
   if (error) return <div className="p-6 text-sm text-red-500">Failed to load workflows.</div>
 
+  // B-104: shared DataTable (closes the row-click bug class B-081/082/083
+  // found). pageSize is set high enough to never engage DataTable's own
+  // pager, matching this page's existing "show every workflow" behavior.
+  const workflowColumns: Column<Workflow>[] = [
+    { key: 'name', header: 'Name', render: (wf) => <span className="font-medium text-gray-900">{wf.name}</span> },
+    { key: 'status', header: 'Status', render: (wf) => <StatusBadge status={wf.status} /> },
+    { key: 'steps', header: 'Steps', render: (wf) => <span className="text-xs text-gray-500">{wf.step_count ?? 0}</span> },
+    { key: 'created', header: 'Created', render: (wf) => <span className="text-xs text-gray-400">{formatDate(wf.created_at)}</span> },
+    {
+      key: 'actions',
+      header: '',
+      className: 'text-right',
+      render: (wf) => (
+        <div className="flex items-center justify-end gap-3">
+          <button onClick={(e) => { e.stopPropagation(); setEditTargetId(wf.id) }}
+            className="text-gray-400 hover:text-indigo-600" title="Edit">
+            <Pencil className="h-4 w-4" />
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(wf) }}
+            className="text-gray-400 hover:text-red-600" title="Delete">
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+      ),
+    },
+  ]
+
   return (
     <div className="flex flex-col h-full">
       <PageHeader
@@ -794,45 +823,7 @@ export function WorkflowsPage() {
             description="Chain connectors together into an ordered sequence of steps."
           />
         ) : (
-          <div className="rounded-lg border border-gray-200 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
-                <tr>
-                  <th className="px-4 py-3 text-left">Name</th>
-                  <th className="px-4 py-3 text-left">Status</th>
-                  <th className="px-4 py-3 text-left">Steps</th>
-                  <th className="px-4 py-3 text-left">Created</th>
-                  <th className="px-4 py-3 text-right"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {workflows.map(wf => (
-                  <tr
-                    key={wf.id}
-                    className="cursor-pointer hover:bg-gray-50"
-                    onClick={() => setEditTargetId(wf.id)}
-                  >
-                    <td className="px-4 py-3 font-medium text-gray-900">{wf.name}</td>
-                    <td className="px-4 py-3"><StatusBadge status={wf.status} /></td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{wf.step_count ?? 0}</td>
-                    <td className="px-4 py-3 text-xs text-gray-400">{formatDate(wf.created_at)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-3">
-                        <button onClick={(e) => { e.stopPropagation(); setEditTargetId(wf.id) }}
-                          className="text-gray-400 hover:text-indigo-600" title="Edit">
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(wf) }}
-                          className="text-gray-400 hover:text-red-600" title="Delete">
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable columns={workflowColumns} data={workflows} onRowClick={(wf) => setEditTargetId(wf.id)} pageSize={1000} />
         )}
       </div>
 
