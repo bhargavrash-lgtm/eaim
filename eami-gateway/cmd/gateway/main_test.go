@@ -104,7 +104,7 @@ func TestRecordTokenUsage_ExtractsAndWrites(t *testing.T) {
 	}
 
 	body := json.RawMessage(`{"model":"claude-haiku-4-5-20251001","usage":{"input_tokens":8,"output_tokens":1}}`)
-	ac := mcp.ActionContext{OrgID: "org-1", AgentUUID: "agent-uuid-1", AgentName: "agent-alpha"}
+	ac := mcp.ActionContext{OrgID: "org-1", AgentUUID: "agent-uuid-1", AgentName: "agent-alpha", Tool: "claude-connector"}
 
 	recordTokenUsage("http://eami-api", "service-key", body, ac)
 
@@ -121,6 +121,33 @@ func TestRecordTokenUsage_ExtractsAndWrites(t *testing.T) {
 	}
 	if gotPayload.OrgID != "org-1" || gotPayload.AgentID != "agent-uuid-1" || gotPayload.AgentName != "agent-alpha" {
 		t.Errorf("identity fields not carried through: %+v", gotPayload)
+	}
+	if gotPayload.ToolName != "claude-connector" {
+		t.Errorf("ToolName = %q, want claude-connector (B-108)", gotPayload.ToolName)
+	}
+}
+
+// TestExtractTokenUsage_ToolNameSurvivesUnparseableBody proves ToolName
+// (B-108) is set from ac.Tool unconditionally -- unlike Model/token counts,
+// which live inside result and are zeroed when result is empty or doesn't
+// parse, ToolName is known at the call site regardless of what the
+// downstream response body contains.
+func TestExtractTokenUsage_ToolNameSurvivesUnparseableBody(t *testing.T) {
+	ac := mcp.ActionContext{OrgID: "org-1", AgentUUID: "agent-1", AgentName: "agent-alpha", Tool: "some-connector"}
+
+	// Empty body: extractTokenUsage returns early, before Model/tokens are set.
+	p := extractTokenUsage(json.RawMessage(``), ac)
+	if p.ToolName != "some-connector" {
+		t.Errorf("empty body: ToolName = %q, want some-connector", p.ToolName)
+	}
+	if p.Model != "" || p.InputTokens != 0 || p.OutputTokens != 0 {
+		t.Errorf("empty body: expected zero Model/token fields, got %+v", p)
+	}
+
+	// Unparseable body: same early-return-with-zeros path for Model/tokens.
+	p = extractTokenUsage(json.RawMessage(`not json`), ac)
+	if p.ToolName != "some-connector" {
+		t.Errorf("unparseable body: ToolName = %q, want some-connector", p.ToolName)
 	}
 }
 

@@ -152,11 +152,21 @@ func (e *finOpsPgTestEnv) seedAgent(t *testing.T, name, owner string) uuid.UUID 
 
 func (e *finOpsPgTestEnv) insertUsage(t *testing.T, agentID uuid.UUID, agentName, model string, tokensIn, tokensOut int32, costUSD float64, recordedAt time.Time) {
 	t.Helper()
+	e.insertUsageWithTool(t, agentID, agentName, model, "", tokensIn, tokensOut, costUSD, recordedAt)
+}
+
+// insertUsageWithTool is insertUsage plus a tool_name (B-108). Kept as a
+// separate helper rather than adding a required param to insertUsage so
+// every pre-existing call site (none of which care about tool_name) stays
+// untouched.
+func (e *finOpsPgTestEnv) insertUsageWithTool(t *testing.T, agentID uuid.UUID, agentName, model, toolName string, tokensIn, tokensOut int32, costUSD float64, recordedAt time.Time) {
+	t.Helper()
 	if err := e.queries.InsertTokenUsage(context.Background(), store.InsertTokenUsageParams{
 		OrgID:      e.orgID,
 		AgentID:    agentID,
 		AgentName:  agentName,
 		Model:      model,
+		ToolName:   toolName,
 		TokensIn:   tokensIn,
 		TokensOut:  tokensOut,
 		CostUSD:    costUSD,
@@ -310,8 +320,111 @@ func TestFinOpsSummary_Real_NoDataInRange(t *testing.T) {
 	if summary.TotalCostUSD != 0 || summary.TotalTokensIn != 0 || summary.TotalTokensOut != 0 {
 		t.Errorf("want zeroed totals for an empty range, got %+v", summary)
 	}
-	if len(summary.ByAgent) != 0 || len(summary.ByTeam) != 0 || len(summary.ByModel) != 0 {
-		t.Errorf("want empty breakdown slices for an empty range, got by_agent=%d by_team=%d by_model=%d",
-			len(summary.ByAgent), len(summary.ByTeam), len(summary.ByModel))
+	if len(summary.ByAgent) != 0 || len(summary.ByTeam) != 0 || len(summary.ByModel) != 0 || len(summary.ByTool) != 0 {
+		t.Errorf("want empty breakdown slices for an empty range, got by_agent=%d by_team=%d by_model=%d by_tool=%d",
+			len(summary.ByAgent), len(summary.ByTeam), len(summary.ByModel), len(summary.ByTool))
+	}
+	if summary.AvgCostPerOutcome != 0 {
+		t.Errorf("want AvgCostPerOutcome=0 for an empty range (no divide-by-zero), got %v", summary.AvgCostPerOutcome)
+	}
+}
+
+// ─── B-108: by_tool breakdown + avg_cost_per_outcome ───────────────────────
+
+// TestFinOpsSummary_Real_ToolBreakdown_RecordsAndAggregatesByConnector
+// proves AC2: a real by_tool breakdown is queryable and numerically correct,
+// mirroring by_model's existing test shape exactly. Also proves AC1's
+// companion contract at the store level: a token_usage row inserted with a
+// real tool_name round-trips through GET /v1/finops/summary correctly.
+func TestFinOpsSummary_Real_ToolBreakdown_RecordsAndAggregatesByConnector(t *testing.T) {
+	env := newFinOpsPgTestEnv(t)
+	now := time.Now().UTC()
+
+	agentA := env.seedAgent(t, "tool-test-agent-a", "team-a")
+
+	env.insertUsageWithTool(t, agentA, "tool-test-agent-a", "test-model", "claude-connector", 1000, 200, 1.50, now.Add(-90*time.Minute))
+	env.insertUsageWithTool(t, agentA, "tool-test-agent-a", "test-model", "claude-connector", 500, 100, 0.50, now.Add(-60*time.Minute))
+	env.insertUsageWithTool(t, agentA, "tool-test-agent-a", "test-model", "rest-connector", 300, 50, 0.25, now.Add(-30*time.Minute))
+
+	from := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	to := now.Add(1 * time.Hour).Format(time.RFC3339)
+
+	resp, summary := env.getSummary(t, from, to)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+
+	toolCosts := map[string]float64{}
+	toolTokensIn := map[string]int64{}
+	for _, ts := range summary.ByTool {
+		toolCosts[ts.Tool] = ts.CostUSD
+		toolTokensIn[ts.Tool] = ts.TokensIn
+	}
+	if got := toolCosts["claude-connector"]; got != 2.00 {
+		t.Errorf(`ByTool["claude-connector"].CostUSD: got %v, want 2.00`, got)
+	}
+	if got := toolTokensIn["claude-connector"]; got != 1500 {
+		t.Errorf(`ByTool["claude-connector"].TokensIn: got %d, want 1500`, got)
+	}
+	if got := toolCosts["rest-connector"]; got != 0.25 {
+		t.Errorf(`ByTool["rest-connector"].CostUSD: got %v, want 0.25`, got)
+	}
+}
+
+// TestFinOpsSummary_Real_UnresolvedToolMapsToUnknown proves the
+// COALESCE(tu.tool_name, 'unknown') fallback: a row with no tool_name (an
+// unresolved-tool dispatch -- resolveDynamicTool/resolveAIProviderTool both
+// return nil for a name that doesn't resolve) is a real, expected case
+// grouped under "unknown", not dropped or errored on, mirroring by_team's
+// identical COALESCE(ga.owner, 'unknown') precedent.
+func TestFinOpsSummary_Real_UnresolvedToolMapsToUnknown(t *testing.T) {
+	env := newFinOpsPgTestEnv(t)
+	now := time.Now().UTC()
+
+	agentA := env.seedAgent(t, "unresolved-tool-agent", "team-a")
+	// toolName = "" -- stored as NULL, exactly what an unresolved ac.Tool produces.
+	env.insertUsageWithTool(t, agentA, "unresolved-tool-agent", "test-model", "", 400, 80, 0.60, now.Add(-30*time.Minute))
+
+	from := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	to := now.Add(1 * time.Hour).Format(time.RFC3339)
+
+	resp, summary := env.getSummary(t, from, to)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if len(summary.ByTool) != 1 {
+		t.Fatalf("want exactly 1 by_tool entry, got %d: %+v", len(summary.ByTool), summary.ByTool)
+	}
+	if summary.ByTool[0].Tool != "unknown" {
+		t.Errorf("Tool = %q, want %q", summary.ByTool[0].Tool, "unknown")
+	}
+	if summary.ByTool[0].CostUSD != 0.60 {
+		t.Errorf("CostUSD = %v, want 0.60", summary.ByTool[0].CostUSD)
+	}
+}
+
+// TestFinOpsSummary_Real_AvgCostPerOutcome proves AC4: avg_cost_per_outcome
+// is a real, correctly computed value (total_cost_usd / number of recorded
+// token_usage rows in the period), not silently blank/omitted.
+func TestFinOpsSummary_Real_AvgCostPerOutcome(t *testing.T) {
+	env := newFinOpsPgTestEnv(t)
+	now := time.Now().UTC()
+
+	agentA := env.seedAgent(t, "avg-cost-agent", "team-a")
+
+	// 3 rows, total cost 3.00 -> avg 1.00 exactly.
+	env.insertUsage(t, agentA, "avg-cost-agent", "test-model", 100, 10, 1.00, now.Add(-90*time.Minute))
+	env.insertUsage(t, agentA, "avg-cost-agent", "test-model", 100, 10, 1.00, now.Add(-60*time.Minute))
+	env.insertUsage(t, agentA, "avg-cost-agent", "test-model", 100, 10, 1.00, now.Add(-30*time.Minute))
+
+	from := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	to := now.Add(1 * time.Hour).Format(time.RFC3339)
+
+	resp, summary := env.getSummary(t, from, to)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if summary.AvgCostPerOutcome != 1.00 {
+		t.Errorf("AvgCostPerOutcome = %v, want 1.00 (3.00 total / 3 rows)", summary.AvgCostPerOutcome)
 	}
 }

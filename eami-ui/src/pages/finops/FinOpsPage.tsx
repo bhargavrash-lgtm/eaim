@@ -11,6 +11,18 @@ import { useFinOpsSummary, useFinOpsTimeSeries } from '@/hooks/useFinOps'
 import type { components } from '@/api/schema'
 
 type AgentSpend = components['schemas']['AgentSpend']
+type TeamSpend = components['schemas']['TeamSpend']
+
+// ToolSpend (B-108) isn't yet declared in api/openapi.yaml (Architect-EAMI-
+// owned, out of this session's file boundary) -- same disclosed-deviation
+// precedent as B-098's agent_id/expires_at fields, accessed via a narrow
+// inline cast below rather than the generated client's types.
+interface ToolSpend {
+  tool: string
+  cost_usd: number
+  tokens_in: number
+  tokens_out: number
+}
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -166,6 +178,17 @@ export function FinOpsPage() {
     .slice()
     .sort((a, b) => (b.cost_usd ?? 0) - (a.cost_usd ?? 0))
 
+  // Team spend table (B-108: computed by the backend since B-097, never
+  // rendered until now)
+  const teamSpend: TeamSpend[] = (summary?.by_team ?? [])
+    .slice()
+    .sort((a, b) => (b.cost_usd ?? 0) - (a.cost_usd ?? 0))
+
+  // Connector (tool) spend table (B-108, new)
+  const toolSpend: ToolSpend[] = ((summary as { by_tool?: ToolSpend[] } | undefined)?.by_tool ?? [])
+    .slice()
+    .sort((a, b) => (b.cost_usd ?? 0) - (a.cost_usd ?? 0))
+
   return (
     <div>
       <Topbar
@@ -295,6 +318,102 @@ export function FinOpsPage() {
                         <td className="px-4 py-3 text-gray-600">{formatTokens(a.tokens_out)}</td>
                         <td className="px-4 py-3 text-gray-600">{a.request_count ?? '—'}</td>
                         <td className="px-4 py-3 font-medium text-gray-900">{formatUsd(a.cost_usd)}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 flex-1 rounded-full bg-gray-100 max-w-20">
+                              <div
+                                className="h-1.5 rounded-full bg-brand-500"
+                                style={{ width: `${Math.min(100, parseFloat(pct as string) || 0)}%` }}
+                              />
+                            </div>
+                            <span className="text-gray-500 text-xs">{pct}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* Team spend table (B-108) */}
+        <section>
+          <h2 className="mb-3 text-sm font-semibold text-gray-700">Spend by Team</h2>
+          {summaryLoading ? (
+            <div className="flex justify-center py-8"><LoadingSpinner /></div>
+          ) : teamSpend.length === 0 ? (
+            <EmptyState title="No spend data for this period" />
+          ) : (
+            <div className="overflow-hidden rounded-lg border border-gray-200">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    {['Team', 'Input tokens', 'Output tokens', 'Total cost', '% of total'].map((h) => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-white">
+                  {teamSpend.map((t) => {
+                    const pct = totalSpend && totalSpend > 0 && t.cost_usd != null
+                      ? ((t.cost_usd / totalSpend) * 100).toFixed(1)
+                      : '—'
+                    return (
+                      <tr key={t.team}>
+                        <td className="px-4 py-3 font-medium text-gray-900">{t.team}</td>
+                        <td className="px-4 py-3 text-gray-600">{formatTokens(t.tokens_in)}</td>
+                        <td className="px-4 py-3 text-gray-600">{formatTokens(t.tokens_out)}</td>
+                        <td className="px-4 py-3 font-medium text-gray-900">{formatUsd(t.cost_usd)}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 flex-1 rounded-full bg-gray-100 max-w-20">
+                              <div
+                                className="h-1.5 rounded-full bg-brand-500"
+                                style={{ width: `${Math.min(100, parseFloat(pct as string) || 0)}%` }}
+                              />
+                            </div>
+                            <span className="text-gray-500 text-xs">{pct}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* Connector (tool) spend table (B-108) */}
+        <section>
+          <h2 className="mb-3 text-sm font-semibold text-gray-700">Spend by Connector</h2>
+          {summaryLoading ? (
+            <div className="flex justify-center py-8"><LoadingSpinner /></div>
+          ) : toolSpend.length === 0 ? (
+            <EmptyState title="No spend data for this period" />
+          ) : (
+            <div className="overflow-hidden rounded-lg border border-gray-200">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    {['Connector', 'Input tokens', 'Output tokens', 'Total cost', '% of total'].map((h) => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-white">
+                  {toolSpend.map((tl) => {
+                    const pct = totalSpend && totalSpend > 0 && tl.cost_usd != null
+                      ? ((tl.cost_usd / totalSpend) * 100).toFixed(1)
+                      : '—'
+                    return (
+                      <tr key={tl.tool}>
+                        <td className="px-4 py-3 font-medium text-gray-900">{tl.tool}</td>
+                        <td className="px-4 py-3 text-gray-600">{formatTokens(tl.tokens_in)}</td>
+                        <td className="px-4 py-3 text-gray-600">{formatTokens(tl.tokens_out)}</td>
+                        <td className="px-4 py-3 font-medium text-gray-900">{formatUsd(tl.cost_usd)}</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
                             <div className="h-1.5 flex-1 rounded-full bg-gray-100 max-w-20">

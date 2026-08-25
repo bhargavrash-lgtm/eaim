@@ -64,7 +64,8 @@ SELECT
                        + (tokens_out * mp.cost_per_1k_out / 1000.0)
                END), 0)         AS total_cost_usd,
   COALESCE(SUM(tokens_in),  0)  AS total_tokens_in,
-  COALESCE(SUM(tokens_out), 0)  AS total_tokens_out
+  COALESCE(SUM(tokens_out), 0)  AS total_tokens_out,
+  COUNT(*)                      AS total_request_count
 FROM token_usage tu
 LEFT JOIN model_pricing mp ON mp.model = tu.model
 WHERE tu.org_id = $1
@@ -72,11 +73,18 @@ WHERE tu.org_id = $1
   AND tu.recorded_at <  $3`
 
 	var totalCost float64
-	var totalIn, totalOut int64
+	var totalIn, totalOut, totalRequests int64
 	row := db.QueryRow(ctx, totalQ, orgID, fromTS, toTS)
-	if err := row.Scan(&totalCost, &totalIn, &totalOut); err != nil {
+	if err := row.Scan(&totalCost, &totalIn, &totalOut, &totalRequests); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
+	}
+	// AvgCostPerOutcome (B-108): each token_usage row is one recorded
+	// dispatch outcome -- guarded against division by zero for an empty
+	// period rather than producing NaN/Inf in the JSON response.
+	var avgCostPerOutcome float64
+	if totalRequests > 0 {
+		avgCostPerOutcome = totalCost / float64(totalRequests)
 	}
 
 	// ── By agent ──────────────────────────────────────────────────────────────
@@ -222,15 +230,61 @@ ORDER BY cost_usd DESC`
 		return
 	}
 
+	// ── By tool (connector) ──────────────────────────────────────────────────
+	// B-108: token_usage.tool_name existed in the schema but was never
+	// populated or queried until this brief. COALESCE(tu.tool_name,
+	// 'unknown') mirrors by_team's identical COALESCE(ga.owner, 'unknown')
+	// pattern immediately above -- a call whose tool didn't resolve at
+	// dispatch time (resolveDynamicTool/resolveAIProviderTool both return
+	// nil for an unresolved name) is a real, expected case, not an error.
+	const toolQ = `
+SELECT COALESCE(tu.tool_name, 'unknown') AS tool,
+  COALESCE(SUM(CASE WHEN tu.cost_usd IS NOT NULL THEN tu.cost_usd
+                    ELSE (tu.tokens_in  * mp.cost_per_1k_in  / 1000.0)
+                       + (tu.tokens_out * mp.cost_per_1k_out / 1000.0)
+               END), 0)           AS cost_usd,
+  COALESCE(SUM(tu.tokens_in),  0) AS tokens_in,
+  COALESCE(SUM(tu.tokens_out), 0) AS tokens_out
+FROM token_usage tu
+LEFT JOIN model_pricing mp ON mp.model = tu.model
+WHERE tu.org_id = $1
+  AND tu.recorded_at >= $2
+  AND tu.recorded_at <  $3
+GROUP BY COALESCE(tu.tool_name, 'unknown')
+ORDER BY cost_usd DESC`
+
+	toolRows, err := db.Query(ctx, toolQ, orgID, fromTS, toTS)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	defer toolRows.Close()
+
+	byTool := make([]ToolSpend, 0)
+	for toolRows.Next() {
+		var t ToolSpend
+		if err := toolRows.Scan(&t.Tool, &t.CostUSD, &t.TokensIn, &t.TokensOut); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		byTool = append(byTool, t)
+	}
+	if err := toolRows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
 	writeJSON(w, http.StatusOK, TokenSpendSummary{
-		PeriodStart:    from,
-		PeriodEnd:      to,
-		TotalCostUSD:   totalCost,
-		TotalTokensIn:  totalIn,
-		TotalTokensOut: totalOut,
-		ByAgent:        byAgent,
-		ByTeam:         byTeam,
-		ByModel:        byModel,
+		PeriodStart:       from,
+		PeriodEnd:         to,
+		TotalCostUSD:      totalCost,
+		AvgCostPerOutcome: avgCostPerOutcome,
+		TotalTokensIn:     totalIn,
+		TotalTokensOut:    totalOut,
+		ByAgent:           byAgent,
+		ByTeam:            byTeam,
+		ByModel:           byModel,
+		ByTool:            byTool,
 	})
 }
 

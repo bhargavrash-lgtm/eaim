@@ -32,9 +32,10 @@ func (q *Queries) GetModelPricing(ctx context.Context, model string) (ModelPrici
 // InsertTokenUsageParams holds parameters for InsertTokenUsage.
 type InsertTokenUsageParams struct {
 	OrgID      uuid.UUID
-	AgentID    uuid.UUID  // zero value treated as NULL
+	AgentID    uuid.UUID // zero value treated as NULL
 	AgentName  string
 	Model      string
+	ToolName   string // empty treated as NULL (B-108) -- unresolved-tool calls have none
 	TokensIn   int32
 	TokensOut  int32
 	CostUSD    float64
@@ -43,8 +44,8 @@ type InsertTokenUsageParams struct {
 
 const insertTokenUsageSQL = `
 INSERT INTO token_usage
-    (org_id, agent_id, agent_name, model, tokens_in, tokens_out, cost_usd, recorded_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+    (org_id, agent_id, agent_name, model, tool_name, tokens_in, tokens_out, cost_usd, recorded_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 
 // InsertTokenUsage writes one token-usage row.
 // When AgentID is the zero UUID it is stored as NULL.
@@ -56,6 +57,12 @@ func (q *Queries) InsertTokenUsage(ctx context.Context, p InsertTokenUsageParams
 	var agentID pgtype.UUID
 	if p.AgentID != (uuid.UUID{}) {
 		agentID = pgtype.UUID{Bytes: p.AgentID, Valid: true}
+	}
+
+	// Encode tool_name — NULL when empty (B-108).
+	var toolName pgtype.Text
+	if p.ToolName != "" {
+		toolName = pgtype.Text{String: p.ToolName, Valid: true}
 	}
 
 	// Encode cost — NULL when zero (allows the finops fallback computation to kick in).
@@ -71,6 +78,7 @@ func (q *Queries) InsertTokenUsage(ctx context.Context, p InsertTokenUsageParams
 		agentID,
 		p.AgentName,
 		p.Model,
+		toolName,
 		p.TokensIn,
 		p.TokensOut,
 		costUSD,

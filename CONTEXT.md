@@ -10,6 +10,7 @@ unrelated framework the founder uses elsewhere. If any file, commit message,
 or prior context suggests otherwise, it is wrong; trust this line.
 
 ## Active decision thread (update every time one moves)
+- **B-108 (2026-08-25): DONE — FinOps connector breakdown + two silent metric gaps closed, all three found by the Token Usage Optimization re-investigation.** `token_usage.tool_name` (existed, unpopulated) is now threaded through `extractTokenUsage`→`TokenUsageRequest`→`InsertTokenUsageParams` and surfaced via a new `by_tool` query/UI table mirroring `by_model` exactly (`COALESCE(tu.tool_name,'unknown')` for unresolved-tool dispatches, same fallback shape as `by_team`'s existing `COALESCE(ga.owner,'unknown')`). **Two decisions made after investigating what each metric was actually meant to represent, not defaulted:** `avg_cost_per_outcome` (documented in `openapi.yaml`, read by the frontend, never computed by the backend — a permanently blank KPI card) — **computed for real** (`total_cost_usd / COUNT(*)` over the period; cheaper than removing, since removing would touch Architect-EAMI-owned `openapi.yaml`). `by_team` (computed correctly since B-097, never rendered) — **rendered**, not removed, since the backend work was already correct and already tested. All 5 ACs live-verified against the real running stack: a real dispatch through a real `rest_api` connector confirmed `tool_name` lands correctly (AC1); a real `GET /v1/finops/summary` against known seeded data returned `avg_cost_per_outcome: 0.12333...` (exactly total/count) and a correctly-split `by_tool` breakdown (AC2/AC4); `by_team` confirmed present in both the API response and the real served `eami-ui` module (AC3); zero regression to `by_agent`/`by_model` across 13/13 FinOps tests (AC5). No schema migration, no dispatch logic touched. Full detail in `BUILT.md`'s `eami-gateway`/`eami-api`/`eami-ui` sections and `BACKLOG.md`'s B-108 entry.
 - **B-098 (2026-08-24): DONE — `POST /v1/gateway/tokens` (previously zero-auth, could mint a valid AI-agent token for any existing agent name) is now gated by real, scoped `api_keys` rows.** New `eami-gateway/internal/identity/issue_http.go` (`IssueHandler`, replacing the deleted insecure `Manager.HandleIssue`) requires a real, unrevoked, unexpired, agent-scoped API key (`X-API-Key`), resolves the requested agent via `registry.LookupByNameAndOrg` scoped to the **validated key's own org** (never client input), and rejects unless the resolved agent's UUID equals the key's bound `agent_id` — the actual cross-agent scoping proof, live-verified against the real running gateway (a key scoped to agent A requesting agent B's token → real 403; requesting its own agent → real 200 with a real signed JWT). New `schema/migrations-v2/000010`: `api_keys.agent_id` (nullable FK to `gateway_agents`, `ON DELETE SET NULL`) + new `ai_token_events` table (org-cascaded, snapshot columns with no FK on `agent_id`/`agent_name`/`api_key_id`, mirroring B-087's `agent_lifecycle_events` reasoning — both `issued` and `revoked` events confirmed recorded live). `eami-api`'s `CreateAPIKey` now accepts `agent_id` (org-scoped validation, rejects a non-`active` agent) and `expires_at` (existed in schema since migration 002, never settable at the API layer until now); `eami-ui`'s Settings API Keys tab gained an agent selector. **Mandatory reviewer + security subagent passes both ran and both found real issues, all fixed before shipping:** security review (independent fork, full adversarial trace) found zero HIGH-confidence findings but the same investigation independently caught a same-org agent-name-enumeration oracle (two different 403 messages) — unified, live-reverified. Code review (general-purpose subagent, "high" effort) found and this session fixed: `eami-api`'s pre-existing `GetAPIKeyByHash` didn't filter `expires_at` (inconsistent with the gateway's own new validator for the identical row), `CreateAPIKey` didn't reject binding to a suspended agent, and the new UI column fell back to a raw UUID instead of a short placeholder. **Disclosed, not fixed (out of this security-fix brief's scope):** `HandleIssue` now costs 3-4 serial Postgres round trips per issuance versus the previous single in-process sign — logged as **B-107**, QUEUED Low-Medium, real only if issuance becomes a high-frequency path. `api/openapi.yaml` doesn't yet document the new fields (Architect-EAMI-owned, disclosed not silently edited, same B-086 precedent) — logged as **B-106**, QUEUED Low. **Verified 2026-08-24: `go build`/`go vet`/`go test -count=1 ./...` clean across both `eami-gateway` and `eami-api` against a real Postgres, zero regressions; the new migration verified via the full `schema/migrationtest` suite (fresh/incremental parity, idempotent re-run); real `tsc`/`vite build` clean.** All 6 acceptance criteria live-proven against the real running containerized stack (rebuilt/restarted before and after the code-review fixes), including the centerpiece cross-agent rejection; all live-verification fixtures cleaned up afterward. Full detail in `BUILT.md`'s `eami-gateway`/`eami-api`/`eami-ui` sections and `BACKLOG.md`'s B-098/B-106/B-107 entries.
 - ADR-019: RESOLVED, Accepted — 2026-07-22. Full episode content stays
   on-prem; eami-api never serves it. See DECISIONS.md ADR-019 (now a full
@@ -1173,7 +1174,55 @@ or prior context suggests otherwise, it is wrong; trust this line.
   and `BACKLOG.md`'s B-077/B-087/B-091 entries.
 
 ## Last updated
-2026-08-24 by Claude Code — B-098: DONE. `POST /v1/gateway/tokens` (previously
+2026-08-25 by Claude Code — B-108: DONE. FinOps connector breakdown +
+two silent metric gaps closed -- all three found by the same-session Token
+Usage Optimization re-investigation. `token_usage.tool_name` (existed in
+schema, never populated) is now threaded through `extractTokenUsage`
+(`eami-gateway/cmd/gateway/main.go`, set unconditionally at construction,
+unlike `Model`/token counts which depend on the downstream body parsing)
+-> `TokenUsageRequest` -> `InsertTokenUsageParams`, surfaced via a new
+`by_tool` query in `finops.go` mirroring `by_model` exactly
+(`COALESCE(tu.tool_name,'unknown')` for an unresolved-tool dispatch, same
+fallback shape as `by_team`'s existing `COALESCE(ga.owner,'unknown')`). No
+schema migration needed -- the column already existed, unused.
+**Two decisions made by investigating what each metric was actually meant
+to represent, not defaulted:** `avg_cost_per_outcome` (documented in
+`openapi.yaml`, read by `FinOpsPage.tsx`, never computed by the backend --
+a permanently blank KPI card in production) -- **computed for real**:
+`total_cost_usd / COUNT(*)` over the period, since each `token_usage` row
+already is one recorded dispatch outcome (exactly what `by_agent`'s
+existing `request_count` counts per-agent); chosen over removal since
+computing needed zero `openapi.yaml` changes (Architect-EAMI-owned, out of
+this session's boundary) where removing it would have. `by_team`
+(computed correctly since B-097, never rendered by `FinOpsPage.tsx`) --
+**rendered**, not removed: the backend computation was already correct and
+already covered by B-097's own real-Postgres regression test, so removing
+it to avoid a small frontend addition was the wrong trade.
+**All 5 ACs live-verified against the real running stack, rebuilt and
+restarted:** a real `POST /v1/gateway/tokens` (B-098) -> real MCP SSE
+session -> real `tool_call` dispatched through a real `rest_api` connector
+to `postman-echo.com` -- the resulting real `token_usage` row confirmed via
+`psql` to carry `tool_name = 'b108-echo-connector'` (AC1). Two more rows
+seeded with distinct connectors/costs; a real admin login (a freshly
+created user with a known bcrypt hash for this verification) then a real
+`GET /v1/finops/summary` returned `total_cost_usd: 0.37`,
+`avg_cost_per_outcome: 0.12333...` (= 0.37/3 exactly), `by_tool` correctly
+split $0.30/$0.07 across the two connectors, `by_team` correctly present --
+all hand-verified against the seeded values (AC2, AC3, AC4). The real
+running `eami-ui` dev container confirmed serving the new "Spend by
+Team"/"Spend by Connector" sections via a direct fetch of the served
+module. **Verified: `go build`/`go vet`/`go test -count=1 ./...` clean
+across both `eami-gateway` and `eami-api`** against a real Postgres --
+13/13 FinOps tests pass, zero regression to `by_agent`/`by_model` (AC5);
+real `tsc`/`vite build` clean. All live-verification fixtures cleaned up
+afterward, including 3 `token_usage` rows requiring explicit manual
+deletion (`token_usage.org_id` has no FK, doesn't cascade with the org).
+No dispatch logic, B-102's hook mechanism, or `model_pricing` touched (all
+explicitly out of scope). Full detail in `BUILT.md`'s
+`eami-gateway`/`eami-api`/`eami-ui` sections and `BACKLOG.md`'s B-108
+entry.
+
+Prior entry, still accurate: 2026-08-24 by Claude Code — B-098: DONE. `POST /v1/gateway/tokens` (previously
 zero-auth) is now gated by real, scoped `api_keys` rows -- the live,
 unauthenticated token-minting gap this brief existed to close. New
 `eami-gateway/internal/identity/issue_http.go` (`IssueHandler`, replacing the

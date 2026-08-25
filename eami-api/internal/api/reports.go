@@ -277,10 +277,14 @@ func (e *parseIntError) Error() string { return "not an integer" }
 
 // TokenUsageRequest is the body posted by the gateway after each proxied call.
 type TokenUsageRequest struct {
-	OrgID        string `json:"org_id"`
-	AgentID      string `json:"agent_id"`
-	AgentName    string `json:"agent_name"`
-	Model        string `json:"model"`
+	OrgID     string `json:"org_id"`
+	AgentID   string `json:"agent_id"`
+	AgentName string `json:"agent_name"`
+	Model     string `json:"model"`
+	// ToolName is the connector this call dispatched through (B-108) --
+	// optional: empty for any caller predating this field (never
+	// required, never validated), stored as NULL, not the empty string.
+	ToolName     string `json:"tool_name"`
 	InputTokens  int32  `json:"input_tokens"`
 	OutputTokens int32  `json:"output_tokens"`
 	RecordedAt   string `json:"recorded_at"` // RFC3339
@@ -335,6 +339,7 @@ func (s *Server) IngestTokenUsage(w http.ResponseWriter, r *http.Request) {
 		AgentID:    agentID,
 		AgentName:  req.AgentName,
 		Model:      req.Model,
+		ToolName:   req.ToolName,
 		TokensIn:   req.InputTokens,
 		TokensOut:  req.OutputTokens,
 		CostUSD:    cost,

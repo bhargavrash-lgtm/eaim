@@ -153,13 +153,13 @@ type PolicyConditionsReq struct {
 }
 
 type PolicyCreateRequest struct {
-	Name        string              `json:"name"`
-	Description *string             `json:"description"`
-	Priority    int32               `json:"priority"`
+	Name        string               `json:"name"`
+	Description *string              `json:"description"`
+	Priority    int32                `json:"priority"`
 	Conditions  *PolicyConditionsReq `json:"conditions"`
-	Action      string              `json:"action"`
-	Alert       bool                `json:"alert"`
-	Status      string              `json:"status"`
+	Action      string               `json:"action"`
+	Alert       bool                 `json:"alert"`
+	Status      string               `json:"status"`
 }
 
 type PolicyUpdateRequest struct {
@@ -237,15 +237,34 @@ type ModelSpend struct {
 	TokensOut int64   `json:"tokens_out"`
 }
 
+// ToolSpend is a per-connector cost breakdown (B-108). Not yet declared in
+// api/openapi.yaml (Architect-EAMI-owned, out of this session's file
+// boundary) -- disclosed, not silently edited, same precedent as B-098's
+// agent_id/expires_at deviation. Tool is "unknown" for a call whose
+// tool_name wasn't resolved at dispatch time (see finops.go's toolQ).
+type ToolSpend struct {
+	Tool      string  `json:"tool"`
+	CostUSD   float64 `json:"cost_usd"`
+	TokensIn  int64   `json:"tokens_in"`
+	TokensOut int64   `json:"tokens_out"`
+}
+
 type TokenSpendSummary struct {
-	PeriodStart    time.Time    `json:"period_start"`
-	PeriodEnd      time.Time    `json:"period_end"`
-	TotalCostUSD   float64      `json:"total_cost_usd"`
-	TotalTokensIn  int64        `json:"total_tokens_in"`
-	TotalTokensOut int64        `json:"total_tokens_out"`
-	ByAgent        []AgentSpend `json:"by_agent"`
-	ByTeam         []TeamSpend  `json:"by_team"`
-	ByModel        []ModelSpend `json:"by_model"`
+	PeriodStart    time.Time `json:"period_start"`
+	PeriodEnd      time.Time `json:"period_end"`
+	TotalCostUSD   float64   `json:"total_cost_usd"`
+	TotalTokensIn  int64     `json:"total_tokens_in"`
+	TotalTokensOut int64     `json:"total_tokens_out"`
+	// AvgCostPerOutcome is TotalCostUSD / the number of recorded
+	// token_usage rows in the period -- each row already represents one
+	// recorded dispatch outcome (B-108; documented in openapi.yaml since
+	// before this brief but never actually computed until now). 0 when
+	// there are zero rows in the period, not a divide-by-zero NaN.
+	AvgCostPerOutcome float64      `json:"avg_cost_per_outcome"`
+	ByAgent           []AgentSpend `json:"by_agent"`
+	ByTeam            []TeamSpend  `json:"by_team"`
+	ByModel           []ModelSpend `json:"by_model"`
+	ByTool            []ToolSpend  `json:"by_tool"`
 }
 
 type SpendPoint struct {

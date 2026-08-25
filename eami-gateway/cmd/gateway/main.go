@@ -433,6 +433,7 @@ type tokenUsagePayload struct {
 	AgentID      string `json:"agent_id"`
 	AgentName    string `json:"agent_name"`
 	Model        string `json:"model"`        // from MCP response; "" if absent
+	ToolName     string `json:"tool_name"`    // ac.Tool -- the connector this call dispatched through (B-108)
 	InputTokens  int    `json:"input_tokens"`
 	OutputTokens int    `json:"output_tokens"`
 	RecordedAt   string `json:"recorded_at"` // RFC3339
@@ -446,6 +447,11 @@ func extractTokenUsage(result json.RawMessage, ac mcp.ActionContext) tokenUsageP
 		OrgID:      ac.OrgID,
 		AgentID:    ac.AgentUUID,
 		AgentName:  ac.AgentName,
+		// ToolName is set unconditionally from ac.Tool, independent of
+		// whether result parses -- it's always known at the call site,
+		// unlike Model/token counts, which live inside the (possibly
+		// unparseable) downstream response body.
+		ToolName:   ac.Tool,
 		RecordedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	if len(result) == 0 {
