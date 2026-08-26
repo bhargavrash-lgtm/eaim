@@ -228,8 +228,11 @@ func run() error {
 	// same DB, not a new cross-service dependency.
 	apiKeyValidator := identity.NewPostgresAPIKeyValidator(pool)
 	tokenEvents := identity.NewPostgresTokenEventStore(pool)
-	// agentRegistry (*registry.Registry) satisfies identity.AgentResolver structurally.
-	issueHandler := identity.NewIssueHandler(idManager, agentRegistry, apiKeyValidator, tokenEvents)
+	// B-107: IssueHandler no longer takes an AgentResolver -- its agent
+	// lookup is now part of apiKeyValidator's own combined query
+	// (ValidateAndResolveAgent). agentRegistry (*registry.Registry) is
+	// still used, unmodified, by revokeHandler below.
+	issueHandler := identity.NewIssueHandler(idManager, apiKeyValidator, tokenEvents)
 	revokeHandler := identity.NewRevokeHandler(idManager, agentRegistry, cfg.API.TokenRevokeServiceKey, tokenEvents)
 
 	// Multi-Hop Workflows Brief 2 (B-059): executes a B-058-defined workflow

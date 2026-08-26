@@ -210,13 +210,13 @@ func (s *Server) UpdatePolicy(w http.ResponseWriter, r *http.Request) {
 		alert = *req.Alert
 	}
 	sp, err := s.storeIface.UpdatePolicy(r.Context(), UpdatePolicyParams{
-		ID:     id,
-		OrgID:  uc.OrgID,
-		Name:   name,
-		Action: action,
-		Status: policyStatus,
+		ID:       id,
+		OrgID:    uc.OrgID,
+		Name:     name,
+		Action:   action,
+		Status:   policyStatus,
 		Priority: pri,
-		Alert:  alert,
+		Alert:    alert,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "policy not found")
@@ -267,6 +267,20 @@ func (s *Server) ReorderPolicies(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSON(r, &req); err != nil || len(req.Order) == 0 {
 		writeError(w, http.StatusBadRequest, "bad_request", "policy_ids (array of UUIDs) is required")
 		return
+	}
+	// B-090 security review: the old N-sequential-UPDATE version was
+	// deterministic last-write-wins on a duplicate id; the new single
+	// UPDATE...FROM unnest() statement lets Postgres pick arbitrarily
+	// between two source rows matching the same target row. Policy
+	// precedence is authorization-relevant, so reject outright rather than
+	// accept silent nondeterminism.
+	seen := make(map[uuid.UUID]bool, len(req.Order))
+	for _, id := range req.Order {
+		if seen[id] {
+			writeError(w, http.StatusBadRequest, "bad_request", "policy_ids must not contain duplicates")
+			return
+		}
+		seen[id] = true
 	}
 
 	// Production path.

@@ -226,31 +226,75 @@ func (q *Queries) DeletePolicy(ctx context.Context, id, orgID uuid.UUID) error {
 	return err
 }
 
-const reorderPoliciesQuery = `-- name: ReorderPolicies :exec
-UPDATE policies SET priority = $2 WHERE id = $1 AND org_id = $3
+// reorderPoliciesBatchedQuery (B-090) replaces N single-row UPDATEs with one
+// batched multi-row UPDATE via unnest() over two parallel arrays -- a fixed
+// 3-parameter shape regardless of len(ids), so no dynamic SQL string-building
+// is needed for a variable-length id list. Still scoped by org_id in the
+// WHERE clause, same as the original per-row query -- a cross-org id in the
+// input simply matches zero rows here. Security review (B-090/107 batch)
+// caught a stale claim in an earlier version of this comment: on the
+// production path (api.Server.ReorderPolicies with s.queries != nil) there
+// is no handler-side per-id org membership check -- that loop only exists
+// on the mock-backed test path. This WHERE clause is the ONLY thing
+// enforcing org isolation here, not a backstop for a handler check that
+// doesn't run in production.
+// Query const kept as reorderPoliciesBatchedQuery (documents the batching
+// approach for a reader of this file), but the sqlc :name annotation below
+// is ReorderPolicies -- matching the actual Go function name -- because code
+// review caught that these two files are meant to mirror what `sqlc
+// generate` would emit (db.go's own doc comment says so): a mismatched
+// annotation would regenerate a function named ReorderPoliciesBatched and
+// silently break both of ReorderPolicies's real call sites (policies.go and
+// the storeIface mock).
+const reorderPoliciesBatchedQuery = `-- name: ReorderPolicies :exec
+UPDATE policies AS p
+SET priority = v.priority
+FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::int[]) AS priority) AS v
+WHERE p.id = v.id AND p.org_id = $3
 `
 
 // ReorderPolicies renumbers priority sequentially (1-based) from each id's
-// position in ids. Run inside a real transaction -- policies' UNIQUE
-// (org_id, priority) constraint is declared DEFERRABLE INITIALLY DEFERRED
-// (schema.sql) specifically so it's only checked at commit, not after each
-// row. Without a transaction, each Exec auto-commits individually and the
-// deferral never applies: assigning an early id the priority a
-// not-yet-updated row still currently holds -- the common case for an
-// ordinary adjacent-pair swap -- 500s with a spurious unique-violation even
-// though the final state is perfectly valid. Found live, B-086.
+// position in ids, in ONE batched UPDATE statement (B-090) rather than N
+// sequential single-row UPDATEs wrapped in an explicit transaction (B-086's
+// original fix).
+//
+// No explicit transaction here, unlike B-086's version -- investigated,
+// not assumed: B-086's bug was specifically that N SEPARATE Exec() calls
+// each auto-commit as their own independent statement, so an early id could
+// transiently collide with a not-yet-updated row's still-current priority
+// BETWEEN two separate commands, tripping the UNIQUE (org_id, priority)
+// constraint before the deferred check ever got a chance to see the final,
+// valid state. A single UPDATE...FROM statement computes every row's new
+// value from one consistent read of the OLD data before applying any
+// writes, and Postgres validates that single command's net effect as one
+// atomic operation regardless of whether an outer transaction wraps it --
+// there is no second command for an intermediate state to be checked
+// against. Verified directly against the real running Postgres before
+// removing the wrapper (not assumed from a query-plan reading): both a
+// real adjacent-pair swap and a real 3-way rotation, each run as a bare
+// single statement with NO surrounding BEGIN, land correctly with zero
+// spurious unique-violation -- reproducing exactly the shape of case
+// B-086 fixed, minus the transaction B-086 needed specifically because its
+// fix was still N separate commands.
+//
+// This also narrows B-090's deadlock-window finding, though code review
+// caught that an earlier version of this comment overstated it as fully
+// "closed by construction" -- it isn't: two concurrent single-statement
+// calls can still acquire this statement's row locks in opposite order and
+// deadlock (Postgres error 40P01), which is exactly why the real
+// concurrency test in policies_reorder_pg_test.go explicitly tolerates a
+// real 40P01 as a safe, retryable outcome rather than asserting it never
+// happens. What IS true, and is the actual improvement: every row lock this
+// now takes is held for the duration of ONE statement's execution (a single
+// round trip), never spread across N sequential client round trips the way
+// the old loop's locks were -- so the deadlock WINDOW shrinks from
+// "however long N round trips take" to "one statement's execution time,"
+// not to zero.
 func (q *Queries) ReorderPolicies(ctx context.Context, orgID uuid.UUID, ids []uuid.UUID) error {
-	tx, err := q.Begin(ctx)
-	if err != nil {
-		return err
+	priorities := make([]int32, len(ids))
+	for i := range ids {
+		priorities[i] = int32(i + 1)
 	}
-	defer tx.Rollback(ctx) // no-op once Commit has succeeded
-
-	txq := q.WithTx(tx)
-	for i, id := range ids {
-		if _, err := txq.db.Exec(ctx, reorderPoliciesQuery, toPgtypeUUID(id), int32(i+1), toPgtypeUUID(orgID)); err != nil {
-			return err
-		}
-	}
-	return tx.Commit(ctx)
+	_, err := q.db.Exec(ctx, reorderPoliciesBatchedQuery, ids, priorities, toPgtypeUUID(orgID))
+	return err
 }

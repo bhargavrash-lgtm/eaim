@@ -355,6 +355,32 @@ func TestReorderPolicies_CrossOrgPolicy_Rejected(t *testing.T) {
 	}
 }
 
+func TestReorderPolicies_DuplicateID_BadRequest(t *testing.T) {
+	// B-090 security review: batching swapped the old N-sequential-UPDATE's
+	// deterministic last-write-wins for an arbitrary Postgres pick on a
+	// duplicate source row, so duplicates are now rejected outright rather
+	// than silently accepted with an unpredictable outcome.
+	ms := api.NewMockStore()
+	ts := newTestServer(t, ms)
+
+	id1 := seedPolicy(ms, policyTestOrgID, "policy-a", 1)
+	id2 := seedPolicy(ms, policyTestOrgID, "policy-b", 2)
+
+	token := ts.bearerToken(t, policyAdminID, policyTestOrgID, "admin")
+	payload := map[string]interface{}{
+		"policy_ids": []string{id1.String(), id2.String(), id1.String()},
+	}
+	resp := ts.do(t, http.MethodPut, "/v1/gateway/policies/reorder", token, payload)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("duplicate policy_ids must yield 400, got %d", resp.StatusCode)
+	}
+	if ms.ReorderCalls != 0 {
+		t.Errorf("ReorderPolicies must not be called when policy_ids has duplicates, called %d times", ms.ReorderCalls)
+	}
+}
+
 func TestReorderPolicies_EmptyList_BadRequest(t *testing.T) {
 	ms := api.NewMockStore()
 	ts := newTestServer(t, ms)

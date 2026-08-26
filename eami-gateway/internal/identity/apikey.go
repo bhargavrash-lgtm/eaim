@@ -17,12 +17,45 @@ type APIKeyRecord struct {
 	AgentID string // UUID, empty if the key is not scoped to a specific agent
 }
 
+// ResolvedAgent is the subset of a gateway_agents row IssueHandler needs,
+// returned by ValidateAndResolveAgent's combined lookup below (B-107).
+// Deliberately NOT registry.AgentRecord -- field-for-field compatible by
+// convention, not by type, to avoid a new cross-package coupling for one
+// call site (registry.Registry/AgentResolver stay completely untouched,
+// still used unmodified by revoke_http.go).
+type ResolvedAgent struct {
+	ID     string // UUID
+	Name   string
+	Status string // "active" | "suspended" | "revoked"
+}
+
 // APIKeyValidator resolves a raw API key (as presented in the X-API-Key
-// header) to the record it authorizes, or an error if the key is missing,
-// unknown, revoked, or expired. Defined as its own interface (mirroring
-// AgentResolver in revoke_http.go) purely as a test seam.
+// header), together with a requested agent name, to the records it
+// authorizes -- or an error if the key is missing, unknown, revoked, or
+// expired. Defined as its own interface (mirroring AgentResolver in
+// revoke_http.go) purely as a test seam.
+//
+// Used to also expose a separate ValidateAPIKey(ctx, rawKey) method (the
+// original B-098 shape, key lookup only, no agent resolution). B-107
+// combined it with the agent lookup into ValidateAndResolveAgent below, and
+// code review on that batch confirmed via a repo-wide grep that nothing
+// outside this file's own declaration/implementation still called the old
+// method -- IssueHandler was its only real caller and now calls the
+// combined method instead -- so it was removed rather than left as a dead,
+// untested extra surface on a security-relevant interface.
 type APIKeyValidator interface {
-	ValidateAPIKey(ctx context.Context, rawKey string) (*APIKeyRecord, error)
+	// ValidateAndResolveAgent (B-107) combines what was originally two
+	// separate calls (ValidateAPIKey, then a separate AgentResolver.
+	// LookupByNameAndOrg) into ONE query -- org_id comes from the SAME
+	// validated key row the agent is joined against, never client input,
+	// preserving the exact scoping guarantee the two-query version had.
+	// Returns (nil key, ...) for any invalid key (ErrInvalidAPIKey); returns
+	// a valid key with a nil *ResolvedAgent when the key is valid but
+	// agentName doesn't resolve to an active, non-suspended agent in that
+	// key's own org -- the caller maps that to the same generic "not
+	// authorized" rejection the old two-query version produced for both
+	// "not found" and "suspended", unchanged.
+	ValidateAndResolveAgent(ctx context.Context, rawKey, agentName string) (*APIKeyRecord, *ResolvedAgent, error)
 }
 
 // ErrInvalidAPIKey is returned for any key that doesn't resolve to a live,
@@ -53,22 +86,38 @@ func hashAPIKey(rawKey string) string {
 	return fmt.Sprintf("%x", sum)
 }
 
-func (v *pgAPIKeyValidator) ValidateAPIKey(ctx context.Context, rawKey string) (*APIKeyRecord, error) {
+// ValidateAndResolveAgent (B-107) -- see the interface doc comment for the
+// contract. LEFT JOIN, not INNER: a row with a valid, unrevoked, unexpired
+// key but no matching gateway_agents row (ga.id scans NULL) is a genuinely
+// different, real outcome from "no such key at all" (pgx.ErrNoRows on the
+// whole query) -- the same distinction the removed two-query version drew
+// between its key lookup succeeding and its separate agent lookup failing.
+func (v *pgAPIKeyValidator) ValidateAndResolveAgent(ctx context.Context, rawKey, agentName string) (*APIKeyRecord, *ResolvedAgent, error) {
 	if rawKey == "" {
-		return nil, ErrInvalidAPIKey
+		return nil, nil, ErrInvalidAPIKey
 	}
 	row := v.pool.QueryRow(ctx, `
-		SELECT id::text, org_id::text, COALESCE(agent_id::text, '')
-		FROM api_keys
-		WHERE key_hash = $1 AND revoked = FALSE AND (expires_at IS NULL OR expires_at > NOW())
+		SELECT ak.id::text, ak.org_id::text, COALESCE(ak.agent_id::text, ''),
+		       ga.id::text, ga.name, ga.status
+		FROM api_keys ak
+		LEFT JOIN gateway_agents ga ON ga.org_id = ak.org_id AND ga.name = $2
+		WHERE ak.key_hash = $1 AND ak.revoked = FALSE AND (ak.expires_at IS NULL OR ak.expires_at > NOW())
 		LIMIT 1
-	`, hashAPIKey(rawKey))
+	`, hashAPIKey(rawKey), agentName)
+
 	var rec APIKeyRecord
-	if err := row.Scan(&rec.ID, &rec.OrgID, &rec.AgentID); err != nil {
+	var agentID, agentNameCol, agentStatus *string
+	if err := row.Scan(&rec.ID, &rec.OrgID, &rec.AgentID, &agentID, &agentNameCol, &agentStatus); err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, ErrInvalidAPIKey
+			return nil, nil, ErrInvalidAPIKey
 		}
-		return nil, fmt.Errorf("identity: validate api key: %w", err)
+		return nil, nil, fmt.Errorf("identity: validate api key and resolve agent: %w", err)
 	}
-	return &rec, nil
+	if agentID == nil {
+		// Key is genuinely valid; agentName just doesn't exist in this
+		// key's org -- same "not found" case LookupByNameAndOrg's
+		// ErrAgentNotFound covered.
+		return &rec, nil, nil
+	}
+	return &rec, &ResolvedAgent{ID: *agentID, Name: *agentNameCol, Status: *agentStatus}, nil
 }

@@ -22,9 +22,13 @@ package api_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/eami/api/internal/store"
@@ -143,5 +147,91 @@ func TestReorderPolicies_RealDB_GenuineCollision_RollsBackCleanly(t *testing.T) 
 	if got[p1] != 1 || got[p2] != 2 || got[p3] != 3 {
 		t.Fatalf("failed reorder left partial state: p1=%d (want 1) p2=%d (want 2) p3=%d (want 3) -- the transaction did not roll back cleanly",
 			got[p1], got[p2], got[p3])
+	}
+}
+
+// ─── B-090: concurrent overlapping reorders ────────────────────────────────
+
+func isDeadlockError(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "40P01"
+}
+
+// TestReorderPolicies_RealDB_ConcurrentOverlappingReorders_NoCorruption is
+// the AC2 centerpiece: two goroutines call ReorderPolicies concurrently
+// against the SAME org with overlapping (here, fully reversed) id lists,
+// many iterations, proving the batched single-statement design (B-090)
+// never corrupts the priority ordering under real concurrency -- the bar
+// this test holds to, matching B-090's own severity note: "no corruption"
+// is required; an occasional real 40P01 deadlock is an accepted, safe,
+// retryable failure mode, not something this test demands never happens.
+func TestReorderPolicies_RealDB_ConcurrentOverlappingReorders_NoCorruption(t *testing.T) {
+	dsn := toolsUpdateTestDSN(t)
+	ctx := context.Background()
+
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		t.Skipf("skipping: could not reach test database: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	q := store.New(pool)
+	orgID := seedTestOrg(t, ctx, pool, "b090-concurrent-reorder-test")
+
+	const n = 5
+	ids := make([]uuid.UUID, n)
+	for i := 0; i < n; i++ {
+		ids[i] = seedTestPolicy(t, ctx, q, orgID, fmt.Sprintf("b090-concurrent-p%d", i), int32(i+1))
+	}
+	reversed := make([]uuid.UUID, n)
+	for i, id := range ids {
+		reversed[n-1-i] = id
+	}
+
+	const iterations = 20
+	for iter := 0; iter < iterations; iter++ {
+		var wg sync.WaitGroup
+		errs := make([]error, 2)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			errs[0] = q.ReorderPolicies(ctx, orgID, ids)
+		}()
+		go func() {
+			defer wg.Done()
+			errs[1] = q.ReorderPolicies(ctx, orgID, reversed)
+		}()
+		wg.Wait()
+
+		for i, err := range errs {
+			if err != nil && !isDeadlockError(err) {
+				t.Fatalf("iteration %d, request %d: unexpected error: %v", iter, i, err)
+			}
+		}
+
+		// The core proof: whichever request "won" (or both, serialized),
+		// the result is always a valid permutation of {1..n} across exactly
+		// these n ids -- never a duplicate priority, never a missing one,
+		// never a priority outside 1..n.
+		rows, err := q.ListPolicies(ctx, orgID, nil)
+		if err != nil {
+			t.Fatalf("iteration %d: ListPolicies: %v", iter, err)
+		}
+		seen := map[int32]bool{}
+		for _, row := range rows {
+			if seen[row.Policy.Priority] {
+				t.Fatalf("iteration %d: duplicate priority %d after concurrent reorder -- corruption", iter, row.Policy.Priority)
+			}
+			seen[row.Policy.Priority] = true
+			if row.Policy.Priority < 1 || row.Policy.Priority > n {
+				t.Fatalf("iteration %d: priority %d out of range 1..%d -- corruption", iter, row.Policy.Priority, n)
+			}
+		}
+		if len(seen) != n {
+			t.Fatalf("iteration %d: only %d distinct priorities, want %d -- corruption", iter, len(seen), n)
+		}
 	}
 }

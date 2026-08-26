@@ -67,4 +67,13 @@ ON CONFLICT (policy_id) DO UPDATE SET
 DELETE FROM policies WHERE id = $1 AND org_id = $2;
 
 -- name: ReorderPolicies :exec
-UPDATE policies SET priority = $2 WHERE id = $1 AND org_id = $3;
+-- B-090: one batched multi-row UPDATE via unnest() over two parallel arrays
+-- (ids, priorities) instead of N single-row UPDATEs -- see policies.sql.go's
+-- ReorderPolicies for why no explicit transaction is needed around this.
+-- Annotation kept as ReorderPolicies (not ReorderPoliciesBatched) so a
+-- future `sqlc generate` regenerates the same function name policies.go and
+-- the storeIface mock already call (code review caught the drift).
+UPDATE policies AS p
+SET priority = v.priority
+FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::int[]) AS priority) AS v
+WHERE p.id = v.id AND p.org_id = $3;

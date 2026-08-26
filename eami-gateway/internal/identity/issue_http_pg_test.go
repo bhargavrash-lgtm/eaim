@@ -1,9 +1,14 @@
 // issue_http_pg_test.go -- eami-gateway/internal/identity
 //
-// Integration tests for IssueHandler (B-098) against a REAL Postgres and a
-// real internal/registry.Registry, proving POST /v1/gateway/tokens is
-// actually gated by a real, scoped api_keys row -- following the same
-// pattern established by revoke_http_pg_test.go (B-042).
+// Integration tests for IssueHandler (B-098) against a REAL Postgres,
+// proving POST /v1/gateway/tokens is actually gated by a real, scoped
+// api_keys row -- following the same pattern established by
+// revoke_http_pg_test.go (B-042). Since B-107, IssueHandler resolves the
+// target agent via APIKeyValidator.ValidateAndResolveAgent's own combined
+// query rather than a separate internal/registry.Registry lookup -- these
+// tests exercise the real pgAPIKeyValidator directly, no registry import
+// needed here anymore (registry.Registry itself is untouched, still used
+// unmodified by revoke_http_pg_test.go).
 //
 // Run against the project's docker-compose Postgres:
 //
@@ -24,8 +29,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/eami/gateway/internal/registry"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func newIssueTestMux(h *IssueHandler) *http.ServeMux {
@@ -106,8 +110,7 @@ func newIssueHandlerForTest(t *testing.T, env *identityTestEnv) (*IssueHandler, 
 	if err != nil {
 		t.Fatalf("NewManagerWithDB: %v", err)
 	}
-	reg := registry.New(env.pool)
-	h := NewIssueHandler(m, reg, NewPostgresAPIKeyValidator(env.pool), NewPostgresTokenEventStore(env.pool))
+	h := NewIssueHandler(m, NewPostgresAPIKeyValidator(env.pool), NewPostgresTokenEventStore(env.pool))
 	return h, m
 }
 
@@ -128,6 +131,27 @@ func TestIssueHandler_MissingAPIKey_Returns401_NoTokenIssued(t *testing.T) {
 	var resp IssueResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err == nil && resp.Token != "" {
 		t.Fatal("a token was issued despite a missing API key")
+	}
+}
+
+// TestIssueHandler_OversizedBody_Returns400Bounded proves the MaxBytesReader
+// added during B-090/107 security review: an unauthenticated caller (no
+// X-API-Key at all, so this can't be mistaken for an authenticated attacker)
+// sending a body past the 8KiB cap gets a bounded 400, not an unbounded
+// buffer allocation followed by whatever json.Decode does with it.
+func TestIssueHandler_OversizedBody_Returns400Bounded(t *testing.T) {
+	env := newIdentityTestEnv(t)
+	h, _ := newIssueHandlerForTest(t, env)
+	mux := newIssueTestMux(h)
+
+	oversized := strings.Repeat("a", 9<<10) // 9KiB > the handler's 8KiB cap
+	body := `{"agent_id":"agent:identity-token-test-agent","scope":"` + oversized + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/gateway/tokens", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %q, want 400 (oversized body must be rejected before any DB work)", w.Code, w.Body.String())
 	}
 }
 
@@ -173,6 +197,122 @@ func TestIssueHandler_KeyScopedToDifferentAgent_Returns403(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, body = %q, want 403 (cross-agent scoping must be rejected)", w.Code, w.Body.String())
+	}
+}
+
+// TestIssueHandler_KeyScopedToSuspendedAgent_Returns403 (B-107 regression
+// guard): before this brief, "is the resolved agent suspended/revoked"
+// was AgentResolver.LookupByNameAndOrg's own checkStatus check, reused
+// automatically. ValidateAndResolveAgent's combined query doesn't call
+// checkStatus at all -- HandleIssue now replicates that check itself
+// (rec.Status == "suspended" || rec.Status == "revoked") -- this proves
+// that hand-replication is actually correct, not just assumed equivalent.
+func TestIssueHandler_KeyScopedToSuspendedAgent_Returns403(t *testing.T) {
+	env := newIdentityTestEnv(t)
+	h, _ := newIssueHandlerForTest(t, env)
+	mux := newIssueTestMux(h)
+
+	suspendedAgentID := uuid.New()
+	if _, err := env.pool.Exec(context.Background(), `
+		INSERT INTO gateway_agents (id, org_id, name, model, owner, scope, status)
+		VALUES ($1, $2, $3, $4, $5, $6, 'suspended')
+	`, suspendedAgentID, env.orgID, "issue-http-test-suspended-agent", "claude-sonnet-5", "test@example.com", "read:test"); err != nil {
+		t.Fatalf("insert suspended test agent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = env.pool.Exec(context.Background(), `DELETE FROM gateway_agents WHERE id = $1`, suspendedAgentID)
+	})
+
+	apiKey := issueTestAPIKeyReal(t, env, env.orgID, suspendedAgentID)
+
+	req := issueRequestJSON(t, apiKey, "agent:issue-http-test-suspended-agent")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, body = %q, want 403 (issuance to a suspended agent must be rejected)", w.Code, w.Body.String())
+	}
+}
+
+// TestIssueHandler_SameAgentNameDifferentOrgs_ResolvesOwnOrgOnly covers a
+// property the B-090/107 code review flagged as real but untested:
+// ValidateAndResolveAgent's combined query joins gateway_agents on
+// `ga.org_id = ak.org_id AND ga.name = $2`, so two different orgs each
+// having an agent with the identical name is an explicitly expected state
+// (gateway_agents.name is unique only per-org) that must not let a key from
+// one org resolve or issue a token bound to the other org's same-named
+// agent.
+func TestIssueHandler_SameAgentNameDifferentOrgs_ResolvesOwnOrgOnly(t *testing.T) {
+	env := newIdentityTestEnv(t)
+	h, m := newIssueHandlerForTest(t, env)
+	mux := newIssueTestMux(h)
+
+	const sharedName = "issue-http-test-shared-name-agent"
+
+	// env.orgID already has an agent named "identity-token-test-agent";
+	// give it a SECOND agent using the shared name so both orgs have a
+	// same-named row.
+	orgAAgentID := uuid.New()
+	if _, err := env.pool.Exec(context.Background(), `
+		INSERT INTO gateway_agents (id, org_id, name, model, owner, scope)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, orgAAgentID, env.orgID, sharedName, "claude-sonnet-5", "test@example.com", "read:test"); err != nil {
+		t.Fatalf("insert org A shared-name agent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = env.pool.Exec(context.Background(), `DELETE FROM gateway_agents WHERE id = $1`, orgAAgentID)
+	})
+
+	orgBID := uuid.New()
+	if _, err := env.pool.Exec(context.Background(), `INSERT INTO orgs (id, name, slug) VALUES ($1, $2, $3)`,
+		orgBID, "issue-http-test-org-b-"+orgBID.String()[:8], "issue-http-test-org-b-"+orgBID.String()); err != nil {
+		t.Fatalf("insert org B: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = env.pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgBID)
+	})
+	orgBAgentID := uuid.New()
+	if _, err := env.pool.Exec(context.Background(), `
+		INSERT INTO gateway_agents (id, org_id, name, model, owner, scope)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, orgBAgentID, orgBID, sharedName, "claude-sonnet-5", "test@example.com", "read:test"); err != nil {
+		t.Fatalf("insert org B shared-name agent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = env.pool.Exec(context.Background(), `DELETE FROM gateway_agents WHERE id = $1`, orgBAgentID)
+	})
+
+	// A key bound to org A's shared-name agent must resolve org A's row and
+	// succeed, never org B's same-named row.
+	apiKey := issueTestAPIKeyReal(t, env, env.orgID, orgAAgentID)
+	req := issueRequestJSON(t, apiKey, "agent:"+sharedName)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("org A key for shared-name agent: status = %d, body = %q, want 200", w.Code, w.Body.String())
+	}
+	var resp IssueResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	claims, err := m.Validate(resp.Token)
+	if err != nil {
+		t.Fatalf("issued token failed to validate: %v", err)
+	}
+	if claims.Subject != "agent:"+sharedName {
+		t.Errorf("Subject = %q, want %q", claims.Subject, "agent:"+sharedName)
+	}
+
+	// A key bound to org A's OTHER agent (not the shared-name one) must not
+	// be able to claim org B's shared-name agent even though the name
+	// matches -- the join is scoped by org, and the caller's key is bound to
+	// a specific agent ID, not merely an org.
+	crossKey := issueTestAPIKeyReal(t, env, env.orgID, env.agentID)
+	crossReq := issueRequestJSON(t, crossKey, "agent:"+sharedName)
+	crossW := httptest.NewRecorder()
+	mux.ServeHTTP(crossW, crossReq)
+	if crossW.Code != http.StatusForbidden {
+		t.Fatalf("org A key not scoped to the shared-name agent: status = %d, body = %q, want 403", crossW.Code, crossW.Body.String())
 	}
 }
 
@@ -228,6 +368,30 @@ func TestIssueHandler_RevokedAPIKey_Returns401(t *testing.T) {
 
 // ─── AC5: issuance is recorded in ai_token_events, live ───────────────────
 
+// waitForTokenEvent polls ai_token_events for jti's row -- B-107 made
+// RecordIssued fire-and-forget (mirroring main.go's established
+// safeWriteTokenUsage/B-099 pattern), so the row is no longer guaranteed to
+// exist the instant HandleIssue's HTTP response returns. A short poll,
+// not an immediate single query, is the correct way to observe an
+// intentionally-async write -- same reasoning as testenv_test.go's
+// waitForPendingApproval in the workflow package.
+func waitForTokenEvent(t *testing.T, pool *pgxpool.Pool, jti string, timeout time.Duration) (eventType, agentName string, agentID uuid.UUID) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		lastErr = pool.QueryRow(context.Background(),
+			`SELECT event_type, agent_id, agent_name FROM ai_token_events WHERE jti = $1`, jti).
+			Scan(&eventType, &agentID, &agentName)
+		if lastErr == nil {
+			return eventType, agentName, agentID
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("expected an ai_token_events row for jti %q within %s, last error: %v", jti, timeout, lastErr)
+	return "", "", uuid.Nil
+}
+
 func TestIssueHandler_SuccessfulIssue_RecordsAITokenEvent(t *testing.T) {
 	env := newIdentityTestEnv(t)
 	h, _ := newIssueHandlerForTest(t, env)
@@ -249,14 +413,7 @@ func TestIssueHandler_SuccessfulIssue_RecordsAITokenEvent(t *testing.T) {
 		t.Fatal("expected a non-empty JTI in the response")
 	}
 
-	var eventType, agentName string
-	var gotAgentID uuid.UUID
-	err := env.pool.QueryRow(context.Background(),
-		`SELECT event_type, agent_id, agent_name FROM ai_token_events WHERE jti = $1`, resp.JTI).
-		Scan(&eventType, &gotAgentID, &agentName)
-	if err != nil {
-		t.Fatalf("expected an ai_token_events row for jti %q, got error: %v", resp.JTI, err)
-	}
+	eventType, agentName, gotAgentID := waitForTokenEvent(t, env.pool, resp.JTI, 2*time.Second)
 	if eventType != "issued" {
 		t.Errorf("event_type = %q, want %q", eventType, "issued")
 	}
