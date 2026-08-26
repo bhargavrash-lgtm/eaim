@@ -1,6 +1,7 @@
 // AgentsPage.tsx — Gateway / Agents with inline Config panel
 // Owned by FE-Gateway
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -307,6 +308,10 @@ function AddAgentPanel({ onClose }: { onClose: () => void }) {
 
 export function AgentsPage() {
   const { data, isLoading, error } = useAgents()
+  // Deep-linking/highlighting by ID (B-092): ?highlight=<agent id> lands
+  // on and highlights that row via DataTable's getRowId/highlightRowId.
+  const [searchParams] = useSearchParams()
+  const highlightId = searchParams.get('highlight')
   const [configAgent, setConfigAgent] = useState<Agent | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null)
@@ -408,7 +413,14 @@ export function AgentsPage() {
       {agents.length === 0 ? (
         <p className="text-sm text-gray-400">No agents registered yet.</p>
       ) : (
-        <DataTable columns={agentColumns} data={agents} onRowClick={setConfigAgent} pageSize={1000} />
+        <DataTable
+          columns={agentColumns}
+          data={agents}
+          onRowClick={setConfigAgent}
+          pageSize={1000}
+          getRowId={(agent) => agent.id}
+          highlightRowId={highlightId}
+        />
       )}
 
       {/* Config slide-out panel */}

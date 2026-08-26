@@ -66,6 +66,18 @@ func readDataHandling(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) *string {
 	return v
 }
 
+func readWorkflowLinkage(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) (*uuid.UUID, *int32) {
+	t.Helper()
+	var runID *uuid.UUID
+	var stepIdx *int32
+	if err := pool.QueryRow(context.Background(),
+		`SELECT workflow_run_id, step_index FROM audit_log WHERE id = $1`, id,
+	).Scan(&runID, &stepIdx); err != nil {
+		t.Fatalf("read back audit_log row %s: %v", id, err)
+	}
+	return runID, stepIdx
+}
+
 func deleteAuditRow(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) {
 	t.Helper()
 	// audit_log has RLS enforcing INSERT-only for the app role in
@@ -176,6 +188,159 @@ func TestWriter_RealDB_DataHandling_EmptyMeansNull(t *testing.T) {
 	got := readDataHandling(t, pool, entryID)
 	if got != nil {
 		t.Errorf("data_handling_designation for a non-ai_provider dispatch = %q, want real SQL NULL", *got)
+	}
+}
+
+// ─── B-093: workflow_run_id/step_index linkage ─────────────────────────────
+
+// TestWriter_RealDB_WorkflowLinkage_PersistsCorrectly proves the core B-093
+// write path: a real workflow-originated entry (WorkflowRunID/StepIndex set,
+// mirroring what workflow/executor.go's runStep populates on the shared
+// mcp.ActionContext) round-trips correctly, and a standalone entry
+// (both left at their Go zero value) stores real SQL NULL for both columns
+// -- distinguishing "not part of a workflow" from "step 0", which a bare
+// `0` for StepIndex could not.
+func TestWriter_RealDB_WorkflowLinkage_PersistsCorrectly(t *testing.T) {
+	pool := newAuditTestPool(t)
+	ctx := context.Background()
+
+	orgID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, $2, $3)`,
+		orgID, "audit-wf-test-"+orgID.String()[:8], "audit-wf-test-"+orgID.String()); err != nil {
+		t.Fatalf("insert test org: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID) })
+
+	w, err := audit.NewWriter(ctx, pool)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+
+	// Workflow-originated entry: a real run id + step 0 (the first step --
+	// deliberately 0, not a later step, to prove a real "step zero" value
+	// survives and isn't confused with "absent").
+	runID := uuid.New()
+	var stepZero int32 = 0
+	wfEntryID := uuid.New()
+	if err := w.Write(ctx, audit.Entry{
+		ID: wfEntryID, OrgID: orgID, AgentName: "wf-agent", ToolName: "claude",
+		Action: "messages", Decision: "allowed",
+		WorkflowRunID: runID, StepIndex: &stepZero,
+		Timestamp: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("Write (workflow entry): %v", err)
+	}
+	t.Cleanup(func() { deleteAuditRow(t, pool, wfEntryID) })
+
+	gotRunID, gotStep := readWorkflowLinkage(t, pool, wfEntryID)
+	if gotRunID == nil || *gotRunID != runID {
+		t.Errorf("workflow entry workflow_run_id = %v, want %s", gotRunID, runID)
+	}
+	if gotStep == nil || *gotStep != 0 {
+		t.Errorf("workflow entry step_index = %v, want 0 (not NULL -- step zero must survive)", gotStep)
+	}
+
+	// Standalone entry: WorkflowRunID/StepIndex both left at their Go zero
+	// value (uuid.Nil / nil), exactly what a non-workflow dispatch produces.
+	standaloneID := uuid.New()
+	if err := w.Write(ctx, audit.Entry{
+		ID: standaloneID, OrgID: orgID, AgentName: "standalone-agent", ToolName: "claude",
+		Action: "messages", Decision: "allowed",
+		Timestamp: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("Write (standalone entry): %v", err)
+	}
+	t.Cleanup(func() { deleteAuditRow(t, pool, standaloneID) })
+
+	gotRunID2, gotStep2 := readWorkflowLinkage(t, pool, standaloneID)
+	if gotRunID2 != nil {
+		t.Errorf("standalone entry workflow_run_id = %v, want real SQL NULL", *gotRunID2)
+	}
+	if gotStep2 != nil {
+		t.Errorf("standalone entry step_index = %v, want real SQL NULL", *gotStep2)
+	}
+}
+
+// TestWriter_RealDB_HashChainRemainsValid_WithWorkflowLinkage proves AC4: a
+// real sequence of Write() calls -- mixing workflow-originated and
+// standalone entries -- produces a hash chain that independently
+// recomputes correctly end to end, using the exact formula writer.go
+// documents (which explicitly excludes WorkflowRunID/StepIndex along with
+// every other non-chain column). Same standard as B-078's own
+// TestWriter_RealDB_HashChainRemainsValid_WithDataHandling immediately
+// below -- empirical proof the new columns don't perturb tamper-evidence,
+// not just "the diff doesn't touch that code."
+func TestWriter_RealDB_HashChainRemainsValid_WithWorkflowLinkage(t *testing.T) {
+	pool := newAuditTestPool(t)
+	ctx := context.Background()
+
+	orgID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, $2, $3)`,
+		orgID, "audit-wf-hashchain-"+orgID.String()[:8], "audit-wf-hashchain-"+orgID.String()); err != nil {
+		t.Fatalf("insert test org: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID) })
+
+	var startPrevHash string
+	if err := pool.QueryRow(ctx, `SELECT hash FROM audit_log ORDER BY timestamp DESC LIMIT 1`).Scan(&startPrevHash); err != nil {
+		genesis := sha256.Sum256([]byte("eami-genesis-2026"))
+		startPrevHash = hex.EncodeToString(genesis[:])
+	}
+
+	w, err := audit.NewWriter(ctx, pool)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+
+	runID := uuid.New()
+	var step0, step1 int32 = 0, 1
+	type written struct {
+		id            uuid.UUID
+		workflowRunID uuid.UUID
+		stepIndex     *int32
+	}
+	entries := []written{
+		{id: uuid.New()}, // standalone
+		{id: uuid.New(), workflowRunID: runID, stepIndex: &step0},
+		{id: uuid.New(), workflowRunID: runID, stepIndex: &step1},
+		{id: uuid.New()}, // standalone again
+	}
+	for _, e := range entries {
+		ts := time.Now().UTC()
+		if err := w.Write(ctx, audit.Entry{
+			ID: e.id, OrgID: orgID, AgentName: "test-agent", ToolName: "claude",
+			Action: "messages", Decision: "allowed",
+			WorkflowRunID: e.workflowRunID, StepIndex: e.stepIndex,
+			Timestamp: ts,
+		}); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+		t.Cleanup(func(id uuid.UUID) func() { return func() { deleteAuditRow(t, pool, id) } }(e.id))
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	prevHash := startPrevHash
+	for _, e := range entries {
+		var orgIDStr, agentName, toolName, action, decision, hash, storedPrevHash string
+		var ts time.Time
+		if err := pool.QueryRow(ctx,
+			`SELECT org_id::text, agent_name, tool_name, action, decision, timestamp, prev_hash, hash
+			 FROM audit_log WHERE id = $1`, e.id,
+		).Scan(&orgIDStr, &agentName, &toolName, &action, &decision, &ts, &storedPrevHash, &hash); err != nil {
+			t.Fatalf("read back row %s: %v", e.id, err)
+		}
+
+		if storedPrevHash != prevHash {
+			t.Fatalf("row %s: stored prev_hash = %q, want %q (chain broken)", e.id, storedPrevHash, prevHash)
+		}
+
+		content := prevHash + e.id.String() + orgIDStr + agentName + toolName + action + decision + ts.UTC().Format(time.RFC3339)
+		want := sha256.Sum256([]byte(content))
+		wantHash := hex.EncodeToString(want[:])
+		if hash != wantHash {
+			t.Errorf("row %s (workflow_run_id=%s): stored hash = %q, independently recomputed = %q -- chain invalid", e.id, e.workflowRunID, hash, wantHash)
+		}
+		prevHash = hash
 	}
 }
 

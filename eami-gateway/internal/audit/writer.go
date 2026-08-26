@@ -67,6 +67,16 @@ type Entry struct {
 	// nothing while making every historical hash-verification script that
 	// already exists (or will be written) need to know about it.
 	DataHandling string
+	// WorkflowRunID/StepIndex (B-093) identify which multi-hop workflow
+	// run/step this dispatch was part of -- uuid.Nil/nil mean a standalone
+	// call, encoded as SQL NULL (same convention as AgentID above).
+	// Deliberately NOT part of the hash content below, same B-078
+	// DataHandling precedent: a visibility-only field, not a governance
+	// decision, so including it would gain nothing while making every
+	// existing hash-verification script (this codebase's and any
+	// operator's own) need to learn about it.
+	WorkflowRunID uuid.UUID
+	StepIndex     *int32
 	// Set by Writer.Write before calling InsertEntry:
 	PrevHash string
 	Hash     string
@@ -132,10 +142,11 @@ func (w *Writer) Write(ctx context.Context, e Entry) error {
 	// Hash formula (must match verify-audit-log.sh):
 	//   SHA-256(prevHash || id || orgID || agentName || toolName || action || decision || timestamp)
 	// Deliberately excludes Parameters, PolicyID, ApprovalID, ApprovedBy,
-	// LatencyMS, TokenIn/Out, and DataHandling (B-078) -- these are
-	// stored columns, not part of the tamper-evidence chain, matching the
-	// scope this formula has always had (confirmed directly against this
-	// code before B-078 added DataHandling, not assumed).
+	// LatencyMS, TokenIn/Out, DataHandling (B-078), and WorkflowRunID/
+	// StepIndex (B-093) -- these are stored columns, not part of the
+	// tamper-evidence chain, matching the scope this formula has always
+	// had (confirmed directly against this code before each of B-078 and
+	// B-093 added their column, not assumed).
 	content := w.lastHash +
 		e.ID.String() +
 		e.OrgID.String() +
@@ -205,20 +216,30 @@ func (d *pgxpoolDB) InsertEntry(ctx context.Context, e Entry) error {
 	if e.DataHandling != "" {
 		dataHandling = &e.DataHandling
 	}
+	// workflow_run_id/step_index (B-093) -- NULL for a standalone dispatch,
+	// same nil-pointer-means-NULL convention as agentID/policyID/approvalID
+	// above.
+	var workflowRunID *uuid.UUID
+	if e.WorkflowRunID != uuid.Nil {
+		workflowRunID = &e.WorkflowRunID
+	}
 
 	_, dbErr := d.pool.Exec(ctx, `
 		INSERT INTO audit_log (
 			id, org_id, agent_id, agent_name, tool_name, action,
 			parameters, decision, policy_id, approval_id, approved_by,
 			latency_ms, token_in, token_out,
-			timestamp, prev_hash, hash, data_handling_designation
+			timestamp, prev_hash, hash, data_handling_designation,
+			workflow_run_id, step_index
 		) VALUES (
-			$1,$2,$3,$4,$5,$6, $7,$8,$9,$10,$11, $12,$13,$14, $15,$16,$17, $18
+			$1,$2,$3,$4,$5,$6, $7,$8,$9,$10,$11, $12,$13,$14, $15,$16,$17, $18,
+			$19, $20
 		)`,
 		e.ID, e.OrgID, agentID, e.AgentName, e.ToolName, e.Action,
 		params, e.Decision, policyID, approvalID, e.ApprovedBy,
 		e.LatencyMS, e.TokenIn, e.TokenOut,
 		e.Timestamp, e.PrevHash, e.Hash, dataHandling,
+		workflowRunID, e.StepIndex,
 	)
 	return dbErr
 }

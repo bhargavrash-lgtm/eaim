@@ -1,6 +1,7 @@
 // PoliciesPage.tsx -- Gateway / Policies CRUD
 // Owned by FE-Gateway
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Plus, ChevronUp, ChevronDown, Pencil, Trash2 } from 'lucide-react'
 import {
   PageHeader,
@@ -294,6 +295,10 @@ export function PoliciesPage() {
   const { data, isLoading, error } = usePolicies()
   const deletePolicy = useDeletePolicy()
   const reorder = useReorderPolicies()
+  // Deep-linking/highlighting by ID (B-092): ?highlight=<policy id> lands
+  // on and highlights that row via DataTable's getRowId/highlightRowId.
+  const [searchParams] = useSearchParams()
+  const highlightId = searchParams.get('highlight')
 
   const [panel, setPanel] = useState<{ mode: PanelMode; policy?: Policy } | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Policy | null>(null)
@@ -431,6 +436,8 @@ export function PoliciesPage() {
             data={policies}
             onRowClick={(policy) => setPanel({ mode: 'edit', policy })}
             pageSize={1000}
+            getRowId={(policy) => policy.id}
+            highlightRowId={highlightId}
           />
         )}
       </div>

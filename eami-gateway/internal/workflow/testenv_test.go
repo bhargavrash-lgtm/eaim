@@ -223,10 +223,17 @@ func newDispatchEnv(t *testing.T, e *workflowTestEnv, adapters map[string]aiprov
 
 		orgUUID, _ := uuid.Parse(ac.OrgID)
 		agentUUID, _ := uuid.Parse(ac.AgentUUID)
+		// B-093: mirrors dispatcher.go's identical WorkflowRunID/StepIndex
+		// wiring -- this closure is an independent reconstruction of
+		// dispatch()'s real shape (see file header), so it needs the same
+		// fix applied here too, not just in cmd/gateway/dispatcher.go.
+		workflowRunUUID, _ := uuid.Parse(ac.WorkflowRunID)
 		auditEntry := audit.Entry{
 			OrgID: orgUUID, AgentID: agentUUID, AgentName: ac.AgentName,
 			ToolName: ac.Tool, Action: ac.Action, Parameters: ac.Parameters,
-			Timestamp: ac.ReceivedAt,
+			Timestamp:     ac.ReceivedAt,
+			WorkflowRunID: workflowRunUUID,
+			StepIndex:     ac.StepIndex,
 		}
 		if decision.PolicyID != nil {
 			auditEntry.PolicyID = *decision.PolicyID

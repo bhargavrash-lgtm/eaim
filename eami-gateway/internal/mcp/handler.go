@@ -51,6 +51,15 @@ type ActionContext struct {
 	Environment string // "production" | "staging" | "development" | "unknown"
 	SessionID   string
 
+	// WorkflowRunID/StepIndex (B-093) are set only by workflow/executor.go's
+	// runStep, for its own per-step call into the SAME dispatch() every
+	// standalone MCP tool_call also uses -- empty/nil here for a standalone
+	// call. Threaded through to audit_log so a governed call's workflow
+	// context is recorded, not just implicit in workflow_run_steps (which
+	// has no FK to/from audit_log at all).
+	WorkflowRunID string
+	StepIndex     *int32
+
 	ReceivedAt time.Time
 }
 

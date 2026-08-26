@@ -261,16 +261,23 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 
 	orgID, _ := uuid.Parse(ac.OrgID)
 	agentID, _ := uuid.Parse(ac.AgentUUID)
+	// WorkflowRunID (B-093): parses to uuid.Nil (audit.Entry's own "not a
+	// workflow call" sentinel) for a standalone dispatch, where
+	// ac.WorkflowRunID is always "" -- workflow/executor.go's runStep is
+	// the only caller that ever sets it.
+	workflowRunID, _ := uuid.Parse(ac.WorkflowRunID)
 	auditEntry := audit.Entry{
-		OrgID:      orgID,
-		AgentID:    agentID,
-		AgentName:  ac.AgentName,
-		ToolName:   ac.Tool,
-		Action:     ac.Action,
-		Parameters: ac.Parameters,
-		LatencyMS:  latencyMS,
-		PolicyID:   policyID,
-		Timestamp:  ac.ReceivedAt,
+		OrgID:         orgID,
+		AgentID:       agentID,
+		AgentName:     ac.AgentName,
+		ToolName:      ac.Tool,
+		Action:        ac.Action,
+		Parameters:    ac.Parameters,
+		LatencyMS:     latencyMS,
+		PolicyID:      policyID,
+		Timestamp:     ac.ReceivedAt,
+		WorkflowRunID: workflowRunID,
+		StepIndex:     ac.StepIndex,
 	}
 	// AI Provider Connector: per-connector audit logging mode
 	// (schema/migrations-v2/000004). Applied once, here, so it covers

@@ -185,6 +185,12 @@ func (e *Executor) runStep(ctx context.Context, template mcp.ActionContext, orgI
 	stepAC.Action = step.Action
 	stepAC.Parameters = resolvedParams
 	stepAC.ReceivedAt = time.Now().UTC()
+	// B-093: identifies this dispatch as part of a workflow run to
+	// dispatch()'s own audit_log write -- a standalone MCP tool_call never
+	// sets these (mcp.ActionContext's zero value), so audit_log rows from
+	// that path stay NULL, unaffected.
+	stepAC.WorkflowRunID = runID.String()
+	stepAC.StepIndex = &step.StepOrder
 
 	// The real, enforced dispatch -- completely unmodified. If this
 	// step's policy escalates, this call blocks inside Submit()+Hold()

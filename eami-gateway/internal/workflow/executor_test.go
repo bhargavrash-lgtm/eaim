@@ -358,7 +358,7 @@ func TestExecutor_Run_TOCTOU_EscalatingMidHold_ConfigChanged_FailsClosed(t *test
 	adapterOriginal := &fakeAdapter{name: "provider-original"}
 	adapterAttacker := &fakeAdapter{name: "provider-attacker"}
 	de := newDispatchEnv(t, env, map[string]aiprovider.Adapter{
-		"provider-a": &fakeAdapter{name: "provider-a"},
+		"provider-a":        &fakeAdapter{name: "provider-a"},
 		"provider-original": adapterOriginal, "provider-attacker": adapterAttacker,
 	})
 	wfID := seedWorkflow(t, env, "toctou-esc-workflow", []struct {
@@ -475,6 +475,140 @@ func TestExecutor_Run_WorkflowRunStepsRecordsAccurateAuditTrail(t *testing.T) {
 	var got map[string]any
 	if err := json.Unmarshal(resultRaw, &got); err != nil || got["ok"] != true {
 		t.Errorf("result = %s, want a real {\"ok\":true,...} adapter response", resultRaw)
+	}
+}
+
+// ─── B-093: audit_log records which workflow run/step a dispatch came from ─
+
+// allowAllRulesRealPolicyID is allowAllRules() with a real-UUID-shaped rule
+// ID. Needed specifically here, not a pre-existing helper: audit_log.policy_id
+// is a real `uuid` column, and testenv_test.go's dispatch closure snapshots
+// decision.PolicyID (the matched rule's own ID) straight into the audit
+// write -- allowAllRules()'s literal "allow-all" string isn't a valid UUID,
+// so any test that (unlike every pre-existing one) actually reads back the
+// resulting audit_log row hits a real INSERT failure the existing tests
+// never noticed, since they never check audit_log content and the write
+// error is discarded (`_ = auditWriter.Write(...)`, matching main.go's own
+// fire-and-forget-from-dispatch's-perspective convention). A real loaded
+// policy's ID from the `policies` table is always a genuine UUID in
+// production, so this is a test-fixture-only gap, not fixed in the shared
+// helper to avoid touching every other test that already passes with it.
+func allowAllRulesRealPolicyID() []policy.Rule {
+	return []policy.Rule{
+		{ID: uuid.NewString(), Name: "allow-all", Priority: 100, Action: policy.ActionAllow},
+	}
+}
+
+// TestExecutor_Run_AuditLogRecordsWorkflowRunIDAndStepIndex is the AC3
+// centerpiece: a real 2-step workflow run's TWO real dispatches (through
+// the reconstructed real dispatch pipeline -- testenv_test.go's own header
+// explains why it's a reconstruction, not a mock) each produce a real
+// audit_log row correctly tagged with this run's id and that step's own
+// index -- proving the mcp.ActionContext plumbing (executor.go's runStep
+// -> dispatch()'s auditEntry construction) actually reaches the stored
+// column, not just that Writer.Write can accept the field in isolation
+// (writer_pg_test.go's own tests already cover that half).
+func TestExecutor_Run_AuditLogRecordsWorkflowRunIDAndStepIndex(t *testing.T) {
+	env := newWorkflowTestEnv(t)
+	env.rules = allowAllRulesRealPolicyID()
+	toolA := env.insertAIProviderTool(t, "b093-tool-a", "b093-provider-a")
+	toolB := env.insertAIProviderTool(t, "b093-tool-b", "b093-provider-b")
+	de := newDispatchEnv(t, env, map[string]aiprovider.Adapter{
+		"b093-provider-a": &fakeAdapter{name: "b093-provider-a"},
+		"b093-provider-b": &fakeAdapter{name: "b093-provider-b"},
+	})
+	wfID := seedWorkflow(t, env, "b093-workflow", []struct {
+		toolID uuid.UUID
+		action string
+		params map[string]any
+	}{
+		{toolA, "query", map[string]any{"x": float64(1)}},
+		{toolB, "notify", map[string]any{"y": float64(2)}},
+	})
+
+	result, err := de.exec.Run(context.Background(), env.template(), wfID)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("Status = %q, want completed", result.Status)
+	}
+
+	rows, err := env.pool.Query(context.Background(), `
+		SELECT tool_name, step_index FROM audit_log
+		WHERE workflow_run_id = $1 ORDER BY step_index ASC
+	`, result.RunID)
+	if err != nil {
+		t.Fatalf("query audit_log by workflow_run_id: %v", err)
+	}
+	defer rows.Close()
+
+	type got struct {
+		toolName  string
+		stepIndex *int32
+	}
+	var gotRows []got
+	for rows.Next() {
+		var g got
+		if err := rows.Scan(&g.toolName, &g.stepIndex); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		gotRows = append(gotRows, g)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+
+	if len(gotRows) != 2 {
+		t.Fatalf("audit_log rows with workflow_run_id=%s: got %d, want 2 (one per real step dispatch)", result.RunID, len(gotRows))
+	}
+	if gotRows[0].toolName != "b093-tool-a" || gotRows[0].stepIndex == nil || *gotRows[0].stepIndex != 0 {
+		t.Errorf("step 0 row = tool_name:%q step_index:%v, want b093-tool-a/0", gotRows[0].toolName, gotRows[0].stepIndex)
+	}
+	if gotRows[1].toolName != "b093-tool-b" || gotRows[1].stepIndex == nil || *gotRows[1].stepIndex != 1 {
+		t.Errorf("step 1 row = tool_name:%q step_index:%v, want b093-tool-b/1", gotRows[1].toolName, gotRows[1].stepIndex)
+	}
+}
+
+// TestExecutor_Run_StandaloneDispatch_AuditLogWorkflowLinkageIsNull proves
+// the other half of AC3: a dispatch NOT made through the workflow executor
+// (calling de.dispatch directly, the same call shape a standalone MCP
+// tool_call uses) leaves audit_log's workflow_run_id/step_index genuinely
+// NULL -- unaffected by this brief's plumbing, not a stray zero value.
+func TestExecutor_Run_StandaloneDispatch_AuditLogWorkflowLinkageIsNull(t *testing.T) {
+	env := newWorkflowTestEnv(t)
+	env.rules = allowAllRulesRealPolicyID()
+	env.insertAIProviderTool(t, "b093-standalone-tool", "b093-standalone-provider")
+	de := newDispatchEnv(t, env, map[string]aiprovider.Adapter{
+		"b093-standalone-provider": &fakeAdapter{name: "b093-standalone-provider"},
+	})
+
+	ac := env.template()
+	ac.Tool = "b093-standalone-tool"
+	ac.Action = "query"
+	ac.Parameters = map[string]any{"z": float64(3)}
+	ac.ReceivedAt = time.Now().UTC()
+	// Deliberately NOT setting WorkflowRunID/StepIndex -- this is the exact
+	// zero-value ActionContext shape a real standalone MCP tool_call has.
+
+	if _, err := de.dispatch(context.Background(), ac); err != nil {
+		t.Fatalf("standalone dispatch: %v", err)
+	}
+
+	var runID *uuid.UUID
+	var stepIdx *int32
+	if err := env.pool.QueryRow(context.Background(), `
+		SELECT workflow_run_id, step_index FROM audit_log
+		WHERE org_id = $1 AND tool_name = 'b093-standalone-tool'
+		ORDER BY timestamp DESC LIMIT 1
+	`, env.orgID).Scan(&runID, &stepIdx); err != nil {
+		t.Fatalf("read audit_log row: %v", err)
+	}
+	if runID != nil {
+		t.Errorf("standalone dispatch audit_log.workflow_run_id = %v, want real SQL NULL", *runID)
+	}
+	if stepIdx != nil {
+		t.Errorf("standalone dispatch audit_log.step_index = %v, want real SQL NULL", *stepIdx)
 	}
 }
 

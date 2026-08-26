@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { CheckCircle } from 'lucide-react'
 import {
   PageHeader,
@@ -208,8 +209,21 @@ const ALL_COLUMNS = [
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ApprovalsPage() {
-  const [tab, setTab] = useState<Tab>('pending')
+  // Deep-linking/highlighting by ID (B-092). ApprovalsPage is genuinely
+  // different from Agents/Policies: the default "pending" tab isn't a
+  // DataTable at all (a card list), and a highlighted approval could be
+  // decided/expired -- not pending -- so a deep link forces the "all" tab.
+  // "all" is server-paginated (25/page) unlike Agents/Policies' fully
+  // client-loaded pageSize={1000} -- rather than adding a
+  // find-which-server-page-has-this-id round trip, a deep link fetches
+  // with a large per_page (same "make pagination a non-issue" convention
+  // Agents/Policies already use), so the target row is reliably present
+  // in the one fetch.
+  const [searchParams] = useSearchParams()
+  const highlightId = searchParams.get('highlight')
+  const [tab, setTab] = useState<Tab>(highlightId ? 'all' : 'pending')
   const [allPage, setAllPage] = useState(1)
+  const perPage = highlightId ? 1000 : 25
 
   const [confirmState, setConfirmState] = useState<{
     approval: ApprovalRequest
@@ -220,7 +234,7 @@ export default function ApprovalsPage() {
   const [decideError, setDecideError] = useState<string | null>(null)
 
   const pendingQuery = useApprovals({ status: 'pending' })
-  const allQuery = useApprovals({ page: allPage, per_page: 25 })
+  const allQuery = useApprovals({ page: allPage, per_page: perPage })
 
   const decideApproval = useDecideApproval()
 
@@ -230,10 +244,10 @@ export default function ApprovalsPage() {
   // Server-paginated (useApprovals sends page/per_page) -- DataTable's own
   // Previous/Next only works for client-side pagination over a fully-loaded
   // array (it derives totalPages from data.length), so it never shows a
-  // pager here: allData is already capped at 25 rows before DataTable ever
-  // sees it. Driven by the server-reported grand total instead.
+  // pager here: allData is already capped at perPage rows before DataTable
+  // ever sees it. Driven by the server-reported grand total instead.
   const allTotal = allQuery.data?.meta?.total ?? 0
-  const allTotalPages = Math.max(1, Math.ceil(allTotal / 25))
+  const allTotalPages = Math.max(1, Math.ceil(allTotal / perPage))
 
 
   function handleDecide(approval: ApprovalRequest, decision: 'approved' | 'denied') {
@@ -347,7 +361,9 @@ export default function ApprovalsPage() {
                 columns={ALL_COLUMNS}
                 data={allData}
                 loading={allQuery.isFetching}
-                pageSize={25}
+                pageSize={perPage}
+                getRowId={(row) => row.id}
+                highlightRowId={highlightId}
               />
               {allTotalPages > 1 && (
                 <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-4 py-3 rounded-b-lg -mt-px">
