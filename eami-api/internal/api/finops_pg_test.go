@@ -428,3 +428,229 @@ func TestFinOpsSummary_Real_AvgCostPerOutcome(t *testing.T) {
 		t.Errorf("AvgCostPerOutcome = %v, want 1.00 (3.00 total / 3 rows)", summary.AvgCostPerOutcome)
 	}
 }
+
+// ─── B-111: caching cost-accounting ─────────────────────────────────────────
+
+// setModelPricing upserts a model_pricing row with all 5 tiers' rates and
+// registers cleanup -- model_pricing is a shared, non-org-scoped table, so
+// every test that touches it must remove exactly the row it added (never a
+// broader DELETE that could affect another concurrently-running test or a
+// real seeded model).
+func (e *finOpsPgTestEnv) setModelPricing(t *testing.T, model string, costIn, costOut, cacheWrite5m, cacheWrite1h, cacheRead float64) {
+	t.Helper()
+	if _, err := e.pool.Exec(context.Background(), `
+INSERT INTO model_pricing (model, cost_per_1k_in, cost_per_1k_out, cost_per_1k_cache_write_5m, cost_per_1k_cache_write_1h, cost_per_1k_cache_read)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (model) DO UPDATE SET
+  cost_per_1k_in = EXCLUDED.cost_per_1k_in,
+  cost_per_1k_out = EXCLUDED.cost_per_1k_out,
+  cost_per_1k_cache_write_5m = EXCLUDED.cost_per_1k_cache_write_5m,
+  cost_per_1k_cache_write_1h = EXCLUDED.cost_per_1k_cache_write_1h,
+  cost_per_1k_cache_read = EXCLUDED.cost_per_1k_cache_read`,
+		model, costIn, costOut, cacheWrite5m, cacheWrite1h, cacheRead,
+	); err != nil {
+		t.Fatalf("upsert model_pricing row for %q: %v", model, err)
+	}
+	t.Cleanup(func() {
+		_, _ = e.pool.Exec(context.Background(), `DELETE FROM model_pricing WHERE model = $1`, model)
+	})
+}
+
+// updateCacheRates changes only the two cache-write rates on an
+// already-seeded model_pricing row -- used by the AC4 rate-change-then-
+// requery test, deliberately not going through setModelPricing (which would
+// re-register a duplicate, harmless-but-redundant cleanup).
+func (e *finOpsPgTestEnv) updateCacheRates(t *testing.T, model string, cacheWrite5m, cacheWrite1h float64) {
+	t.Helper()
+	if _, err := e.pool.Exec(context.Background(),
+		`UPDATE model_pricing SET cost_per_1k_cache_write_5m = $2, cost_per_1k_cache_write_1h = $3 WHERE model = $1`,
+		model, cacheWrite5m, cacheWrite1h,
+	); err != nil {
+		t.Fatalf("update cache rates for %q: %v", model, err)
+	}
+}
+
+// insertUsageWithCache is insertUsage plus the 3 raw cache-token counts
+// (B-111). costUSD here represents ONLY the base in/out cost, matching what
+// the real write-time IngestTokenUsage actually stores (it never computes
+// cache cost) -- cache cost is added independently, at query time, by
+// finops.go's own SQL, which is exactly the mechanism these tests verify.
+func (e *finOpsPgTestEnv) insertUsageWithCache(t *testing.T, agentID uuid.UUID, agentName, model string, tokensIn, tokensOut, cache5m, cache1h, cacheRead int32, costUSD float64, recordedAt time.Time) {
+	t.Helper()
+	if err := e.queries.InsertTokenUsage(context.Background(), store.InsertTokenUsageParams{
+		OrgID:                 e.orgID,
+		AgentID:               agentID,
+		AgentName:             agentName,
+		Model:                 model,
+		TokensIn:              tokensIn,
+		TokensOut:             tokensOut,
+		CostUSD:               costUSD,
+		CacheCreation5mTokens: cache5m,
+		CacheCreation1hTokens: cache1h,
+		CacheReadTokens:       cacheRead,
+		RecordedAt:            recordedAt,
+	}); err != nil {
+		t.Fatalf("insert token_usage row with cache tokens: %v", err)
+	}
+}
+
+// TestFinOpsSummary_Real_CacheTokens_RecordedRawAndQueriedAtAllFiveTiers is
+// the AC1+AC2 centerpiece: a row with non-zero counts across all 5 tiers
+// (base in, base out, 5m cache write, 1h cache write, cache read) is
+// recorded raw (AC1 -- verified via a direct pool query, standing in for
+// the psql check the live-verification step also performs against a real
+// dispatch) and priced with each tier's own distinct rate, hand-computed
+// (AC2), not the base input rate applied uniformly.
+func TestFinOpsSummary_Real_CacheTokens_RecordedRawAndQueriedAtAllFiveTiers(t *testing.T) {
+	env := newFinOpsPgTestEnv(t)
+	now := time.Now().UTC()
+
+	model := "b111-tier-test-" + env.orgID.String()[:8]
+	// cost_per_1k_in=0.01, out=0.02, cache_write_5m=0.0125 (1.25x in),
+	// cache_write_1h=0.02 (2x in), cache_read=0.001 (0.1x in) -- the real
+	// Anthropic multipliers, applied to made-up-but-round base rates so
+	// the hand-computed expected total is easy to verify independently.
+	env.setModelPricing(t, model, 0.01, 0.02, 0.0125, 0.02, 0.001)
+
+	agentA := env.seedAgent(t, "cache-tier-agent", "team-cache")
+
+	// Base cost (as real write-time IngestTokenUsage would compute and
+	// store it): 1000/1000*0.01 + 500/1000*0.02 = 0.01 + 0.01 = 0.02.
+	const baseCost = 0.02
+	env.insertUsageWithCache(t, agentA, "cache-tier-agent", model,
+		1000, 500, // tokens_in, tokens_out
+		2000, 1000, 3000, // cache_creation_5m, cache_creation_1h, cache_read
+		baseCost, now.Add(-30*time.Minute))
+
+	// AC1: raw counts land exactly as inserted, independent of any pricing.
+	var gotIn, gotOut, got5m, got1h, gotRead int32
+	err := env.pool.QueryRow(context.Background(),
+		`SELECT tokens_in, tokens_out, cache_creation_5m_tokens, cache_creation_1h_tokens, cache_read_tokens
+		 FROM token_usage WHERE org_id = $1 AND agent_name = 'cache-tier-agent'`,
+		env.orgID,
+	).Scan(&gotIn, &gotOut, &got5m, &got1h, &gotRead)
+	if err != nil {
+		t.Fatalf("query raw token_usage row: %v", err)
+	}
+	if gotIn != 1000 || gotOut != 500 || got5m != 2000 || got1h != 1000 || gotRead != 3000 {
+		t.Fatalf("raw counts = in:%d out:%d 5m:%d 1h:%d read:%d, want 1000/500/2000/1000/3000",
+			gotIn, gotOut, got5m, got1h, gotRead)
+	}
+
+	// AC2: query-time cost = frozen base (0.02) + live cache terms:
+	//   5m:   2000/1000 * 0.0125 = 0.025
+	//   1h:   1000/1000 * 0.02   = 0.02
+	//   read: 3000/1000 * 0.001  = 0.003
+	// total cache = 0.048; total row cost = 0.02 + 0.048 = 0.068.
+	const wantCost = 0.068
+
+	from := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	to := now.Add(1 * time.Hour).Format(time.RFC3339)
+	resp, summary := env.getSummary(t, from, to)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+
+	if diff := summary.TotalCostUSD - wantCost; diff > 1e-9 || diff < -1e-9 {
+		t.Errorf("TotalCostUSD = %v, want %v", summary.TotalCostUSD, wantCost)
+	}
+	// AC5: the same corrected total shows up consistently across every
+	// breakdown, not just the grand total.
+	if len(summary.ByAgent) != 1 || withinEpsilon(summary.ByAgent[0].CostUSD, wantCost) == false {
+		t.Errorf("ByAgent[0].CostUSD = %+v, want %v", summary.ByAgent, wantCost)
+	}
+	if len(summary.ByModel) != 1 || withinEpsilon(summary.ByModel[0].CostUSD, wantCost) == false {
+		t.Errorf("ByModel[0].CostUSD = %+v, want %v", summary.ByModel, wantCost)
+	}
+	// total_tokens_in/out semantics are unchanged by B-111 -- they still
+	// reflect only tokens_in/tokens_out, not cache token counts.
+	if summary.TotalTokensIn != 1000 || summary.TotalTokensOut != 500 {
+		t.Errorf("TotalTokensIn/Out = %d/%d, want 1000/500 (cache tokens excluded, unchanged semantics)",
+			summary.TotalTokensIn, summary.TotalTokensOut)
+	}
+}
+
+func withinEpsilon(got, want float64) bool {
+	diff := got - want
+	return diff < 1e-9 && diff > -1e-9
+}
+
+// TestFinOpsSummary_Real_NoCaching_PricesExactlyAsBefore is the AC3
+// regression guard: a row with zero cache tokens, against a model that DOES
+// have cache rates configured, prices identically to pre-B-111 behavior --
+// the cache terms contribute exactly $0 when the counts are 0, regardless
+// of what the configured rates are.
+func TestFinOpsSummary_Real_NoCaching_PricesExactlyAsBefore(t *testing.T) {
+	env := newFinOpsPgTestEnv(t)
+	now := time.Now().UTC()
+
+	model := "b111-no-cache-test-" + env.orgID.String()[:8]
+	env.setModelPricing(t, model, 0.01, 0.02, 0.0125, 0.02, 0.001)
+
+	agentA := env.seedAgent(t, "no-cache-agent", "team-a")
+
+	const baseCost = 0.02 // 1000/1000*0.01 + 500/1000*0.02
+	env.insertUsageWithCache(t, agentA, "no-cache-agent", model,
+		1000, 500, 0, 0, 0, // no cache activity at all
+		baseCost, now.Add(-30*time.Minute))
+
+	from := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	to := now.Add(1 * time.Hour).Format(time.RFC3339)
+	resp, summary := env.getSummary(t, from, to)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if summary.TotalCostUSD != baseCost {
+		t.Errorf("TotalCostUSD = %v, want %v (cache columns at 0 must not change pre-B-111 pricing)", summary.TotalCostUSD, baseCost)
+	}
+}
+
+// TestFinOpsSummary_Real_RateChangeThenRequery_ReflectsNewRate is the AC4
+// centerpiece: changing model_pricing's cache rate and re-querying the SAME
+// already-recorded historical row shows the NEW rate, proving cost is
+// genuinely computed at query time from CURRENT rates -- not frozen at
+// write time the way base/output cost_usd is.
+func TestFinOpsSummary_Real_RateChangeThenRequery_ReflectsNewRate(t *testing.T) {
+	env := newFinOpsPgTestEnv(t)
+	now := time.Now().UTC()
+
+	model := "b111-rate-change-test-" + env.orgID.String()[:8]
+	env.setModelPricing(t, model, 0.01, 0.02, 0.0125, 0.02, 0.001)
+
+	agentA := env.seedAgent(t, "rate-change-agent", "team-a")
+
+	const baseCost = 0.0 // isolate the cache term: no in/out tokens at all
+	env.insertUsageWithCache(t, agentA, "rate-change-agent", model,
+		0, 0, 2000, 0, 0, // 2000 tokens on the 5m cache-write tier only
+		baseCost, now.Add(-30*time.Minute))
+
+	from := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	to := now.Add(1 * time.Hour).Format(time.RFC3339)
+
+	// First query, at the original rate: 2000/1000 * 0.0125 = 0.025.
+	resp1, summary1 := env.getSummary(t, from, to)
+	if resp1.StatusCode != http.StatusOK {
+		t.Fatalf("first query: want 200, got %d", resp1.StatusCode)
+	}
+	if summary1.TotalCostUSD != 0.025 {
+		t.Fatalf("first query TotalCostUSD = %v, want 0.025 (original rate)", summary1.TotalCostUSD)
+	}
+
+	// Change ONLY the rate in model_pricing -- the historical token_usage
+	// row itself is never touched, per this brief's own "no backfill"
+	// contract (mirrors B-078's audit_log snapshot-immutability principle,
+	// applied here to raw counts rather than a written cost).
+	env.updateCacheRates(t, model, 0.05, 0.02) // 5m rate: 0.0125 -> 0.05
+
+	// Re-query the exact same row: 2000/1000 * 0.05 = 0.10, not 0.025.
+	resp2, summary2 := env.getSummary(t, from, to)
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("second query: want 200, got %d", resp2.StatusCode)
+	}
+	if summary2.TotalCostUSD != 0.10 {
+		t.Errorf("second query TotalCostUSD = %v, want 0.10 (new rate applied to the SAME historical row)", summary2.TotalCostUSD)
+	}
+	if summary2.TotalCostUSD == summary1.TotalCostUSD {
+		t.Error("cost did not change after the rate update -- query-time computation is not actually working")
+	}
+}

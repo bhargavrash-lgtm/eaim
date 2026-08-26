@@ -31,21 +31,31 @@ func (q *Queries) GetModelPricing(ctx context.Context, model string) (ModelPrici
 
 // InsertTokenUsageParams holds parameters for InsertTokenUsage.
 type InsertTokenUsageParams struct {
-	OrgID      uuid.UUID
-	AgentID    uuid.UUID // zero value treated as NULL
-	AgentName  string
-	Model      string
-	ToolName   string // empty treated as NULL (B-108) -- unresolved-tool calls have none
-	TokensIn   int32
-	TokensOut  int32
-	CostUSD    float64
-	RecordedAt time.Time
+	OrgID     uuid.UUID
+	AgentID   uuid.UUID // zero value treated as NULL
+	AgentName string
+	Model     string
+	ToolName  string // empty treated as NULL (B-108) -- unresolved-tool calls have none
+	TokensIn  int32
+	TokensOut int32
+	CostUSD   float64
+	// CacheCreation5mTokens/CacheCreation1hTokens/CacheReadTokens (B-111)
+	// are raw Anthropic prompt-caching counters, stored as plain
+	// NOT NULL DEFAULT 0 columns -- no NULL-encoding needed, unlike
+	// ToolName/CostUSD above. Cost for these is never computed or stored
+	// here -- finops.go prices them at query time from current
+	// model_pricing rates.
+	CacheCreation5mTokens int32
+	CacheCreation1hTokens int32
+	CacheReadTokens       int32
+	RecordedAt            time.Time
 }
 
 const insertTokenUsageSQL = `
 INSERT INTO token_usage
-    (org_id, agent_id, agent_name, model, tool_name, tokens_in, tokens_out, cost_usd, recorded_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+    (org_id, agent_id, agent_name, model, tool_name, tokens_in, tokens_out, cost_usd,
+     cache_creation_5m_tokens, cache_creation_1h_tokens, cache_read_tokens, recorded_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
 
 // InsertTokenUsage writes one token-usage row.
 // When AgentID is the zero UUID it is stored as NULL.
@@ -82,6 +92,9 @@ func (q *Queries) InsertTokenUsage(ctx context.Context, p InsertTokenUsageParams
 		p.TokensIn,
 		p.TokensOut,
 		costUSD,
+		p.CacheCreation5mTokens,
+		p.CacheCreation1hTokens,
+		p.CacheReadTokens,
 		recordedAt,
 	)
 	return err

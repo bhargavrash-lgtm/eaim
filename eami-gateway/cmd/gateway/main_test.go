@@ -151,6 +151,87 @@ func TestExtractTokenUsage_ToolNameSurvivesUnparseableBody(t *testing.T) {
 	}
 }
 
+// ─── Cache-token extraction (B-111) ────────────────────────────────────────
+
+// TestExtractTokenUsage_CacheBreakdownPresent_UsesExactSplit uses the exact
+// real response shape captured from a live claude-haiku-4-5-20251001
+// dispatch with a pure 1h-only cache_control (no 5m mixed in) — proving the
+// breakdown object is trusted directly, not just the flat total, and that a
+// single-TTL response (not just a documented mixed one) really does carry it.
+func TestExtractTokenUsage_CacheBreakdownPresent_UsesExactSplit(t *testing.T) {
+	ac := mcp.ActionContext{OrgID: "org-1", AgentUUID: "agent-1", AgentName: "agent-alpha", Tool: "claude"}
+	body := json.RawMessage(`{"model":"claude-haiku-4-5-20251001","usage":{"input_tokens":14,"cache_creation_input_tokens":4812,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":4812},"output_tokens":5}}`)
+
+	p := extractTokenUsage(body, ac)
+
+	if p.CacheCreation5mTokens != 0 {
+		t.Errorf("CacheCreation5mTokens = %d, want 0", p.CacheCreation5mTokens)
+	}
+	if p.CacheCreation1hTokens != 4812 {
+		t.Errorf("CacheCreation1hTokens = %d, want 4812", p.CacheCreation1hTokens)
+	}
+	if p.CacheReadTokens != 0 {
+		t.Errorf("CacheReadTokens = %d, want 0", p.CacheReadTokens)
+	}
+	if p.InputTokens != 14 || p.OutputTokens != 5 {
+		t.Errorf("InputTokens/OutputTokens = %d/%d, want 14/5 (unaffected by cache parsing)", p.InputTokens, p.OutputTokens)
+	}
+}
+
+// TestExtractTokenUsage_CacheRead_NoBreakdownNeeded proves cache_read_input_tokens
+// is parsed independent of any cache_creation activity — a pure cache-hit
+// request (reading a previously-written cache, writing nothing new).
+func TestExtractTokenUsage_CacheRead_NoBreakdownNeeded(t *testing.T) {
+	ac := mcp.ActionContext{OrgID: "org-1", AgentUUID: "agent-1", AgentName: "agent-alpha", Tool: "claude"}
+	body := json.RawMessage(`{"model":"claude-haiku-4-5-20251001","usage":{"input_tokens":14,"cache_creation_input_tokens":0,"cache_read_input_tokens":4812,"output_tokens":5}}`)
+
+	p := extractTokenUsage(body, ac)
+
+	if p.CacheReadTokens != 4812 {
+		t.Errorf("CacheReadTokens = %d, want 4812", p.CacheReadTokens)
+	}
+	if p.CacheCreation5mTokens != 0 || p.CacheCreation1hTokens != 0 {
+		t.Errorf("CacheCreation5mTokens/1hTokens = %d/%d, want 0/0", p.CacheCreation5mTokens, p.CacheCreation1hTokens)
+	}
+}
+
+// TestExtractTokenUsage_CacheBreakdownAbsent_FallsBackToFlat5m covers the
+// defensive fallback branch (not observed reachable against the real API in
+// B-111's live verification, but kept in case some response path ever omits
+// the breakdown object): a flat cache_creation_input_tokens with no nested
+// cache_creation object is attributed entirely to the 5m tier, not dropped.
+func TestExtractTokenUsage_CacheBreakdownAbsent_FallsBackToFlat5m(t *testing.T) {
+	ac := mcp.ActionContext{OrgID: "org-1", AgentUUID: "agent-1", AgentName: "agent-alpha", Tool: "claude"}
+	body := json.RawMessage(`{"model":"claude-haiku-4-5-20251001","usage":{"input_tokens":14,"cache_creation_input_tokens":300,"cache_read_input_tokens":0,"output_tokens":5}}`)
+
+	p := extractTokenUsage(body, ac)
+
+	if p.CacheCreation5mTokens != 300 {
+		t.Errorf("CacheCreation5mTokens = %d, want 300 (fallback: flat total attributed to 5m)", p.CacheCreation5mTokens)
+	}
+	if p.CacheCreation1hTokens != 0 {
+		t.Errorf("CacheCreation1hTokens = %d, want 0", p.CacheCreation1hTokens)
+	}
+}
+
+// TestExtractTokenUsage_NoCaching_CacheFieldsStayZero is the regression
+// guard for AC3: a plain response with no cache fields at all leaves all
+// three new fields at their zero value, and InputTokens/OutputTokens parse
+// exactly as they did before B-111.
+func TestExtractTokenUsage_NoCaching_CacheFieldsStayZero(t *testing.T) {
+	ac := mcp.ActionContext{OrgID: "org-1", AgentUUID: "agent-1", AgentName: "agent-alpha", Tool: "claude"}
+	body := json.RawMessage(`{"model":"claude-haiku-4-5-20251001","usage":{"input_tokens":8,"output_tokens":1}}`)
+
+	p := extractTokenUsage(body, ac)
+
+	if p.CacheCreation5mTokens != 0 || p.CacheCreation1hTokens != 0 || p.CacheReadTokens != 0 {
+		t.Errorf("expected all cache fields to stay 0 for a non-caching response, got %+v", p)
+	}
+	if p.InputTokens != 8 || p.OutputTokens != 1 {
+		t.Errorf("InputTokens/OutputTokens = %d/%d, want 8/1", p.InputTokens, p.OutputTokens)
+	}
+}
+
 // TestRecordTokenUsage_CalledTwiceIndependently proves the shared helper is
 // genuinely reusable across two call sites with independent ActionContexts
 // (standing in for the Allow branch and the escalate-then-approved branch)

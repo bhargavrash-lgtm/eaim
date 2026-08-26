@@ -432,11 +432,22 @@ type tokenUsagePayload struct {
 	OrgID        string `json:"org_id"`
 	AgentID      string `json:"agent_id"`
 	AgentName    string `json:"agent_name"`
-	Model        string `json:"model"`        // from MCP response; "" if absent
-	ToolName     string `json:"tool_name"`    // ac.Tool -- the connector this call dispatched through (B-108)
+	Model        string `json:"model"`     // from MCP response; "" if absent
+	ToolName     string `json:"tool_name"` // ac.Tool -- the connector this call dispatched through (B-108)
 	InputTokens  int    `json:"input_tokens"`
 	OutputTokens int    `json:"output_tokens"`
-	RecordedAt   string `json:"recorded_at"` // RFC3339
+	// CacheCreation5mTokens/CacheCreation1hTokens/CacheReadTokens (B-111)
+	// are Anthropic Messages API prompt-caching counters, distinct from
+	// InputTokens/OutputTokens -- Anthropic's own documented invariant is
+	// that usage.input_tokens excludes cache tokens entirely (three
+	// non-overlapping counters), so these are always additive, never
+	// double-counted against InputTokens. Raw counts only -- no cost is
+	// computed here or at write time; finops.go prices them at query time
+	// from the current model_pricing rates.
+	CacheCreation5mTokens int    `json:"cache_creation_5m_tokens"`
+	CacheCreation1hTokens int    `json:"cache_creation_1h_tokens"`
+	CacheReadTokens       int    `json:"cache_read_tokens"`
+	RecordedAt            string `json:"recorded_at"` // RFC3339
 }
 
 // extractTokenUsage parses an MCP proxy result for token counts and model name.
@@ -444,9 +455,9 @@ type tokenUsagePayload struct {
 // This never returns an error — the caller must not block on this.
 func extractTokenUsage(result json.RawMessage, ac mcp.ActionContext) tokenUsagePayload {
 	p := tokenUsagePayload{
-		OrgID:      ac.OrgID,
-		AgentID:    ac.AgentUUID,
-		AgentName:  ac.AgentName,
+		OrgID:     ac.OrgID,
+		AgentID:   ac.AgentUUID,
+		AgentName: ac.AgentName,
 		// ToolName is set unconditionally from ac.Tool, independent of
 		// whether result parses -- it's always known at the call site,
 		// unlike Model/token counts, which live inside the (possibly
@@ -462,6 +473,26 @@ func extractTokenUsage(result json.RawMessage, ac mcp.ActionContext) tokenUsageP
 		Usage struct {
 			InputTokens  int `json:"input_tokens"`
 			OutputTokens int `json:"output_tokens"`
+			// CacheCreationInputTokens (B-111) is the flat total Anthropic
+			// always documents -- equals the sum of the CacheCreation
+			// sub-object's two fields when that sub-object is present.
+			// Used as a fallback total when the sub-object is absent (see
+			// below), and as a cross-check when it's present.
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			// CacheCreation is Anthropic's documented per-TTL breakdown.
+			// Docs only showed it for a mixed 5m+1h example; live-verified
+			// (B-111, 2026-08-26, real claude-haiku-4-5-20251001 dispatch,
+			// a pure 1h-only cache_control, no 5m mixed in) that it's ALSO
+			// present for a single-TTL response: real usage was
+			// {"cache_creation_input_tokens":4812,"cache_creation":
+			// {"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":4812}}
+			// -- so this struct's zero value never has to double as
+			// "absent" in the case that's actually been observed live.
+			CacheCreation struct {
+				Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
+				Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
+			} `json:"cache_creation"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(result, &resp); err != nil {
@@ -470,6 +501,25 @@ func extractTokenUsage(result json.RawMessage, ac mcp.ActionContext) tokenUsageP
 	p.Model = resp.Model
 	p.InputTokens = resp.Usage.InputTokens
 	p.OutputTokens = resp.Usage.OutputTokens
+	p.CacheReadTokens = resp.Usage.CacheReadInputTokens
+
+	switch {
+	case resp.Usage.CacheCreation.Ephemeral5mInputTokens > 0 || resp.Usage.CacheCreation.Ephemeral1hInputTokens > 0:
+		// Breakdown present -- trust it directly, the exact split.
+		p.CacheCreation5mTokens = resp.Usage.CacheCreation.Ephemeral5mInputTokens
+		p.CacheCreation1hTokens = resp.Usage.CacheCreation.Ephemeral1hInputTokens
+	case resp.Usage.CacheCreationInputTokens > 0:
+		// Defensive fallback only -- B-111's live verification (see
+		// above) found the breakdown object present even for a pure
+		// single-TTL (1h-only) real dispatch, so this branch wasn't
+		// observed to be reachable against the real API. Kept in case
+		// some other response path (a different API version, a
+		// provider-side omission) ever produces a flat total without
+		// the breakdown -- attributed to 5m (Anthropic's default TTL
+		// when cache_control omits "ttl") rather than silently
+		// dropping real cache-write spend.
+		p.CacheCreation5mTokens = resp.Usage.CacheCreationInputTokens
+	}
 	return p
 }
 

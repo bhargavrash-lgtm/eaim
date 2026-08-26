@@ -57,12 +57,23 @@ func (s *Server) FinOpsSummary(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// ── Totals ────────────────────────────────────────────────────────────────
+	// The cache-tier terms (B-111) are appended to every per-row sum below,
+	// never persisted to cost_usd -- always computed fresh from CURRENT
+	// model_pricing cache rates, so a rate correction re-prices historical
+	// rows the next time this query runs, unlike the base/output CASE
+	// above it (frozen cost_usd when present, matching pre-B-111
+	// behavior exactly -- no regression to non-caching pricing).
 	const totalQ = `
 SELECT
-  COALESCE(SUM(CASE WHEN cost_usd IS NOT NULL THEN cost_usd
-                    ELSE (tokens_in  * mp.cost_per_1k_in  / 1000.0)
-                       + (tokens_out * mp.cost_per_1k_out / 1000.0)
-               END), 0)         AS total_cost_usd,
+  COALESCE(SUM(
+    (CASE WHEN cost_usd IS NOT NULL THEN cost_usd
+          ELSE (tokens_in  * mp.cost_per_1k_in  / 1000.0)
+             + (tokens_out * mp.cost_per_1k_out / 1000.0)
+     END)
+    + (cache_creation_5m_tokens * COALESCE(mp.cost_per_1k_cache_write_5m,0) / 1000.0)
+    + (cache_creation_1h_tokens * COALESCE(mp.cost_per_1k_cache_write_1h,0) / 1000.0)
+    + (cache_read_tokens        * COALESCE(mp.cost_per_1k_cache_read,0)    / 1000.0)
+  ), 0)                          AS total_cost_usd,
   COALESCE(SUM(tokens_in),  0)  AS total_tokens_in,
   COALESCE(SUM(tokens_out), 0)  AS total_tokens_out,
   COUNT(*)                      AS total_request_count
@@ -90,10 +101,15 @@ WHERE tu.org_id = $1
 	// ── By agent ──────────────────────────────────────────────────────────────
 	const agentQ = `
 SELECT tu.agent_id, tu.agent_name,
-  COALESCE(SUM(CASE WHEN tu.cost_usd IS NOT NULL THEN tu.cost_usd
-                    ELSE (tu.tokens_in  * mp.cost_per_1k_in  / 1000.0)
-                       + (tu.tokens_out * mp.cost_per_1k_out / 1000.0)
-               END), 0)         AS cost_usd,
+  COALESCE(SUM(
+    (CASE WHEN tu.cost_usd IS NOT NULL THEN tu.cost_usd
+          ELSE (tu.tokens_in  * mp.cost_per_1k_in  / 1000.0)
+             + (tu.tokens_out * mp.cost_per_1k_out / 1000.0)
+     END)
+    + (tu.cache_creation_5m_tokens * COALESCE(mp.cost_per_1k_cache_write_5m,0) / 1000.0)
+    + (tu.cache_creation_1h_tokens * COALESCE(mp.cost_per_1k_cache_write_1h,0) / 1000.0)
+    + (tu.cache_read_tokens        * COALESCE(mp.cost_per_1k_cache_read,0)    / 1000.0)
+  ), 0)                            AS cost_usd,
   COALESCE(SUM(tu.tokens_in),  0) AS tokens_in,
   COALESCE(SUM(tu.tokens_out), 0) AS tokens_out,
   COUNT(*)                        AS request_count
@@ -156,10 +172,15 @@ ORDER BY cost_usd DESC`
 	// function of the grouped column.
 	const teamQ = `
 SELECT COALESCE(ga.owner, 'unknown') AS team,
-  COALESCE(SUM(CASE WHEN tu.cost_usd IS NOT NULL THEN tu.cost_usd
-                    ELSE (tu.tokens_in  * mp.cost_per_1k_in  / 1000.0)
-                       + (tu.tokens_out * mp.cost_per_1k_out / 1000.0)
-               END), 0)           AS cost_usd,
+  COALESCE(SUM(
+    (CASE WHEN tu.cost_usd IS NOT NULL THEN tu.cost_usd
+          ELSE (tu.tokens_in  * mp.cost_per_1k_in  / 1000.0)
+             + (tu.tokens_out * mp.cost_per_1k_out / 1000.0)
+     END)
+    + (tu.cache_creation_5m_tokens * COALESCE(mp.cost_per_1k_cache_write_5m,0) / 1000.0)
+    + (tu.cache_creation_1h_tokens * COALESCE(mp.cost_per_1k_cache_write_1h,0) / 1000.0)
+    + (tu.cache_read_tokens        * COALESCE(mp.cost_per_1k_cache_read,0)    / 1000.0)
+  ), 0)                            AS cost_usd,
   COALESCE(SUM(tu.tokens_in),  0) AS tokens_in,
   COALESCE(SUM(tu.tokens_out), 0) AS tokens_out
 FROM token_usage tu
@@ -195,10 +216,15 @@ ORDER BY cost_usd DESC`
 	// ── By model ──────────────────────────────────────────────────────────────
 	const modelQ = `
 SELECT tu.model,
-  COALESCE(SUM(CASE WHEN tu.cost_usd IS NOT NULL THEN tu.cost_usd
-                    ELSE (tu.tokens_in  * mp.cost_per_1k_in  / 1000.0)
-                       + (tu.tokens_out * mp.cost_per_1k_out / 1000.0)
-               END), 0)           AS cost_usd,
+  COALESCE(SUM(
+    (CASE WHEN tu.cost_usd IS NOT NULL THEN tu.cost_usd
+          ELSE (tu.tokens_in  * mp.cost_per_1k_in  / 1000.0)
+             + (tu.tokens_out * mp.cost_per_1k_out / 1000.0)
+     END)
+    + (tu.cache_creation_5m_tokens * COALESCE(mp.cost_per_1k_cache_write_5m,0) / 1000.0)
+    + (tu.cache_creation_1h_tokens * COALESCE(mp.cost_per_1k_cache_write_1h,0) / 1000.0)
+    + (tu.cache_read_tokens        * COALESCE(mp.cost_per_1k_cache_read,0)    / 1000.0)
+  ), 0)                            AS cost_usd,
   COALESCE(SUM(tu.tokens_in),  0) AS tokens_in,
   COALESCE(SUM(tu.tokens_out), 0) AS tokens_out
 FROM token_usage tu
@@ -239,10 +265,15 @@ ORDER BY cost_usd DESC`
 	// nil for an unresolved name) is a real, expected case, not an error.
 	const toolQ = `
 SELECT COALESCE(tu.tool_name, 'unknown') AS tool,
-  COALESCE(SUM(CASE WHEN tu.cost_usd IS NOT NULL THEN tu.cost_usd
-                    ELSE (tu.tokens_in  * mp.cost_per_1k_in  / 1000.0)
-                       + (tu.tokens_out * mp.cost_per_1k_out / 1000.0)
-               END), 0)           AS cost_usd,
+  COALESCE(SUM(
+    (CASE WHEN tu.cost_usd IS NOT NULL THEN tu.cost_usd
+          ELSE (tu.tokens_in  * mp.cost_per_1k_in  / 1000.0)
+             + (tu.tokens_out * mp.cost_per_1k_out / 1000.0)
+     END)
+    + (tu.cache_creation_5m_tokens * COALESCE(mp.cost_per_1k_cache_write_5m,0) / 1000.0)
+    + (tu.cache_creation_1h_tokens * COALESCE(mp.cost_per_1k_cache_write_1h,0) / 1000.0)
+    + (tu.cache_read_tokens        * COALESCE(mp.cost_per_1k_cache_read,0)    / 1000.0)
+  ), 0)                            AS cost_usd,
   COALESCE(SUM(tu.tokens_in),  0) AS tokens_in,
   COALESCE(SUM(tu.tokens_out), 0) AS tokens_out
 FROM token_usage tu

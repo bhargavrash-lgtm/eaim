@@ -287,7 +287,16 @@ type TokenUsageRequest struct {
 	ToolName     string `json:"tool_name"`
 	InputTokens  int32  `json:"input_tokens"`
 	OutputTokens int32  `json:"output_tokens"`
-	RecordedAt   string `json:"recorded_at"` // RFC3339
+	// CacheCreation5mTokens/CacheCreation1hTokens/CacheReadTokens (B-111)
+	// are raw Anthropic prompt-caching counters -- optional, empty/0 for
+	// any caller predating this field. Stored as-is; no cost is computed
+	// for them here (unlike InputTokens/OutputTokens above) -- finops.go
+	// prices them at query time from the current model_pricing rates, so
+	// a future rate correction re-prices historical rows automatically.
+	CacheCreation5mTokens int32  `json:"cache_creation_5m_tokens"`
+	CacheCreation1hTokens int32  `json:"cache_creation_1h_tokens"`
+	CacheReadTokens       int32  `json:"cache_read_tokens"`
+	RecordedAt            string `json:"recorded_at"` // RFC3339
 }
 
 // IngestTokenUsage handles POST /v1/internal/token-usage.
@@ -335,15 +344,18 @@ func (s *Server) IngestTokenUsage(w http.ResponseWriter, r *http.Request) {
 		(float64(req.OutputTokens)/1000.0)*mp.CostPer1kOut
 
 	p := store.InsertTokenUsageParams{
-		OrgID:      orgID,
-		AgentID:    agentID,
-		AgentName:  req.AgentName,
-		Model:      req.Model,
-		ToolName:   req.ToolName,
-		TokensIn:   req.InputTokens,
-		TokensOut:  req.OutputTokens,
-		CostUSD:    cost,
-		RecordedAt: recordedAt,
+		OrgID:                 orgID,
+		AgentID:               agentID,
+		AgentName:             req.AgentName,
+		Model:                 req.Model,
+		ToolName:              req.ToolName,
+		TokensIn:              req.InputTokens,
+		TokensOut:             req.OutputTokens,
+		CostUSD:               cost,
+		CacheCreation5mTokens: req.CacheCreation5mTokens,
+		CacheCreation1hTokens: req.CacheCreation1hTokens,
+		CacheReadTokens:       req.CacheReadTokens,
+		RecordedAt:            recordedAt,
 	}
 	if err := s.queries.InsertTokenUsage(ctx, p); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to record token usage")
