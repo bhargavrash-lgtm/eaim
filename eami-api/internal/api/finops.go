@@ -76,7 +76,12 @@ SELECT
   ), 0)                          AS total_cost_usd,
   COALESCE(SUM(tokens_in),  0)  AS total_tokens_in,
   COALESCE(SUM(tokens_out), 0)  AS total_tokens_out,
-  COUNT(*)                      AS total_request_count
+  COUNT(*)                      AS total_request_count,
+  -- B-112: rows whose model has no model_pricing match contribute a
+  -- silent $0 to total_cost_usd above (tokens * a NULL rate -> NULL,
+  -- which SUM() ignores) -- not necessarily their real cost. This count
+  -- makes that undercount visible instead of invisible.
+  COUNT(*) FILTER (WHERE mp.model IS NULL) AS unrecognized_model_request_count
 FROM token_usage tu
 LEFT JOIN model_pricing mp ON mp.model = tu.model
 WHERE tu.org_id = $1
@@ -84,9 +89,9 @@ WHERE tu.org_id = $1
   AND tu.recorded_at <  $3`
 
 	var totalCost float64
-	var totalIn, totalOut, totalRequests int64
+	var totalIn, totalOut, totalRequests, unrecognizedModelCount int64
 	row := db.QueryRow(ctx, totalQ, orgID, fromTS, toTS)
-	if err := row.Scan(&totalCost, &totalIn, &totalOut, &totalRequests); err != nil {
+	if err := row.Scan(&totalCost, &totalIn, &totalOut, &totalRequests, &unrecognizedModelCount); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
@@ -226,7 +231,13 @@ SELECT tu.model,
     + (tu.cache_read_tokens        * COALESCE(mp.cost_per_1k_cache_read,0)    / 1000.0)
   ), 0)                            AS cost_usd,
   COALESCE(SUM(tu.tokens_in),  0) AS tokens_in,
-  COALESCE(SUM(tu.tokens_out), 0) AS tokens_out
+  COALESCE(SUM(tu.tokens_out), 0) AS tokens_out,
+  -- B-112: mp.model IS NOT NULL is constant within a tu.model group (the
+  -- join key IS tu.model, so every row in the group either all match the
+  -- same model_pricing row or none do) -- bool_and just reads that
+  -- constant out per group, flagging "no rate configured" distinctly
+  -- from a real $0.00.
+  bool_and(mp.model IS NOT NULL) AS pricing_configured
 FROM token_usage tu
 LEFT JOIN model_pricing mp ON mp.model = tu.model
 WHERE tu.org_id = $1
@@ -245,7 +256,7 @@ ORDER BY cost_usd DESC`
 	byModel := make([]ModelSpend, 0)
 	for modelRows.Next() {
 		var m ModelSpend
-		if err := modelRows.Scan(&m.Model, &m.CostUSD, &m.TokensIn, &m.TokensOut); err != nil {
+		if err := modelRows.Scan(&m.Model, &m.CostUSD, &m.TokensIn, &m.TokensOut, &m.PricingConfigured); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
@@ -306,16 +317,17 @@ ORDER BY cost_usd DESC`
 	}
 
 	writeJSON(w, http.StatusOK, TokenSpendSummary{
-		PeriodStart:       from,
-		PeriodEnd:         to,
-		TotalCostUSD:      totalCost,
-		AvgCostPerOutcome: avgCostPerOutcome,
-		TotalTokensIn:     totalIn,
-		TotalTokensOut:    totalOut,
-		ByAgent:           byAgent,
-		ByTeam:            byTeam,
-		ByModel:           byModel,
-		ByTool:            byTool,
+		PeriodStart:                   from,
+		PeriodEnd:                     to,
+		TotalCostUSD:                  totalCost,
+		AvgCostPerOutcome:             avgCostPerOutcome,
+		TotalTokensIn:                 totalIn,
+		TotalTokensOut:                totalOut,
+		ByAgent:                       byAgent,
+		ByTeam:                        byTeam,
+		ByModel:                       byModel,
+		ByTool:                        byTool,
+		UnrecognizedModelRequestCount: unrecognizedModelCount,
 	})
 }
 

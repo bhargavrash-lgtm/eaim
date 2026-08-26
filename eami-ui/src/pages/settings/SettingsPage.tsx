@@ -14,6 +14,13 @@ import { useUsers, useInviteUser, useChangeUserRole, useRevokeUser, type UserRol
 import { useNotificationSettings, useUpdateNotificationSettings, useTestNotification } from '@/hooks/useNotificationSettings'
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from '@/hooks/useApiKeys'
 import { useAgents, type Agent } from '@/hooks/useAgents'
+import {
+  useModelPricing,
+  useCreateModelPricing,
+  useUpdateModelPricing,
+  useDeleteModelPricing,
+  type ModelPricing,
+} from '@/hooks/useModelPricing'
 import type { components } from '@/api/schema'
 
 type OrgUser = components['schemas']['OrgUser']
@@ -682,14 +689,229 @@ function ApiKeysTab() {
   )
 }
 
+// ── Tab 5: Model Pricing (B-112) ─────────────────────────────────────────────────
+// Previously the only way to add/reprice a model was a raw SQL statement --
+// this is the real admin CRUD path, mirroring the API Keys tab above.
+// model_pricing has no org_id (a genuinely global table, unlike every other
+// resource this page manages) -- writes are admin-only (router.go), not the
+// looser admin+operator gating agents/policies/tools use, since a change
+// here affects every org's cost reporting, not just this one.
+
+const modelPricingSchema = z.object({
+  model: z.string().min(1, 'Model is required'),
+  cost_per_1k_in: z.string().min(1, 'Required'),
+  cost_per_1k_out: z.string().min(1, 'Required'),
+  cost_per_1k_cache_write_5m: z.string().optional(),
+  cost_per_1k_cache_write_1h: z.string().optional(),
+  cost_per_1k_cache_read: z.string().optional(),
+})
+type ModelPricingFormValues = z.infer<typeof modelPricingSchema>
+
+const emptyPricingForm: ModelPricingFormValues = {
+  model: '',
+  cost_per_1k_in: '',
+  cost_per_1k_out: '',
+  cost_per_1k_cache_write_5m: '',
+  cost_per_1k_cache_write_1h: '',
+  cost_per_1k_cache_read: '',
+}
+
+function fmtRate(v?: number) {
+  return v == null ? <span className="text-gray-300">—</span> : `$${v.toFixed(6)}`
+}
+
+function ModelPricingTab() {
+  const { data, isLoading } = useModelPricing()
+  const createPricing = useCreateModelPricing()
+  const updatePricing = useUpdateModelPricing()
+  const deletePricing = useDeleteModelPricing()
+
+  const [showForm, setShowForm] = useState(false)
+  const [editTarget, setEditTarget] = useState<ModelPricing | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<ModelPricing | null>(null)
+
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<ModelPricingFormValues>({
+    resolver: zodResolver(modelPricingSchema),
+    defaultValues: emptyPricingForm,
+  })
+
+  function openCreate() {
+    setEditTarget(null)
+    reset(emptyPricingForm)
+    setShowForm(true)
+  }
+
+  function openEdit(m: ModelPricing) {
+    setEditTarget(m)
+    reset({
+      model: m.model,
+      cost_per_1k_in: String(m.cost_per_1k_in),
+      cost_per_1k_out: String(m.cost_per_1k_out),
+      cost_per_1k_cache_write_5m: m.cost_per_1k_cache_write_5m != null ? String(m.cost_per_1k_cache_write_5m) : '',
+      cost_per_1k_cache_write_1h: m.cost_per_1k_cache_write_1h != null ? String(m.cost_per_1k_cache_write_1h) : '',
+      cost_per_1k_cache_read: m.cost_per_1k_cache_read != null ? String(m.cost_per_1k_cache_read) : '',
+    })
+    setShowForm(true)
+  }
+
+  async function onSubmit(values: ModelPricingFormValues) {
+    const cacheFields = {
+      ...(values.cost_per_1k_cache_write_5m ? { cost_per_1k_cache_write_5m: parseFloat(values.cost_per_1k_cache_write_5m) } : {}),
+      ...(values.cost_per_1k_cache_write_1h ? { cost_per_1k_cache_write_1h: parseFloat(values.cost_per_1k_cache_write_1h) } : {}),
+      ...(values.cost_per_1k_cache_read ? { cost_per_1k_cache_read: parseFloat(values.cost_per_1k_cache_read) } : {}),
+    }
+    if (editTarget) {
+      await updatePricing.mutateAsync({
+        model: editTarget.model,
+        body: {
+          cost_per_1k_in: parseFloat(values.cost_per_1k_in),
+          cost_per_1k_out: parseFloat(values.cost_per_1k_out),
+          ...cacheFields,
+        },
+      })
+    } else {
+      await createPricing.mutateAsync({
+        model: values.model,
+        cost_per_1k_in: parseFloat(values.cost_per_1k_in),
+        cost_per_1k_out: parseFloat(values.cost_per_1k_out),
+        ...cacheFields,
+      })
+    }
+    setShowForm(false)
+    setEditTarget(null)
+  }
+
+  const rows: ModelPricing[] = data?.data ?? []
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500">{rows.length} model{rows.length !== 1 ? 's' : ''} priced</p>
+        <button
+          onClick={openCreate}
+          className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
+        >
+          Add model pricing
+        </button>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-8"><LoadingSpinner /></div>
+      ) : rows.length === 0 ? (
+        <EmptyState title="No model pricing configured" description="Add a model's rates so its dispatches price correctly in FinOps." />
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-gray-200">
+          <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                {['Model', 'Input /1k', 'Output /1k', 'Cache write 5m /1k', 'Cache write 1h /1k', 'Cache read /1k', 'Updated', ''].map((h, i) => (
+                  <th key={i} className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 bg-white">
+              {rows.map((m) => (
+                <tr key={m.model}>
+                  <td className="px-4 py-3 font-mono text-xs font-medium text-gray-900">{m.model}</td>
+                  <td className="px-4 py-3 text-gray-700">${m.cost_per_1k_in.toFixed(6)}</td>
+                  <td className="px-4 py-3 text-gray-700">${m.cost_per_1k_out.toFixed(6)}</td>
+                  <td className="px-4 py-3 text-gray-500">{fmtRate(m.cost_per_1k_cache_write_5m)}</td>
+                  <td className="px-4 py-3 text-gray-500">{fmtRate(m.cost_per_1k_cache_write_1h)}</td>
+                  <td className="px-4 py-3 text-gray-500">{fmtRate(m.cost_per_1k_cache_read)}</td>
+                  <td className="px-4 py-3 text-xs text-gray-400">{new Date(m.updated_at).toLocaleDateString()}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right">
+                    <button onClick={() => openEdit(m)} className="mr-3 text-xs text-brand-600 hover:underline">Edit</button>
+                    <button onClick={() => setDeleteTarget(m)} className="text-xs text-red-600 hover:underline">Delete</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <h2 className="mb-4 text-base font-semibold text-gray-900">
+              {editTarget ? `Edit pricing — ${editTarget.model}` : 'Add model pricing'}
+            </h2>
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+              <div>
+                <Label>Model</Label>
+                <Input {...register('model')} placeholder="e.g. claude-sonnet-5" disabled={!!editTarget} />
+                <FieldError message={errors.model?.message} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Cost per 1k input tokens ($)</Label>
+                  <Input {...register('cost_per_1k_in')} placeholder="0.003000" />
+                  <FieldError message={errors.cost_per_1k_in?.message} />
+                </div>
+                <div>
+                  <Label>Cost per 1k output tokens ($)</Label>
+                  <Input {...register('cost_per_1k_out')} placeholder="0.015000" />
+                  <FieldError message={errors.cost_per_1k_out?.message} />
+                </div>
+              </div>
+              <p className="text-xs text-gray-400">
+                Cache rates (optional) — only Claude models with prompt caching need these (B-111): 5-minute write ≈ 1.25× input, 1-hour write ≈ 2× input, cache read ≈ 0.1× input.
+              </p>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <Label>Cache write 5m</Label>
+                  <Input {...register('cost_per_1k_cache_write_5m')} placeholder="optional" />
+                </div>
+                <div>
+                  <Label>Cache write 1h</Label>
+                  <Input {...register('cost_per_1k_cache_write_1h')} placeholder="optional" />
+                </div>
+                <div>
+                  <Label>Cache read</Label>
+                  <Input {...register('cost_per_1k_cache_read')} placeholder="optional" />
+                </div>
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setShowForm(false); setEditTarget(null) }}
+                  className="rounded border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <SaveButton
+                  isLoading={createPricing.isPending || updatePricing.isPending}
+                  label={editTarget ? 'Save changes' : 'Add pricing'}
+                />
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title={`Remove pricing for "${deleteTarget.model}"?`}
+          description="Future dispatches against this model will show as unrecognized/unpriced in FinOps until pricing is re-added."
+          confirmLabel="Remove pricing"
+          destructive
+          onConfirm={() => { deletePricing.mutate(deleteTarget.model); setDeleteTarget(null) }}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+    </div>
+  )
+}
+
 // ── Tab bar + routing ──────────────────────────────────────────────────────────
 
-type TabId = 'org' | 'users' | 'notifications' | 'api-keys'
+type TabId = 'org' | 'users' | 'notifications' | 'api-keys' | 'model-pricing'
 const TABS: { id: TabId; label: string }[] = [
   { id: 'org', label: 'Organisation' },
   { id: 'users', label: 'Users' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'api-keys', label: 'API Keys' },
+  { id: 'model-pricing', label: 'Model Pricing' },
 ]
 
 // ── Main page ──────────────────────────────────────────────────────────────────
@@ -736,6 +958,7 @@ export function SettingsPage() {
         {activeTab === 'users' && <UsersTab />}
         {activeTab === 'notifications' && <NotificationsTab />}
         {activeTab === 'api-keys' && <ApiKeysTab />}
+        {activeTab === 'model-pricing' && <ModelPricingTab />}
       </div>
     </div>
   )

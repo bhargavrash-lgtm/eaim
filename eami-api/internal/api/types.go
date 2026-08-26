@@ -235,6 +235,12 @@ type ModelSpend struct {
 	CostUSD   float64 `json:"cost_usd"`
 	TokensIn  int64   `json:"tokens_in"`
 	TokensOut int64   `json:"tokens_out"`
+	// PricingConfigured (B-112) is false when no model_pricing row matches
+	// this model -- CostUSD is then a silent $0.00 (Postgres SUM ignores
+	// the NULL produced by tokens * an unmatched rate), not genuinely
+	// zero spend. Distinguishes "recognized and free" from "unrecognized,
+	// real cost unknown" instead of rendering both identically.
+	PricingConfigured bool `json:"pricing_configured"`
 }
 
 // ToolSpend is a per-connector cost breakdown (B-108). Not yet declared in
@@ -247,6 +253,45 @@ type ToolSpend struct {
 	CostUSD   float64 `json:"cost_usd"`
 	TokensIn  int64   `json:"tokens_in"`
 	TokensOut int64   `json:"tokens_out"`
+}
+
+// ModelPricingResp is one full model_pricing row (B-112 admin CRUD),
+// including B-111's 3 cache-rate columns. The cache-rate fields are
+// pointers, omitted from the JSON body entirely when a model has none
+// configured (a non-Claude model, or a Claude model an admin hasn't
+// backfilled yet) -- distinguishing "priced at $0" from "no rate set".
+type ModelPricingResp struct {
+	Model                 string    `json:"model"`
+	CostPer1kIn           float64   `json:"cost_per_1k_in"`
+	CostPer1kOut          float64   `json:"cost_per_1k_out"`
+	CostPer1kCacheWrite5m *float64  `json:"cost_per_1k_cache_write_5m,omitempty"`
+	CostPer1kCacheWrite1h *float64  `json:"cost_per_1k_cache_write_1h,omitempty"`
+	CostPer1kCacheRead    *float64  `json:"cost_per_1k_cache_read,omitempty"`
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
+type ModelPricingListResponse struct {
+	Data []ModelPricingResp `json:"data"`
+}
+
+type CreateModelPricingRequest struct {
+	Model                 string   `json:"model"`
+	CostPer1kIn           float64  `json:"cost_per_1k_in"`
+	CostPer1kOut          float64  `json:"cost_per_1k_out"`
+	CostPer1kCacheWrite5m *float64 `json:"cost_per_1k_cache_write_5m,omitempty"`
+	CostPer1kCacheWrite1h *float64 `json:"cost_per_1k_cache_write_1h,omitempty"`
+	CostPer1kCacheRead    *float64 `json:"cost_per_1k_cache_read,omitempty"`
+}
+
+// UpdateModelPricingRequest is a partial update -- every field is optional;
+// an absent field leaves that column unchanged (PATCH semantics, mirroring
+// AgentUpdateRequest's pointer-field convention in agents.go).
+type UpdateModelPricingRequest struct {
+	CostPer1kIn           *float64 `json:"cost_per_1k_in,omitempty"`
+	CostPer1kOut          *float64 `json:"cost_per_1k_out,omitempty"`
+	CostPer1kCacheWrite5m *float64 `json:"cost_per_1k_cache_write_5m,omitempty"`
+	CostPer1kCacheWrite1h *float64 `json:"cost_per_1k_cache_write_1h,omitempty"`
+	CostPer1kCacheRead    *float64 `json:"cost_per_1k_cache_read,omitempty"`
 }
 
 type TokenSpendSummary struct {
@@ -265,6 +310,12 @@ type TokenSpendSummary struct {
 	ByTeam            []TeamSpend  `json:"by_team"`
 	ByModel           []ModelSpend `json:"by_model"`
 	ByTool            []ToolSpend  `json:"by_tool"`
+	// UnrecognizedModelRequestCount (B-112) is the number of token_usage
+	// rows in this period whose model has no model_pricing row -- these
+	// rows contribute $0 to TotalCostUSD (not their real, unknown cost),
+	// so a nonzero count here means TotalCostUSD is a silent undercount.
+	// See ModelSpend.PricingConfigured for the per-model breakdown.
+	UnrecognizedModelRequestCount int64 `json:"unrecognized_model_request_count"`
 }
 
 type SpendPoint struct {

@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
@@ -133,12 +134,20 @@ export function FinOpsPage() {
   )[0]
   const avgCost = summary?.avg_cost_per_outcome
 
-  // Daily spend bar chart data — annotated with model proportions for stacking
-  const models = (summary?.by_model ?? []).map((m, i) => ({
-    model: m.model ?? `model-${i}`,
-    cost: m.cost_usd ?? 0,
-    color: MODEL_COLORS[i % MODEL_COLORS.length],
-  }))
+  // Daily spend bar chart data — annotated with model proportions for stacking.
+  // pricing_configured (B-112) isn't yet in api/openapi.yaml (Architect-EAMI-
+  // owned, out of this session's file boundary), same disclosed-deviation
+  // precedent as by_tool below -- an unrecognized model's cost_usd is a
+  // silent $0 (no rate exists to compute its real cost from), so its label
+  // is flagged rather than rendered identically to a genuinely free model.
+  const models = (summary?.by_model ?? []).map((m, i) => {
+    const pricingConfigured = (m as { pricing_configured?: boolean }).pricing_configured ?? true
+    return {
+      model: pricingConfigured ? (m.model ?? `model-${i}`) : `${m.model ?? `model-${i}`} (unpriced)`,
+      cost: m.cost_usd ?? 0,
+      color: pricingConfigured ? MODEL_COLORS[i % MODEL_COLORS.length] : '#9CA3AF',
+    }
+  })
   const totalModelCost = models.reduce((s, m) => s + m.cost, 0)
 
   const barData = useMemo(() => {
@@ -189,6 +198,13 @@ export function FinOpsPage() {
     .slice()
     .sort((a, b) => (b.cost_usd ?? 0) - (a.cost_usd ?? 0))
 
+  // unrecognized_model_request_count (B-112): a nonzero value means
+  // total_cost_usd above is a silent undercount -- some dispatches this
+  // period used a model with no configured rate, priced at $0 rather than
+  // their real (unknown) cost. Surfaced here rather than left invisible.
+  const unrecognizedModelCount =
+    (summary as { unrecognized_model_request_count?: number } | undefined)?.unrecognized_model_request_count ?? 0
+
   return (
     <div>
       <Topbar
@@ -203,6 +219,17 @@ export function FinOpsPage() {
         }
       />
       <div className="p-6 space-y-6">
+
+        {/* B-112: unrecognized-model warning -- total_cost_usd below is a
+            silent undercount whenever this is nonzero. */}
+        {unrecognizedModelCount > 0 && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <span className="font-semibold">{unrecognizedModelCount}</span>{' '}
+            dispatch{unrecognizedModelCount !== 1 ? 'es' : ''} this period used a model with no configured
+            pricing — its cost shows as $0.00, so totals below may be undercounted.{' '}
+            <Link to="/settings?tab=model-pricing" className="font-medium underline">Add pricing</Link>
+          </div>
+        )}
 
         {/* KPI row */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

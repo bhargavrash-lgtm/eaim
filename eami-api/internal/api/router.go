@@ -201,6 +201,14 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/v1/users/invite", s.InviteUser)
 			r.Put("/v1/users/{userId}/role", s.UpdateUserRole)
 			r.Delete("/v1/users/{userId}", s.DeleteUser)
+			// model_pricing (B-112) is a global, cross-org table (no
+			// org_id column) -- gated admin-only rather than the looser
+			// admin+operator gating agents/policies/tools use below,
+			// since a write here affects every org's cost reporting, not
+			// just the calling org's own resources.
+			r.Post("/v1/admin/model-pricing", s.CreateModelPricing)
+			r.Patch("/v1/admin/model-pricing/{model}", s.UpdateModelPricing)
+			r.Delete("/v1/admin/model-pricing/{model}", s.DeleteModelPricing)
 		})
 
 		// ── Admin + operator: write access ────────────────────────────────────
@@ -265,6 +273,7 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/v1/gateway/workflows/{workflowId}", s.GetWorkflow)
 			r.Get("/v1/gateway/workflow-steps/{stepId}/params", s.GetWorkflowStepParams)
 			r.Get("/v1/gateway/nodes", s.ListNodes)
+			r.Get("/v1/admin/model-pricing", s.ListModelPricing)
 			r.Get("/v1/audit", s.ListAudit)
 			r.Get("/v1/audit/export", s.ExportAudit)
 			r.Get("/v1/audit/verify", s.VerifyAuditChain)

@@ -654,3 +654,88 @@ func TestFinOpsSummary_Real_RateChangeThenRequery_ReflectsNewRate(t *testing.T) 
 		t.Error("cost did not change after the rate update -- query-time computation is not actually working")
 	}
 }
+
+// ─── B-112: fallback-rate collision fix ─────────────────────────────────────
+
+// TestFinOpsSummary_Real_UnrecognizedModel_NeverMergesIntoRecognizedModelsCost
+// is the AC3 centerpiece: an unrecognized model's row must never contaminate
+// a different, recognized model's aggregate cost, and must be visibly
+// flagged (PricingConfigured=false, plus a nonzero
+// UnrecognizedModelRequestCount) rather than silently rendered as an
+// indistinguishable $0.00. Re-verified via direct psql before this fix was
+// written: the unrecognized row was already correctly kept in its own
+// by_model bucket (never merged into the recognized model's), but showed a
+// plain, unflagged $0 -- indistinguishable from a genuinely free dispatch.
+func TestFinOpsSummary_Real_UnrecognizedModel_NeverMergesIntoRecognizedModelsCost(t *testing.T) {
+	env := newFinOpsPgTestEnv(t)
+	now := time.Now().UTC()
+
+	recognizedModel := "b112-recognized-model-" + env.orgID.String()[:8]
+	env.setModelPricing(t, recognizedModel, 0.01, 0.02, 0, 0, 0)
+	unrecognizedModel := "b112-totally-unrecognized-model-" + env.orgID.String()[:8]
+	// Deliberately no setModelPricing call for unrecognizedModel -- that's
+	// the point: no model_pricing row exists for it at all.
+
+	agentA := env.seedAgent(t, "b112-collision-agent", "team-a")
+
+	// Recognized row: 1000/500 tokens at 0.01/0.02 -> exactly 0.02.
+	env.insertUsage(t, agentA, "b112-collision-agent", recognizedModel, 1000, 500, 0.02, now.Add(-30*time.Minute))
+	// Unrecognized row: same shape, but no pricing exists to compute a real
+	// cost from -- cost_usd left NULL (as real write-time ingestion would
+	// do for an unrecognized model), same as recognizedModel's row.
+	env.insertUsage(t, agentA, "b112-collision-agent", unrecognizedModel, 1000, 500, 0, now.Add(-30*time.Minute))
+	// insertUsage stores 0 as cost_usd verbatim -- but InsertTokenUsage's
+	// own NULL-when-<=0 encoding (token_usage.sql.go) means this lands as
+	// SQL NULL, exactly matching a real unrecognized-model write.
+
+	from := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	to := now.Add(1 * time.Hour).Format(time.RFC3339)
+	resp, summary := env.getSummary(t, from, to)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+
+	if len(summary.ByModel) != 2 {
+		t.Fatalf("want exactly 2 by_model entries (no merge), got %d: %+v", len(summary.ByModel), summary.ByModel)
+	}
+	var recognized, unrecognized *api.ModelSpend
+	for i := range summary.ByModel {
+		switch summary.ByModel[i].Model {
+		case recognizedModel:
+			recognized = &summary.ByModel[i]
+		case unrecognizedModel:
+			unrecognized = &summary.ByModel[i]
+		}
+	}
+	if recognized == nil || unrecognized == nil {
+		t.Fatalf("expected both models present as separate entries, got %+v", summary.ByModel)
+	}
+
+	// The core proof: the recognized model's cost is EXACTLY its own
+	// value, un-contaminated by the unrecognized row.
+	if recognized.CostUSD != 0.02 {
+		t.Errorf("recognized model CostUSD = %v, want 0.02 (must not include any part of the unrecognized model's cost)", recognized.CostUSD)
+	}
+	if !recognized.PricingConfigured {
+		t.Error("recognized model PricingConfigured = false, want true")
+	}
+
+	// The B-112 fix: the unrecognized model is visibly flagged, not a
+	// plain, indistinguishable $0.00.
+	if unrecognized.CostUSD != 0 {
+		t.Errorf("unrecognized model CostUSD = %v, want 0 (no rate exists to compute a real cost)", unrecognized.CostUSD)
+	}
+	if unrecognized.PricingConfigured {
+		t.Error("unrecognized model PricingConfigured = true, want false -- this is exactly the silent-undercount case B-112 must flag")
+	}
+
+	if summary.UnrecognizedModelRequestCount != 1 {
+		t.Errorf("UnrecognizedModelRequestCount = %d, want 1", summary.UnrecognizedModelRequestCount)
+	}
+	// Grand total must also reflect only the recognized model's real cost
+	// -- not silently including a phantom contribution from the
+	// unrecognized row, and not silently merged into it either.
+	if summary.TotalCostUSD != 0.02 {
+		t.Errorf("TotalCostUSD = %v, want 0.02 (unrecognized model's real cost is unknown, not $0 -- but must not be invented either)", summary.TotalCostUSD)
+	}
+}
