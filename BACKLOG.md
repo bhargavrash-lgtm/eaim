@@ -927,4 +927,17 @@ New `PATCH /v1/gateway/tools/{toolId}` (`store.UpdateTool`/`Server.UpdateTool`) 
 **Live-verified end-to-end against the real running stack, rebuilt and restarted:** a real `POST /v1/gateway/tokens` (B-098) → real MCP SSE session → real `tool_call` through a real `rest_api` connector to `postman-echo.com` — the resulting real `token_usage` row confirmed via `psql` to carry `tool_name = 'b108-echo-connector'` (AC1). Two more rows seeded with distinct connectors/costs; a real admin login then a real `GET /v1/finops/summary` returned `total_cost_usd: 0.37`, `avg_cost_per_outcome: 0.12333...` (= 0.37/3 exactly), `by_tool` correctly split $0.30/$0.07 across the two connectors, `by_team` correctly present — all hand-verified against the seeded values (AC2, AC3, AC4). The real running `eami-ui` dev container confirmed serving the new sections via a direct fetch of the served module. All fixtures cleaned up afterward, including 3 `token_usage` rows requiring explicit manual deletion (`token_usage.org_id` has no FK, doesn't cascade with the org).
 **Dependencies:** B-097 (`by_team`'s underlying query), B-098 (live-verification login/token path). **Out of scope, as specified:** `model_pricing` admin CRUD, caching cost-accounting, budget enforcement, workflow-level cost attribution (all separate, already-logged from the same re-investigation).
 
-## Next B-ID: B-109
+### B-109 — Concurrent test-helper data race: shared `float64` cost variable mutated across goroutines without synchronization
+**Objective:** found during the caching cost-accounting investigation (not yet started as a fix) — a test helper mutates a shared `float64` cost accumulator from concurrent test goroutines with no synchronization (mutex/atomic/channel). Real but narrow: test-only code, not a production path, so no live-system correctness or security impact — the risk is flaky/misleading test results (a torn read/write on a non-atomic `float64`), not a shipped bug.
+**Severity:** Low.
+**Investigation not started:** exact file/test/line not yet pinned down; scoping that is the first step of whichever session picks this up.
+**Dependencies:** none known yet.
+
+### B-110 — `finops.go` fallback-rate collision: an unrecognized model's requests can be silently misattributed into a recognized model's aggregate totals
+**Objective:** found during the same caching cost-accounting investigation (not yet started as a fix) — in FinOps' cost-summary calculation, a request from a model `model_pricing` doesn't recognize can be silently folded into a different, recognized model's aggregate cost/token totals rather than being excluded or bucketed as unknown. Unlike B-109, this is a real correctness gap in FinOps' own reporting accuracy (production code, not test-only) — a real dispatch's spend could misreport against the wrong model line.
+**Severity:** Medium.
+**Connection to item 3 (`model_pricing` admin CRUD, tracked separately):** worth doing alongside that work rather than deferred indefinitely — admin CRUD will let operators add/rename model rows directly, which is exactly the lever that changes how often an "unrecognized model" case is hit in practice; fixing the collision in isolation, before CRUD exists, risks re-solving it once CRUD reshapes how models get registered.
+**Investigation not started:** exact query/join responsible for the misattribution not yet root-caused; scoping that is the first step of whichever session picks this up.
+**Dependencies:** related to item 3 (`model_pricing` admin CRUD, not yet B-ID'd) — see note above.
+
+## Next B-ID: B-111
