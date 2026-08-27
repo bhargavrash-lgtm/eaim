@@ -6,11 +6,94 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/eami/gateway/internal/safego"
 )
+
+// tokenIssueRateLimit/tokenIssueRateLimitWindow bound POST /v1/gateway/tokens
+// per resolved agent (B-118). Hardcoded rather than env-configurable like
+// B-070's WorkflowRunPerAgent/WorkflowRunPerAgentWindowSeconds -- a fully
+// tunable version is legitimate future work (see BACKLOG.md's B-118 entry
+// for the follow-up item, added at the same time this was built), but
+// closing the "no rate limiting exists at all" gap matters more than making
+// the threshold operator-tunable, and a same-file constant keeps this fix
+// inside issue_http.go/apikey.go, this brief's full MAY MODIFY scope,
+// without touching config.go/main.go.
+const (
+	tokenIssueRateLimit       = 20
+	tokenIssueRateLimitWindow = 60 * time.Second
+)
+
+// rateLimiter is a small in-memory, per-key fixed-window limiter, algorithm
+// deliberately reused from eami-gateway/internal/workflow/ratelimit.go
+// (B-070) rather than invented fresh -- same fixed-window/fail-closed/
+// Retry-After shape, duplicated (not imported) because sharing it would mean
+// either exporting workflow-package internals for one non-workflow caller or
+// a new shared package for a two-line struct, neither justified by this
+// brief's scope. ADR-020 Model A is always a single process, so in-memory
+// state is correct here for the same reason it is in workflow/ratelimit.go.
+type rateLimiter struct {
+	mu       sync.Mutex
+	attempts map[string][]time.Time
+	limit    int
+	window   time.Duration
+}
+
+func newRateLimiter(limit int, window time.Duration) *rateLimiter {
+	return &rateLimiter{attempts: make(map[string][]time.Time), limit: limit, window: window}
+}
+
+// Allow records an attempt for key and reports whether it's within the
+// window's limit. When it is not, retryAfter is the duration until the
+// window's oldest surviving attempt ages out, suitable for a Retry-After
+// response header. A non-positive limit fails closed rather than panicking
+// on the kept[0] index below -- see workflow/ratelimit.go's identical
+// reasoning; tokenIssueRateLimit above is a positive compile-time constant,
+// but Allow() stays defensive independent of that, matching the precedent.
+func (rl *rateLimiter) Allow(key string) (ok bool, retryAfter time.Duration) {
+	if rl.limit <= 0 {
+		return false, rl.window
+	}
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-rl.window)
+	var kept []time.Time
+	for _, t := range rl.attempts[key] {
+		if t.After(cutoff) {
+			kept = append(kept, t)
+		}
+	}
+	if len(kept) >= rl.limit {
+		rl.attempts[key] = kept
+		oldest := kept[0]
+		retryAfter = oldest.Add(rl.window).Sub(now)
+		if retryAfter < time.Second {
+			retryAfter = time.Second
+		}
+		return false, retryAfter
+	}
+	rl.attempts[key] = append(kept, now)
+	return true, 0
+}
+
+// setRetryAfter sets the Retry-After header from a rate-limit duration,
+// rounding up to a whole number of seconds per RFC 9110 Sec 10.2.3.
+func setRetryAfter(w http.ResponseWriter, d time.Duration) {
+	secs := int(d / time.Second)
+	if d%time.Second != 0 {
+		secs++
+	}
+	if secs < 1 {
+		secs = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+}
 
 // IssueHandler serves POST /v1/gateway/tokens (B-098).
 //
@@ -33,6 +116,7 @@ type IssueHandler struct {
 	manager *Manager
 	keys    APIKeyValidator
 	events  TokenEventStore
+	limiter *rateLimiter // B-118
 }
 
 // NewIssueHandler returns an IssueHandler. No AgentResolver parameter (B-107
@@ -40,7 +124,7 @@ type IssueHandler struct {
 // registry.Registry/AgentResolver itself is completely untouched and still
 // used unmodified by revoke_http.go.
 func NewIssueHandler(m *Manager, keys APIKeyValidator, events TokenEventStore) *IssueHandler {
-	return &IssueHandler{manager: m, keys: keys, events: events}
+	return &IssueHandler{manager: m, keys: keys, events: events, limiter: newRateLimiter(tokenIssueRateLimit, tokenIssueRateLimitWindow)}
 }
 
 // HandleIssue handles POST /v1/gateway/tokens.
@@ -120,9 +204,44 @@ func (h *IssueHandler) HandleIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Subject is rebuilt from the resolved record's own canonical name, not
-	// echoed from client input.
+	// B-118: rate-limited by the resolved agent's real registry UUID, not
+	// the raw client-claimed agent_id string -- same cross-org-collision
+	// reasoning as workflow/ratelimit.go's RateLimitRunMiddleware (agent
+	// names are unique only per-org, schema.sql's UNIQUE (org_id, name)).
+	// Checked only once the caller is fully authenticated and scoped (past
+	// both the API-key validation and the cross-agent scoping check above)
+	// so an invalid/misscoped request never consumes a legitimate agent's
+	// quota -- same ordering precedent as B-070's own workflow-run limiter.
+	if ok, retryAfter := h.limiter.Allow(rec.ID); !ok {
+		setRetryAfter(w, retryAfter)
+		http.Error(w, "too many token issuance requests for this agent -- try again later", http.StatusTooManyRequests)
+		return
+	}
+
+	// B-116: Subject/Scope/Model/Owner/RiskTier/TTLSeconds are all rebuilt
+	// from the resolved gateway_agents record, not echoed from client input
+	// -- previously only Subject was. A signed token's claims must reflect
+	// what the agent is actually authorized for in the DB, not whatever the
+	// issuance request happened to say. TTLSeconds is not latent the way
+	// the other four originally were -- Manager.Issue honors it directly
+	// and Manager.Validate enforces exp from it, so a client that could set
+	// its own ttl_seconds could mint a token that outlives the per-agent
+	// window an admin configured via gateway_agents.token_ttl_seconds (a
+	// real, admin-managed column previously never read by eami-gateway at
+	// all) -- caught by this brief's own mandatory review passes, not in
+	// B-116's original backlog description. api/openapi.yaml's
+	// AITokenRequest still documents ttl_seconds as client-settable
+	// (60-14400s) -- that's Architect-EAMI-owned (BOUNDARIES.md), disclosed
+	// as a now-stale contract rather than edited, same B-086/B-107
+	// precedent. Task is the one field deliberately left client-supplied:
+	// it's a per-request purpose string, not an agent-identity attribute,
+	// and gateway_agents has no matching column to rebuild it from.
 	req.AgentID = "agent:" + rec.Name
+	req.Scope = rec.Scope
+	req.Model = rec.Model
+	req.Owner = rec.Owner
+	req.RiskTier = rec.RiskTier
+	req.TTLSeconds = rec.TokenTTLSeconds
 	resp, err := h.manager.Issue(req)
 	if err != nil {
 		slog.Error("identity: token issuance failed", "err", err)

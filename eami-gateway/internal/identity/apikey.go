@@ -24,9 +24,24 @@ type APIKeyRecord struct {
 // call site (registry.Registry/AgentResolver stay completely untouched,
 // still used unmodified by revoke_http.go).
 type ResolvedAgent struct {
-	ID     string // UUID
-	Name   string
-	Status string // "active" | "suspended" | "revoked"
+	ID       string // UUID
+	Name     string
+	Status   string // "active" | "suspended" | "revoked"
+	Scope    string // gateway_agents.scope -- authoritative, B-116
+	Model    string // gateway_agents.model -- authoritative, B-116
+	Owner    string // gateway_agents.owner -- authoritative, B-116
+	RiskTier string // gateway_agents.risk_tier -- authoritative, B-116
+
+	// TokenTTLSeconds (gateway_agents.token_ttl_seconds, B-116's mandatory
+	// code-review pass -- not in B-116's original backlog description,
+	// which only named Scope/Task/Model/Owner/RiskTier, but the same bug
+	// class): unlike those four claims, TTL is NOT latent -- Manager.Issue
+	// (tokens.go) honors req.TTLSeconds directly and Manager.Validate
+	// enforces exp from it. Leaving this client-controlled while "fixing"
+	// four claims nothing downstream reads would have hardened the wrong
+	// fields entirely; see issue_http.go's HandleIssue for where this is
+	// applied.
+	TokenTTLSeconds int
 }
 
 // APIKeyValidator resolves a raw API key (as presented in the X-API-Key
@@ -98,7 +113,7 @@ func (v *pgAPIKeyValidator) ValidateAndResolveAgent(ctx context.Context, rawKey,
 	}
 	row := v.pool.QueryRow(ctx, `
 		SELECT ak.id::text, ak.org_id::text, COALESCE(ak.agent_id::text, ''),
-		       ga.id::text, ga.name, ga.status
+		       ga.id::text, ga.name, ga.status, ga.scope, ga.model, ga.owner, ga.risk_tier, ga.token_ttl_seconds
 		FROM api_keys ak
 		LEFT JOIN gateway_agents ga ON ga.org_id = ak.org_id AND ga.name = $2
 		WHERE ak.key_hash = $1 AND ak.revoked = FALSE AND (ak.expires_at IS NULL OR ak.expires_at > NOW())
@@ -106,8 +121,9 @@ func (v *pgAPIKeyValidator) ValidateAndResolveAgent(ctx context.Context, rawKey,
 	`, hashAPIKey(rawKey), agentName)
 
 	var rec APIKeyRecord
-	var agentID, agentNameCol, agentStatus *string
-	if err := row.Scan(&rec.ID, &rec.OrgID, &rec.AgentID, &agentID, &agentNameCol, &agentStatus); err != nil {
+	var agentID, agentNameCol, agentStatus, agentScope, agentModel, agentOwner, agentRiskTier *string
+	var agentTokenTTL *int
+	if err := row.Scan(&rec.ID, &rec.OrgID, &rec.AgentID, &agentID, &agentNameCol, &agentStatus, &agentScope, &agentModel, &agentOwner, &agentRiskTier, &agentTokenTTL); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil, ErrInvalidAPIKey
 		}
@@ -119,5 +135,20 @@ func (v *pgAPIKeyValidator) ValidateAndResolveAgent(ctx context.Context, rawKey,
 		// ErrAgentNotFound covered.
 		return &rec, nil, nil
 	}
-	return &rec, &ResolvedAgent{ID: *agentID, Name: *agentNameCol, Status: *agentStatus}, nil
+	// The 5 pointer dereferences below are safe only because
+	// scope/model/owner/risk_tier/token_ttl_seconds are all NOT NULL on
+	// gateway_agents (schema.sql) -- confirmed, not assumed, by this
+	// brief's own mandatory review passes. agentID != nil here (checked
+	// above) guarantees the LEFT JOIN matched a real row, so a NULL in any
+	// of these five would mean the column itself went nullable, not a
+	// missing join. If a future migration ever relaxes one of those NOT
+	// NULL constraints, this panics on a real request instead of silently
+	// misbehaving -- deliberately not defended with COALESCE, since a
+	// silently-substituted empty scope/risk_tier on an identity/auth path
+	// is a worse failure mode than a loud crash.
+	return &rec, &ResolvedAgent{
+		ID: *agentID, Name: *agentNameCol, Status: *agentStatus,
+		Scope: *agentScope, Model: *agentModel, Owner: *agentOwner, RiskTier: *agentRiskTier,
+		TokenTTLSeconds: *agentTokenTTL,
+	}, nil
 }
