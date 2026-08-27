@@ -80,6 +80,33 @@ type DispatchOutcome struct {
 	// episodeRecorder.Record call.
 	EpisodeSteps   []episode.Step
 	EpisodeOutcome string
+	// AuditWriteErr (B-121) is the error returned by this branch's own
+	// d.auditWriter.Write call, if any -- nil on a successful write. Every
+	// branch below calls Write() at its OWN correct moment (Escalate
+	// writes before Hold() blocks; the others write after their outcome is
+	// known) -- that timing is deliberately NOT unified into the hook loop
+	// (see Dispatch's own doc comment), but the resulting error's HANDLING
+	// is: carrying it through here lets logAuditWriteFailureHook below
+	// react identically regardless of which branch produced it, closing
+	// the asymmetry B-121 found (Allow's proxy-error and Deny/Escalate all
+	// silently discarded this error via `_ = ...`; only Allow-success
+	// checked it) with one change instead of three independently-patched
+	// call sites that could drift apart again later.
+	AuditWriteErr error
+	// AuditDecision (B-121) is the exact value that was set on
+	// auditEntry.Decision for the write AuditWriteErr came from --
+	// deliberately NOT the same as Decision above. Found by this fix's own
+	// mandatory security-review pass: the Allow-proxy-failure branch sets
+	// Decision:"allowed" (the policy branch label) but
+	// auditEntry.Decision="denied" (what was actually attempted for
+	// audit_log) -- logging Decision there would have told an operator
+	// reconciling a lost row to look for a "denied" gap under "allowed" in
+	// their own investigation, exactly backwards. AuditDecision is always
+	// the value genuinely passed to d.auditWriter.Write, so
+	// logAuditWriteFailureHook's log line is trustworthy by construction,
+	// not by the three-out-of-four branches happening to agree with
+	// Decision.
+	AuditDecision string
 }
 
 // DispatchHook reacts to one completed Dispatcher.Dispatch call. Every
@@ -146,11 +173,71 @@ func NewDispatcher(
 		apiServiceKey:    apiServiceKey,
 		holdTimeout:      holdTimeout,
 	}
+	// logAuditWriteFailureHook is registered FIRST (code-review finding on
+	// this fix): recordTokenUsageHook runs extractTokenUsage synchronously
+	// before spawning its own goroutine, and the hook loop below has no
+	// panic recovery -- a panic there would have prevented the
+	// audit-integrity signal from ever firing if it ran after. The
+	// audit-write-failure signal has zero dependency on the other two
+	// hooks, so registering it first costs nothing and makes it unlosable.
 	d.hooks = append([]DispatchHook{
+		d.logAuditWriteFailureHook,
 		d.recordTokenUsageHook,
 		d.recordEpisodeHook,
 	}, extraHooks...)
 	return d
+}
+
+// logAuditWriteFailureHook (B-121) logs a failed audit_log write at Error
+// level, uniformly for every decision type -- closing the asymmetry where
+// only the Allow-success branch checked d.auditWriter.Write's returned
+// error (via an inline slog.Error) while Deny/Escalate/Allow-proxy-error
+// all silently discarded it (`_ = ...`). No-op on a successful write
+// (the overwhelmingly common case).
+//
+// Logging, not a stronger alert/metric, is the deliberate choice here
+// (confirmed with the user before building): eami-gateway has no existing
+// metrics or alerting infrastructure to escalate into today (no
+// Prometheus, no expvar -- only an opt-in pprof endpoint), and
+// eami-api's internal/alerting engine is a separate Go module evaluating
+// business-metric alert rules, not reachable from here and not a natural
+// fit for an in-process DB-write failure signal. Building new alerting
+// infrastructure for this one gap would be well beyond this fix's scope;
+// if real paging is wanted later, that's a separate, larger decision.
+//
+// Log fields (code-review finding on this fix): the lost audit_log row's
+// own id is generated inside audit.Writer.Write and never returned, so
+// these fields are the ONLY correlation key an operator investigating a
+// gap has. workflow_run_id/step_index/session_id/agent_uuid were added
+// after the first draft only logged org_id/agent-name/tool/action/
+// decision -- insufficient to correlate against workflow_run_steps (which
+// has no FK to/from audit_log at all, per ActionContext's own doc
+// comment) or the approval subsystem (keyed on session, not agent name).
+func (d *Dispatcher) logAuditWriteFailureHook(_ context.Context, ac mcp.ActionContext, o DispatchOutcome) {
+	if o.AuditWriteErr == nil {
+		return
+	}
+	var stepIndex any
+	if ac.StepIndex != nil {
+		stepIndex = *ac.StepIndex
+	}
+	slog.Error("dispatch: audit_log write failed",
+		"org_id", ac.OrgID,
+		"agent", ac.AgentName,
+		"agent_uuid", ac.AgentUUID,
+		"session_id", ac.SessionID,
+		"tool", ac.Tool,
+		"action", ac.Action,
+		// AuditDecision, not Decision -- see AuditDecision's own doc
+		// comment (security-review finding on this fix): they diverge for
+		// the Allow-proxy-failure branch (Decision="allowed", the policy
+		// branch label, but the audit_log write that failed was
+		// actually "denied").
+		"decision", o.AuditDecision,
+		"workflow_run_id", ac.WorkflowRunID,
+		"step_index", stepIndex,
+		"err", o.AuditWriteErr,
+	)
 }
 
 // recordTokenUsageHook is the pre-B-102 recordTokenUsage call, migrated
@@ -310,7 +397,7 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 	switch decision.Action {
 	case policy.ActionDeny:
 		auditEntry.Decision = "denied"
-		_ = d.auditWriter.Write(reqCtx, auditEntry)
+		auditWriteErr := d.auditWriter.Write(reqCtx, auditEntry)
 		outcome = DispatchOutcome{
 			Decision: "denied",
 			// Return a typed error so the MCP handler builds a structured -32600 response.
@@ -320,12 +407,18 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 			},
 			EpisodeSteps:   []episode.Step{newEpisodeStep(ac, "blocked", nil)},
 			EpisodeOutcome: "blocked",
+			AuditWriteErr:  auditWriteErr,
+			AuditDecision:  auditEntry.Decision,
 		}
 
 	case policy.ActionEscalate:
 		// Write "escalated" audit entry before blocking on the approval waiter.
 		auditEntry.Decision = "escalated"
-		_ = d.auditWriter.Write(reqCtx, auditEntry)
+		// auditWriteErr (B-121) is carried into BOTH of this branch's exit
+		// points below (the Submit-failure early exit and the
+		// resumed-after-Hold exit) -- this single write happens before
+		// either is reached, so both outcomes must report the same result.
+		auditWriteErr := d.auditWriter.Write(reqCtx, auditEntry)
 
 		approvalReq := approval.Request{
 			OrgID:      ac.OrgID,
@@ -379,8 +472,10 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 			// was ever reached), and recordEpisodeHook's empty-steps
 			// guard preserves that exactly.
 			outcome = DispatchOutcome{
-				Decision: "escalated",
-				Err:      fmt.Errorf("approval submit: %w", submitErr),
+				Decision:      "escalated",
+				Err:           fmt.Errorf("approval submit: %w", submitErr),
+				AuditWriteErr: auditWriteErr,
+				AuditDecision: auditEntry.Decision,
 			}
 			break
 		}
@@ -401,6 +496,8 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 			Err:            holdErr,
 			EpisodeSteps:   []episode.Step{newEpisodeStep(ac, "escalated", result)},
 			EpisodeOutcome: episodeOutcome,
+			AuditWriteErr:  auditWriteErr,
+			AuditDecision:  auditEntry.Decision,
 		}
 
 	default: // policy.ActionAllow
@@ -434,23 +531,30 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 		}
 		if proxyErr != nil {
 			auditEntry.Decision = "denied"
-			_ = d.auditWriter.Write(reqCtx, auditEntry)
+			auditWriteErr := d.auditWriter.Write(reqCtx, auditEntry)
 			outcome = DispatchOutcome{
 				Decision:       "allowed",
 				Err:            fmt.Errorf("proxy error: %w", proxyErr),
 				EpisodeSteps:   []episode.Step{newEpisodeStep(ac, "allowed", nil)},
 				EpisodeOutcome: "failed",
+				AuditWriteErr:  auditWriteErr,
+				AuditDecision:  auditEntry.Decision,
 			}
 		} else {
 			auditEntry.Decision = "allowed"
-			if writeErr := d.auditWriter.Write(reqCtx, auditEntry); writeErr != nil {
-				slog.Error("audit write failed", "err", writeErr)
-			}
+			// B-121: the failure log this used to do inline here now
+			// happens uniformly for every branch via logAuditWriteFailureHook
+			// (see AuditWriteErr on DispatchOutcome) -- same observable
+			// signal on failure, silent on success, just no longer
+			// duplicated as this branch's own special case.
+			auditWriteErr := d.auditWriter.Write(reqCtx, auditEntry)
 			outcome = DispatchOutcome{
 				Decision:       "allowed",
 				Result:         tr.Body,
 				EpisodeSteps:   []episode.Step{newEpisodeStep(ac, "allowed", tr.Body)},
 				EpisodeOutcome: "success",
+				AuditWriteErr:  auditWriteErr,
+				AuditDecision:  auditEntry.Decision,
 			}
 		}
 	}

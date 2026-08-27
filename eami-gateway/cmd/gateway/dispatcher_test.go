@@ -28,6 +28,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -97,6 +98,23 @@ type dispatcherTestEnv struct {
 func newDispatcherTestEnv(t *testing.T, action string, extraHooks ...DispatchHook) *dispatcherTestEnv {
 	t.Helper()
 	env := newMainTestEnv(t)
+	auditWriter, err := audit.NewWriter(context.Background(), env.pool)
+	if err != nil {
+		t.Fatalf("audit.NewWriter: %v", err)
+	}
+	return newDispatcherTestEnvFromEnv(t, env, action, auditWriter, extraHooks...)
+}
+
+// newDispatcherTestEnvFromEnv is the shared constructor both
+// newDispatcherTestEnv (real Postgres-backed audit.Writer, every
+// pre-existing test) and newDispatcherTestEnvFailingAudit (B-121, a
+// fake-WriterDB-backed audit.Writer that always fails) delegate to, given
+// an already-built *mainTestEnv -- identical wiring for everything except
+// which *audit.Writer is passed to NewDispatcher. Takes env rather than
+// building its own, since newDispatcherTestEnv already needs a real env.pool
+// to construct its own real audit.Writer before this function runs.
+func newDispatcherTestEnvFromEnv(t *testing.T, env *mainTestEnv, action string, auditWriter *audit.Writer, extraHooks ...DispatchHook) *dispatcherTestEnv {
+	t.Helper()
 	agentID, agentName := env.insertAgent(t)
 
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -115,10 +133,6 @@ func newDispatcherTestEnv(t *testing.T, action string, extraHooks ...DispatchHoo
 	go approvalRouter.Run(runCtx)
 	t.Cleanup(cancel)
 
-	auditWriter, err := audit.NewWriter(context.Background(), env.pool)
-	if err != nil {
-		t.Fatalf("audit.NewWriter: %v", err)
-	}
 	episodeRecorder := episode.New(env.pool)
 
 	dispatcher := NewDispatcher(
@@ -128,6 +142,44 @@ func newDispatcherTestEnv(t *testing.T, action string, extraHooks ...DispatchHoo
 	)
 
 	return &dispatcherTestEnv{env: env, dispatcher: dispatcher, downstream: downstream, agentID: agentID, agentName: agentName}
+}
+
+// failingAuditDB (B-121) implements audit.WriterDB, always failing
+// InsertEntry with a fixed, injected error -- audit.NewWithDB is the
+// package's own designed test seam ("Inject a test double... to unit-test
+// audit logic without a real Postgres connection"), so this deterministically
+// simulates a real audit-log write failure (a full disk, a permissions
+// change, a stalled DB) on demand, per branch, without needing to actually
+// break the real test Postgres instance shared by every other test in this
+// file.
+type failingAuditDB struct {
+	err error
+}
+
+func (f *failingAuditDB) GetLastHash(context.Context) (string, error) {
+	// ErrNoRows seeds the hash chain with the genesis hash (writer.go's own
+	// lazy-init path) -- irrelevant to what these tests prove (the INSERT
+	// failure, not hash-chain seeding), and avoids needing a real prior row.
+	return "", audit.ErrNoRows
+}
+
+func (f *failingAuditDB) InsertEntry(context.Context, audit.Entry) error {
+	return f.err
+}
+
+// newDispatcherTestEnvFailingAudit (B-121) is newDispatcherTestEnv with the
+// real Postgres-backed audit.Writer swapped for one backed by
+// failingAuditDB -- every audit_log write this Dispatcher attempts fails
+// deterministically with injectedErr. Everything else (the real toolRouter/
+// aiProviderRouter/approvalRouter/episodeRecorder, the real downstream
+// httptest server) stays genuinely real, matching this file's own
+// established "no full MCP/SSE server needed, but everything Dispatch
+// actually touches is real" precedent.
+func newDispatcherTestEnvFailingAudit(t *testing.T, action string, injectedErr error, extraHooks ...DispatchHook) *dispatcherTestEnv {
+	t.Helper()
+	env := newMainTestEnv(t)
+	auditWriter := audit.NewWithDB(&failingAuditDB{err: injectedErr})
+	return newDispatcherTestEnvFromEnv(t, env, action, auditWriter, extraHooks...)
 }
 
 func (e *dispatcherTestEnv) actionContext(tool string) mcp.ActionContext {
@@ -250,9 +302,10 @@ func TestDispatch_Escalate_Approved_NoFullServerNeeded(t *testing.T) {
 // just that both branches happen to work. ----
 
 type hookCall struct {
-	dispatched   bool
-	decision     string
-	episodeSteps int
+	dispatched    bool
+	decision      string
+	episodeSteps  int
+	auditWriteErr error // B-121
 }
 
 func newRecordingHook() (hook DispatchHook, calls func() []hookCall) {
@@ -261,7 +314,7 @@ func newRecordingHook() (hook DispatchHook, calls func() []hookCall) {
 	hook = func(_ context.Context, _ mcp.ActionContext, o DispatchOutcome) {
 		mu.Lock()
 		defer mu.Unlock()
-		recorded = append(recorded, hookCall{dispatched: o.Dispatched, decision: o.Decision, episodeSteps: len(o.EpisodeSteps)})
+		recorded = append(recorded, hookCall{dispatched: o.Dispatched, decision: o.Decision, episodeSteps: len(o.EpisodeSteps), auditWriteErr: o.AuditWriteErr})
 	}
 	calls = func() []hookCall {
 		mu.Lock()
@@ -401,5 +454,345 @@ func TestDispatch_Escalate_SubmitFails_StillConverges(t *testing.T) {
 	}
 	if got[0].episodeSteps != 0 {
 		t.Errorf("EpisodeSteps had %d entries, want 0 -- pre-B-102 this path never wrote an episode either (it returned before Hold() was ever reached); recordEpisodeHook's empty-steps guard must preserve that exactly, not start writing a new episode for a case that never had one", got[0].episodeSteps)
+	}
+}
+
+// ---- B-121: a failed audit_log write is now logged identically for every
+// decision type, via the new logAuditWriteFailureHook, instead of being
+// silently discarded on Deny/Escalate/Allow-proxy-error while only
+// Allow-success checked it. ----
+
+// capturedLog is one slog record captured by captureAuditFailureLogs below.
+type capturedLog struct {
+	msg   string
+	attrs map[string]any
+}
+
+// captureHandler is a minimal slog.Handler that appends every record it
+// receives to a shared, mutex-guarded slice -- just enough to assert on
+// message/attributes in a test, not a general-purpose logging facility.
+//
+// Deliberately does NOT forward to the real previous default handler --
+// an earlier draft of this fix tried that (to avoid silently swallowing
+// unrelated log output, e.g. this package's own pre-existing "episode: db
+// write failed" warning, for the duration of every test using this
+// capture) and it deadlocked: Go's slog.defaultHandler (the bridge to the
+// classic `log` package installed when nothing has customized
+// slog.Default()) internally re-enters through `log.Logger.output`'s own
+// non-reentrant mutex when called from inside another handler's Handle --
+// confirmed by a real hang, `go test -timeout 30s` panicking with two
+// goroutines both blocked in log.(*Logger).output on the identical mutex,
+// one nested inside the other's call stack. captureAuditFailureLogs below
+// dumps captured records via t.Logf on failure instead, which gets the
+// same "don't silently hide info from someone debugging a failure"
+// outcome without touching the live default handler chain at runtime.
+type captureHandler struct {
+	mu      *sync.Mutex
+	records *[]capturedLog
+}
+
+func (h *captureHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *captureHandler) Handle(_ context.Context, r slog.Record) error {
+	attrs := make(map[string]any, r.NumAttrs())
+	r.Attrs(func(a slog.Attr) bool {
+		attrs[a.Key] = a.Value.Any()
+		return true
+	})
+	h.mu.Lock()
+	*h.records = append(*h.records, capturedLog{msg: r.Message, attrs: attrs})
+	h.mu.Unlock()
+	return nil
+}
+
+// WithAttrs/WithGroup return the receiver unchanged -- no code under test
+// here ever calls slog.Default().With(...)/WithGroup(...)
+// (logAuditWriteFailureHook always logs directly via slog.Error), so a
+// full attrs-merging implementation would be untested, unused complexity.
+// Documented here instead of silently implemented wrong.
+func (h *captureHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *captureHandler) WithGroup(string) slog.Handler      { return h }
+
+// captureAuditFailureLogs swaps slog's package-level default logger for one
+// that records every entry, restoring the original via t.Cleanup. If the
+// test using it fails, every captured record is dumped via t.Logf first --
+// see captureHandler's own doc comment for why this doesn't forward to the
+// real default handler live (a real, confirmed deadlock in an earlier
+// draft), and this is the safe alternative that keeps failures debuggable.
+//
+// slog.SetDefault is genuinely global process state, so this is safe only
+// under two conditions, both true today: (1) no test in this file calls
+// t.Parallel() -- verified, it appears nowhere in this package outside
+// this comment; (2) no OTHER slog call in this package's test files,
+// including background goroutines that outlive their own test
+// (recordEpisodeHook's detached `go Record(...)`, approval.Router.Run's
+// LISTEN loop), ever emits a message matching findAuditFailureLog's
+// "dispatch: audit_log write failed" filter -- so a leftover goroutine
+// from an EARLIER test logging into a LATER test's still-installed
+// capture window cannot produce a false positive, only an uncounted,
+// harmless record.
+func captureAuditFailureLogs(t *testing.T) func() []capturedLog {
+	t.Helper()
+	prev := slog.Default()
+	var mu sync.Mutex
+	var records []capturedLog
+	slog.SetDefault(slog.New(&captureHandler{mu: &mu, records: &records}))
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		if t.Failed() {
+			mu.Lock()
+			defer mu.Unlock()
+			for i, l := range records {
+				t.Logf("captured log %d: msg=%q attrs=%+v", i, l.msg, l.attrs)
+			}
+		}
+	})
+	return func() []capturedLog {
+		mu.Lock()
+		defer mu.Unlock()
+		out := make([]capturedLog, len(records))
+		copy(out, records)
+		return out
+	}
+}
+
+// findAuditFailureLog returns the first captured "dispatch: audit_log
+// write failed" record whose decision attribute matches wantDecision, or
+// nil if none matches.
+func findAuditFailureLog(logs []capturedLog, wantDecision string) *capturedLog {
+	for i := range logs {
+		if logs[i].msg == "dispatch: audit_log write failed" && logs[i].attrs["decision"] == wantDecision {
+			return &logs[i]
+		}
+	}
+	return nil
+}
+
+// ---- AC1: Deny ----
+
+func TestDispatch_AuditWriteFailure_Deny_LoggedByHook(t *testing.T) {
+	injectedErr := errors.New("b121-simulated-audit-write-failure")
+	getLogs := captureAuditFailureLogs(t)
+	e := newDispatcherTestEnvFailingAudit(t, policy.ActionDeny, injectedErr)
+
+	_, err := e.dispatcher.Dispatch(context.Background(), e.actionContext("some-tool"))
+	var pd *mcp.PolicyDeniedError
+	if !errors.As(err, &pd) {
+		t.Fatalf("Err = %v, want *mcp.PolicyDeniedError -- the audit-write failure must not change the Deny decision itself", err)
+	}
+
+	found := findAuditFailureLog(getLogs(), "denied")
+	if found == nil {
+		t.Fatal("expected a logged audit-write-failure record for the Deny branch, found none -- this is the exact silent discard B-121 closes")
+	}
+	if found.attrs["err"] == nil {
+		t.Error("logged record is missing the err attribute")
+	}
+	if found.attrs["tool"] != "some-tool" {
+		t.Errorf("logged record's tool attribute = %v, want %q", found.attrs["tool"], "some-tool")
+	}
+}
+
+// ---- AC2: Escalate, both exit points that share the same pre-Hold() write ----
+
+func TestDispatch_AuditWriteFailure_Escalate_SubmitFails_LoggedByHook(t *testing.T) {
+	injectedErr := errors.New("b121-simulated-audit-write-failure")
+	getLogs := captureAuditFailureLogs(t)
+	e := newDispatcherTestEnvFailingAudit(t, policy.ActionEscalate, injectedErr)
+
+	ac := e.actionContext("some-tool")
+	ac.OrgID = "" // Submit() rejects this deterministically (router.go), same trick as TestDispatch_Escalate_SubmitFails_StillConverges
+
+	_, err := e.dispatcher.Dispatch(context.Background(), ac)
+	if err == nil {
+		t.Fatal("expected an error from Submit's own validation, got nil")
+	}
+
+	if findAuditFailureLog(getLogs(), "escalated") == nil {
+		t.Fatal("expected a logged audit-write-failure record for the Escalate/Submit-failure branch, found none -- this exit point shares the SAME pre-Hold() write as the resumed case below, and must report the same AuditWriteErr")
+	}
+}
+
+func TestDispatch_AuditWriteFailure_Escalate_Approved_LoggedByHook(t *testing.T) {
+	injectedErr := errors.New("b121-simulated-audit-write-failure")
+	getLogs := captureAuditFailureLogs(t)
+	e := newDispatcherTestEnvFailingAudit(t, policy.ActionEscalate, injectedErr)
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = e.dispatcher.Dispatch(context.Background(), e.actionContext("some-tool"))
+		close(done)
+	}()
+	approvalID := waitForPendingApproval(t, e.env.pool, e.env.orgID, 5*time.Second)
+	decideTestApproval(t, e.env.pool, approvalID, "approved")
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for Dispatch to resume after approval")
+	}
+
+	if findAuditFailureLog(getLogs(), "escalated") == nil {
+		t.Fatal("expected a logged audit-write-failure record for the resumed Escalate branch, found none")
+	}
+}
+
+// ---- AC3: Allow's existing correct behavior is unaffected -- still logged,
+// still doesn't block the underlying dispatched call from succeeding. ----
+
+func TestDispatch_AuditWriteFailure_Allow_LoggedByHook(t *testing.T) {
+	injectedErr := errors.New("b121-simulated-audit-write-failure")
+	getLogs := captureAuditFailureLogs(t)
+	e := newDispatcherTestEnvFailingAudit(t, policy.ActionAllow, injectedErr)
+
+	result, err := e.dispatcher.Dispatch(context.Background(), e.actionContext("some-tool"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v -- an audit-write failure must not block the underlying dispatched call from succeeding, exactly as before this fix", err)
+	}
+	if string(result) != `{"ok":true}` {
+		t.Errorf("Result = %s, want the real downstream body -- unaffected by the audit-write failure", result)
+	}
+
+	if findAuditFailureLog(getLogs(), "allowed") == nil {
+		t.Fatal("expected a logged audit-write-failure record for the Allow branch, found none -- this must remain logged exactly as it always was, now via the shared hook instead of an inline special case")
+	}
+}
+
+// TestDispatch_AuditWriteFailure_AllowProxyError_LoggedWithCorrectDecision
+// is the regression test for a real bug this fix's own mandatory
+// security-review pass found: the Allow-proxy-failure branch sets
+// DispatchOutcome.Decision="allowed" (the policy-branch label -- see its
+// own doc comment) but writes auditEntry.Decision="denied" to audit_log
+// (a failed downstream call is audited as denied, even though the POLICY
+// branch was Allow). Logging Decision there would have told an operator
+// reconciling a lost row to look for a "denied" gap filed under
+// "allowed" -- exactly backwards. This forces a REAL proxy failure and
+// asserts the logged decision is "denied", matching AuditDecision (what
+// was actually attempted), not Decision.
+func TestDispatch_AuditWriteFailure_AllowProxyError_LoggedWithCorrectDecision(t *testing.T) {
+	injectedErr := errors.New("b121-simulated-audit-write-failure")
+	getLogs := captureAuditFailureLogs(t)
+
+	env := newMainTestEnv(t)
+	agentID, agentName := env.insertAgent(t)
+	toolRouter := toolrouter.New(env.pool, nil)
+	aiProviderRouter := aiprovider.New(env.pool, nil, map[string]aiprovider.Adapter{})
+	holdTimeout := 5 * time.Second
+	// A real listener, started then immediately closed, deterministically
+	// and portably refuses the next connection attempt (the OS actually
+	// held this port and released it) -- unlike pointing at an arbitrary
+	// low/unused port number, which internal/proxy/proxy_test.go's own
+	// TestProxy_UnreachableDownstream_ReturnsError does (127.0.0.1:1) but
+	// which this test found hangs under this environment's Windows TCP
+	// stack instead of refusing promptly, timing the whole test out.
+	deadServer := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	deadServer.Close()
+	brokenFwd := proxy.New(proxy.Config{DownstreamURL: deadServer.URL}, http.DefaultClient)
+	approvalRouter := approval.New(env.pool, brokenFwd, holdTimeout, "", "", toolRouter, aiProviderRouter)
+	runCtx, cancel := context.WithCancel(context.Background())
+	go approvalRouter.Run(runCtx)
+	t.Cleanup(cancel)
+	episodeRecorder := episode.New(env.pool)
+	auditWriter := audit.NewWithDB(&failingAuditDB{err: injectedErr})
+
+	dispatcher := NewDispatcher(
+		toolRouter, aiProviderRouter, &fakeEvaluator{action: policy.ActionAllow},
+		auditWriter, episodeRecorder, approvalRouter, brokenFwd,
+		"", "", holdTimeout,
+	)
+	ac := mcp.ActionContext{
+		AgentID: "agent:" + agentName, AgentUUID: agentID.String(), AgentName: agentName,
+		OrgID: env.orgID.String(), Tool: "some-tool", Action: "test-action",
+		Parameters: map[string]any{"k": "v"}, Environment: "development",
+		SessionID: "dispatch-test-" + uuid.NewString()[:8], ReceivedAt: time.Now(),
+	}
+
+	// Bounded as a safety net, not the primary mechanism -- the closed
+	// listener above should refuse promptly on its own; this just ensures
+	// the test fails fast with a clear timeout instead of hanging if
+	// connection-refused timing is ever unreliable in some environment.
+	ctx, cancelDispatch := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelDispatch()
+	_, err := dispatcher.Dispatch(ctx, ac)
+	if err == nil {
+		t.Fatal("expected a proxy error from the unreachable downstream, got nil")
+	}
+
+	if findAuditFailureLog(getLogs(), "denied") == nil {
+		t.Fatal(`expected a logged audit-write-failure record with decision="denied" for the Allow-proxy-failure branch -- got none, or it was mislabeled "allowed" (the exact bug this test regression-guards)`)
+	}
+}
+
+// TestDispatch_NoAuditWriteFailure_NothingLogged is the negative-case
+// sanity check: a successful write (the real Postgres-backed audit.Writer,
+// same as every pre-existing test in this file) must never produce a false
+// positive.
+func TestDispatch_NoAuditWriteFailure_NothingLogged(t *testing.T) {
+	getLogs := captureAuditFailureLogs(t)
+	e := newDispatcherTestEnv(t, policy.ActionAllow)
+
+	if _, err := e.dispatcher.Dispatch(context.Background(), e.actionContext("some-tool")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if found := findAuditFailureLog(getLogs(), "allowed"); found != nil {
+		t.Errorf("expected no audit-write-failure log on a successful write, got one: %+v", found)
+	}
+}
+
+// ---- AC4: B-121's own version of B-102's AC4 proof -- ONE production
+// change (the AuditWriteErr field + the single logAuditWriteFailureHook,
+// both added once in dispatcher.go) correctly logs a failed audit write
+// for every one of the three decision types, not three independently
+// hand-verified branch sites that could silently drift apart again
+// later. Modeled directly on TestDispatch_NewHook_FiresForAllThreeDecisionTypes. ----
+
+func TestDispatch_AuditWriteFailure_LoggedForAllThreeDecisionTypes(t *testing.T) {
+	injectedErr := errors.New("b121-simulated-audit-write-failure")
+	getLogs := captureAuditFailureLogs(t)
+
+	eDeny := newDispatcherTestEnvFailingAudit(t, policy.ActionDeny, injectedErr)
+	if _, err := eDeny.dispatcher.Dispatch(context.Background(), eDeny.actionContext("some-tool")); err == nil {
+		t.Fatal("expected a PolicyDeniedError for the Deny case, got nil")
+	}
+
+	eAllow := newDispatcherTestEnvFailingAudit(t, policy.ActionAllow, injectedErr)
+	if _, err := eAllow.dispatcher.Dispatch(context.Background(), eAllow.actionContext("some-tool")); err != nil {
+		t.Fatalf("unexpected error for the Allow case: %v", err)
+	}
+
+	// Escalate, denied by the approver -- simpler setup than approve-and-
+	// resume; the approve-and-resume sub-case is already separately proven
+	// by TestDispatch_AuditWriteFailure_Escalate_Approved_LoggedByHook above.
+	eEscalate := newDispatcherTestEnvFailingAudit(t, policy.ActionEscalate, injectedErr)
+	done := make(chan struct{})
+	go func() {
+		_, _ = eEscalate.dispatcher.Dispatch(context.Background(), eEscalate.actionContext("some-tool"))
+		close(done)
+	}()
+	approvalID := waitForPendingApproval(t, eEscalate.env.pool, eEscalate.env.orgID, 5*time.Second)
+	decideTestApproval(t, eEscalate.env.pool, approvalID, "denied")
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the Escalate case to resolve")
+	}
+
+	logs := getLogs()
+	for _, decision := range []string{"denied", "allowed", "escalated"} {
+		if findAuditFailureLog(logs, decision) == nil {
+			t.Errorf("no audit-write-failure log found for decision=%q -- the single logAuditWriteFailureHook must cover every decision type from one code change", decision)
+		}
+	}
+	// getLogs() captures EVERY slog line emitted during this test (LISTEN
+	// startup, proxy response, approval state changes, etc.), not just
+	// audit-write-failure records -- count only messages matching this
+	// hook's own, not the raw total.
+	matching := 0
+	for _, l := range logs {
+		if l.msg == "dispatch: audit_log write failed" {
+			matching++
+		}
+	}
+	if matching != 3 {
+		t.Errorf("audit-write-failure logs = %d, want exactly 3 (one per decision type, no duplicates, no extra firings)", matching)
 	}
 }
