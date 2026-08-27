@@ -1,11 +1,16 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"sort"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/eami/api/internal/store"
@@ -261,6 +266,93 @@ func (s *Server) DeletePolicy(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// reorderPoliciesMaxAttempts/reorderPoliciesRetryBackoff bound B-117's
+// deadlock retry: 1 initial attempt + up to 2 retries (the brief's own
+// "1-2 attempts" sizing), a short FIXED backoff -- not exponential, since a
+// 40P01 deadlock is resolved the instant Postgres aborts the losing
+// transaction; there's nothing further to wait out beyond letting the
+// winning transaction's lock release.
+const (
+	reorderPoliciesMaxAttempts  = 3
+	reorderPoliciesRetryBackoff = 20 * time.Millisecond
+)
+
+// reorderPoliciesExecFunc executes one ReorderPolicies attempt against the
+// real store -- a package-level var, not a direct call, purely as a test
+// seam (mirrors cmd/gateway/main.go's tokenUsageWriteFunc convention in the
+// sister module) so a test can inject a real *pgconn.PgError{Code:"40P01"}
+// on an early attempt and prove the retry-then-succeed path deterministically,
+// without needing genuinely concurrent goroutines to probabilistically
+// trigger a real deadlock (B-090's own concurrency test already covers that
+// harder-to-pin-down "does it ever corrupt data" question; this is a
+// narrower, different question -- "does a deadlock get retried").
+var reorderPoliciesExecFunc = func(ctx context.Context, q *store.Queries, orgID uuid.UUID, order []uuid.UUID) error {
+	return q.ReorderPolicies(ctx, orgID, order)
+}
+
+// isReorderDeadlock reports whether err is a real Postgres 40P01 deadlock --
+// the exact class B-090's own concurrency test already treats as a safe,
+// retryable outcome of two genuinely concurrent overlapping reorders, but
+// which nothing in the actual handler retried until this fix (B-117). Same
+// detection shape as policies_reorder_pg_test.go's existing
+// isDeadlockError, not shared across files since that one lives in
+// `package api_test` (external test package) and this needs to be reachable
+// from production code in `package api`.
+func isReorderDeadlock(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "40P01"
+}
+
+// reorderPoliciesWithRetry (B-117) retries a detected 40P01 deadlock up to
+// reorderPoliciesMaxAttempts total attempts before giving up -- a small,
+// bounded, deadlock-specific retry, not a generic retry framework (out of
+// this fix's stated scope, per the task brief). Any other error returns
+// immediately, unretried -- only the specific failure mode B-090's own test
+// already treats as safe gets a second chance.
+//
+// Only valid for an autocommit, single-statement exec -- found by this
+// fix's own mandatory code-review pass: store.ReorderPolicies is a bare
+// q.db.Exec with no explicit transaction (B-090's own deliberate design,
+// see policies.sql.go), so re-executing it on retry is safe. If a future
+// change ever passes a tx-scoped *store.Queries here (store.Queries.WithTx
+// exists elsewhere in this package), Postgres has already aborted that
+// transaction by the time 40P01 is raised -- every retry attempt would
+// return 25P02 ("current transaction is aborted"), which isReorderDeadlock
+// correctly does NOT match, so the retry would silently stop after attempt
+// 1 and surface the misleading 25P02 instead of the real deadlock. Do not
+// call this with a tx-scoped Queries.
+func reorderPoliciesWithRetry(ctx context.Context, q *store.Queries, orgID uuid.UUID, order []uuid.UUID) error {
+	// Found by this fix's own mandatory code-review pass: without this,
+	// reorderPoliciesMaxAttempts <= 0 would make the loop below never
+	// execute and return nil (success) without ever calling the store --
+	// silently reporting the reorder succeeded when it never ran. Not
+	// reachable today (the constant above is a positive compile-time
+	// literal), but the loop itself shouldn't rely on that externally.
+	if reorderPoliciesMaxAttempts < 1 {
+		return fmt.Errorf("reorderPoliciesWithRetry: reorderPoliciesMaxAttempts must be >= 1, got %d", reorderPoliciesMaxAttempts)
+	}
+	var err error
+	for attempt := 1; attempt <= reorderPoliciesMaxAttempts; attempt++ {
+		err = reorderPoliciesExecFunc(ctx, q, orgID, order)
+		if err == nil || !isReorderDeadlock(err) {
+			return err
+		}
+		if attempt < reorderPoliciesMaxAttempts {
+			// Found by this fix's own mandatory code-review pass: a plain
+			// time.Sleep ignores ctx cancellation. The backoff is short
+			// (20ms) so real-world impact is negligible either way, but an
+			// already-cancelled/expired ctx should give up immediately
+			// rather than sleep first.
+			select {
+			case <-ctx.Done():
+				return err
+			case <-time.After(reorderPoliciesRetryBackoff):
+			}
+		}
+	}
+	return err
+}
+
 func (s *Server) ReorderPolicies(w http.ResponseWriter, r *http.Request) {
 	uc := claimsFromContext(r)
 	var req PolicyReorderRequest
@@ -285,7 +377,19 @@ func (s *Server) ReorderPolicies(w http.ResponseWriter, r *http.Request) {
 
 	// Production path.
 	if s.queries != nil {
-		if err := s.queries.ReorderPolicies(r.Context(), uc.OrgID, req.Order); err != nil {
+		// B-117: a real 40P01 deadlock under genuinely concurrent
+		// overlapping reorders (B-090's own test explicitly accepts this as
+		// safe/retryable) is now retried transparently -- a request that
+		// would previously fail on the FIRST deadlock now only fails if
+		// every one of reorderPoliciesMaxAttempts attempts deadlocks. Found
+		// by this fix's own mandatory code/security review: this does NOT
+		// close the raw-driver-error-text-in-response leak below (an
+		// exhausted retry, or any other error, still reaches the caller
+		// verbatim via err.Error()) -- that's the same broader,
+		// app-wide hygiene concern B-117's own backlog entry explicitly
+		// scoped OUT of this one-endpoint fix, not silently reintroduced
+		// here.
+		if err := reorderPoliciesWithRetry(r.Context(), s.queries, uc.OrgID, req.Order); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}

@@ -54,7 +54,17 @@ func seedWorkflow(t *testing.T, e *workflowTestEnv, name string, steps []struct 
 
 func allowAllRules() []policy.Rule {
 	return []policy.Rule{
-		{ID: "allow-all", Name: "allow-all", Priority: 100, Action: policy.ActionAllow},
+		// B-115: ID must be a real UUID, not the literal "allow-all" this
+		// helper originally used -- audit_log.policy_id is a real `uuid`
+		// column, and every allow-path dispatch that matches this rule
+		// writes decision.PolicyID straight into it (see testenv_test.go's
+		// dispatch closure). The literal string failed that INSERT with
+		// "invalid input syntax for type uuid" on every single test using
+		// this helper, silently, since the write error is discarded
+		// (`_ = auditWriter.Write(...)`) and no pre-existing test read back
+		// the resulting row. Name stays "allow-all" -- confirmed no test
+		// asserts against the ID string itself.
+		{ID: uuid.NewString(), Name: "allow-all", Priority: 100, Action: policy.ActionAllow},
 	}
 }
 
@@ -113,6 +123,59 @@ func TestExecutor_Run_AllStepsAllowed_ExecutesInOrder(t *testing.T) {
 	}
 	if runStatus != "completed" {
 		t.Errorf("workflow_runs.status = %q, want completed", runStatus)
+	}
+}
+
+// TestExecutor_Run_AllowPath_UsingAllowAllRules_AuditLogRowPersists is
+// B-115's own regression proof: every pre-existing test that uses
+// allowAllRules() has silently absorbed an audit_log write failure (the
+// helper's rule ID wasn't a valid UUID, and decision.PolicyID -- the
+// matched rule's own ID -- gets written straight into audit_log's real
+// `uuid` policy_id column). None of them previously read back the
+// resulting row, so the failure went unnoticed. This test does read it
+// back, through allowAllRules() directly (NOT
+// allowAllRulesRealPolicyID(), B-093's separate local workaround) --
+// before the B-115 fix this test would fail on the INSERT; after it, the
+// row must exist with decision="allowed" and a policy_id matching the
+// matched rule's own (now-real-UUID) ID.
+func TestExecutor_Run_AllowPath_UsingAllowAllRules_AuditLogRowPersists(t *testing.T) {
+	env := newWorkflowTestEnv(t)
+	rules := allowAllRules()
+	env.rules = rules
+	matchedRuleID := rules[0].ID
+
+	toolA := env.insertAIProviderTool(t, "b115-audit-tool", "b115-provider")
+	adapterA := &fakeAdapter{name: "b115-provider"}
+	de := newDispatchEnv(t, env, map[string]aiprovider.Adapter{"b115-provider": adapterA})
+
+	wfID := seedWorkflow(t, env, "b115-audit-workflow", []struct {
+		toolID uuid.UUID
+		action string
+		params map[string]any
+	}{
+		{toolA, "query", map[string]any{"q": "b115"}},
+	})
+
+	result, err := de.exec.Run(context.Background(), env.template(), wfID)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Status != "completed" || len(result.Steps) != 1 || result.Steps[0].Outcome != "allowed" {
+		t.Fatalf("Run result = %+v, want a single completed/allowed step", result)
+	}
+
+	var decision, policyID string
+	err = env.pool.QueryRow(context.Background(),
+		`SELECT decision, policy_id::text FROM audit_log WHERE workflow_run_id = $1 AND step_index = 0`,
+		result.RunID).Scan(&decision, &policyID)
+	if err != nil {
+		t.Fatalf("expected a real audit_log row for this allow-path dispatch, got error (this is the exact failure B-115 closes): %v", err)
+	}
+	if decision != "allowed" {
+		t.Errorf("audit_log.decision = %q, want %q", decision, "allowed")
+	}
+	if policyID != matchedRuleID {
+		t.Errorf("audit_log.policy_id = %q, want the matched rule's own ID %q", policyID, matchedRuleID)
 	}
 }
 
