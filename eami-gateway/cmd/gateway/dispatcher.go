@@ -32,6 +32,7 @@ import (
 	"github.com/eami/gateway/internal/episode"
 	"github.com/eami/gateway/internal/mcp"
 	"github.com/eami/gateway/internal/proxy"
+	"github.com/eami/gateway/internal/safego"
 	"github.com/eami/gateway/internal/toolrouter"
 	policy "github.com/eami/policy"
 )
@@ -107,6 +108,23 @@ type DispatchOutcome struct {
 	// not by the three-out-of-four branches happening to agree with
 	// Decision.
 	AuditDecision string
+
+	// ResolutionAuditEntry (B-124/125) is the fully-built second audit_log
+	// entry to write once an Escalate branch's Hold() genuinely resolved
+	// (approved, denied, or expired) -- nil for every non-Escalate
+	// outcome, the Submit-failure exit, and a ctx-cancelled Hold() (none
+	// of those have a confirmed resolution to record). Built here, in
+	// Dispatch() itself, not inside the hook that writes it: the fields
+	// it needs to clone correctly (already-masked Parameters, DataHandling,
+	// PolicyID, WorkflowRunID/StepIndex) only exist as Dispatch()-local
+	// state (resolvedProvider/resolvedTool, auditEntry) that a hook
+	// (mcp.ActionContext + DispatchOutcome only) has no access to --
+	// keeping construction here means there's exactly one place that
+	// knows how to build a correct audit_log row for this call, not two.
+	// A *audit.Entry pointer (not a value) specifically so "no resolution
+	// to write" is unambiguous (nil), distinct from a genuinely
+	// zero-valued entry.
+	ResolutionAuditEntry *audit.Entry
 }
 
 // DispatchHook reacts to one completed Dispatcher.Dispatch call. Every
@@ -178,19 +196,78 @@ func NewDispatcher(
 		apiServiceKey:    apiServiceKey,
 		holdTimeout:      holdTimeout,
 	}
-	// logAuditWriteFailureHook is registered FIRST (code-review finding on
-	// this fix): recordTokenUsageHook runs extractTokenUsage synchronously
-	// before spawning its own goroutine, and the hook loop below has no
-	// panic recovery -- a panic there would have prevented the
-	// audit-integrity signal from ever firing if it ran after. The
-	// audit-write-failure signal has zero dependency on the other two
-	// hooks, so registering it first costs nothing and makes it unlosable.
+	// logAuditWriteFailureHook and recordEscalationResolutionAuditHook are
+	// both registered before recordTokenUsageHook/recordEpisodeHook
+	// (code-review finding on B-121, extended here to the new hook for the
+	// same reason): the hook loop below has no panic recovery, and both
+	// audit hooks perform (or report on) writes into the tamper-evident
+	// hash chain -- the highest-priority side effects here, ahead of
+	// token-usage/episode bookkeeping. recordEscalationResolutionAuditHook
+	// must be its OWN hook, not merged into logAuditWriteFailureHook (which
+	// this brief's own MUST NOT MODIFY forbids touching): DispatchHook
+	// passes DispatchOutcome BY VALUE to every hook independently, so one
+	// hook's write result can't be observed by a later hook in the same
+	// pass -- the write and its own failure logging have to live together.
 	d.hooks = append([]DispatchHook{
 		d.logAuditWriteFailureHook,
+		d.recordEscalationResolutionAuditHook,
 		d.recordTokenUsageHook,
 		d.recordEpisodeHook,
 	}, extraHooks...)
 	return d
+}
+
+// recordEscalationResolutionAuditHook (B-124/125) writes a SECOND, real
+// audit_log row once an escalation's Hold() genuinely resolved --
+// approved, denied, or expired -- closing the gap where the only
+// tamper-evident record of an escalation was the pre-Hold "escalated" row,
+// which structurally cannot carry approval_id/approved_by (neither exists
+// at that write's own moment -- it's written before Submit() even creates
+// the approval_requests row). No-op for every outcome without a built
+// ResolutionAuditEntry: non-Escalate branches, the Submit-failure exit,
+// and a ctx-cancelled Hold() (o.Resolved is false in Router.HoldOutcome
+// for that last case, so Dispatch's Escalate branch never builds one).
+//
+// Fits the hook mechanism where the ORIGINAL "escalated" write does not
+// (see that write's own doc comment, established by B-121): by the time
+// this hook runs, Hold() has already returned -- no further unbounded
+// blocking happens before the hook loop executes, so there's no
+// crash-durability argument for writing synchronously inline instead of
+// here, unlike the original write, which must survive a crash during
+// Hold()'s own potentially multi-minute wait.
+// Wrapped in safego.Guard (code-review finding on this fix): this hook sits
+// second in d.hooks, ahead of token-usage/episode recording, and the hook
+// loop itself has no panic recovery -- an unrecovered panic inside
+// d.auditWriter.Write would have skipped both of those AND propagated an
+// error out of Dispatch for a call that may have already genuinely
+// executed downstream. Uses context.WithoutCancel(ctx) for the same reason
+// Hold()'s own expiry UPDATE uses context.Background() (router.go): both
+// of Dispatch's real production callers already pass a WithoutCancel'd ctx
+// (mcp/handler.go, workflow/http.go), so this is currently a no-op in
+// practice, but a future third caller without that wrapping would
+// otherwise make this write silently lossy on client disconnect -- cheap
+// to make structurally safe now rather than depend on that invariant
+// holding forever.
+func (d *Dispatcher) recordEscalationResolutionAuditHook(ctx context.Context, ac mcp.ActionContext, o DispatchOutcome) {
+	if o.ResolutionAuditEntry == nil {
+		return
+	}
+	safego.Guard("escalation-resolution-audit-write", func() {
+		if writeErr := d.auditWriter.Write(context.WithoutCancel(ctx), *o.ResolutionAuditEntry); writeErr != nil {
+			slog.Error("dispatch: escalation resolution audit_log write failed",
+				"org_id", ac.OrgID,
+				"agent", ac.AgentName,
+				"agent_uuid", ac.AgentUUID,
+				"session_id", ac.SessionID,
+				"tool", ac.Tool,
+				"action", ac.Action,
+				"approval_id", o.ResolutionAuditEntry.ApprovalID,
+				"decision", o.ResolutionAuditEntry.Decision,
+				"workflow_run_id", ac.WorkflowRunID,
+				"err", writeErr,
+			)
+		}
+	})
 }
 
 // logAuditWriteFailureHook (B-121) logs a failed audit_log write at Error
@@ -489,20 +566,86 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 			"agent", ac.AgentName,
 			"hold_timeout", d.holdTimeout,
 		)
-		result, holdErr := d.approvalRouter.Hold(reqCtx, approvalID, approvalReq)
+		holdStart := time.Now()
+		holdOutcome := d.approvalRouter.Hold(reqCtx, approvalID, approvalReq)
 
 		episodeOutcome := "success"
-		if holdErr != nil {
+		if holdOutcome.Err != nil {
 			episodeOutcome = "failed"
 		}
+
+		// resolutionEntry (B-124/125): built here, not inside the hook that
+		// writes it, so it can clone auditEntry's already-correctly-masked
+		// Parameters/DataHandling/PolicyID/WorkflowRunID/StepIndex --
+		// dispatchApproved's own TOCTOU re-verification (approval.Request's
+		// doc comment) already proves the resolved connector's identity and
+		// config are unchanged since escalation time, so reusing those
+		// cloned values is provably still accurate, not stale.
+		var resolutionEntry *audit.Entry
+		if holdOutcome.Resolved {
+			re := auditEntry
+			// Decision follows the SAME vocabulary precedent B-121's own
+			// AuditDecision fix established on the Allow-proxy-failure
+			// branch: "allowed" only when the call genuinely, successfully
+			// executed; every other case (a real denial, an expiry, or an
+			// approval whose actual dispatch technically failed -- TOCTOU
+			// rejection, connector deleted, a real downstream error) is
+			// "denied" in this schema's existing 3-value vocabulary, not a
+			// new invented category.
+			re.Decision = "denied"
+			if holdOutcome.Status == "approved" && holdOutcome.Err == nil {
+				re.Decision = "allowed"
+			}
+			re.ApprovalID = approvalID
+			// ApprovedBy is deliberately NOT copied unconditionally --
+			// found by BOTH of this fix's own mandatory review passes,
+			// independently: an approval whose actual dispatch technically
+			// failed AFTER a genuine human approval (dispatchApproved's
+			// TOCTOU rejection -- connector deleted/config changed -- or a
+			// real downstream error) lands on Decision="denied" above, per
+			// the same enforcement-outcome vocabulary B-121 established.
+			// Pairing that "denied" with the REAL approver's identity
+			// inside the tamper-evident chain would read as "this person
+			// denied it," which is false -- they approved it; the
+			// downstream call failed for unrelated technical reasons.
+			// ApprovedBy is populated only when it can't be misread this
+			// way: a genuine human denial (Status != "approved", where it
+			// truthfully names who denied it) or a genuine success
+			// (Decision == "allowed", where it truthfully names who
+			// approved it). The approver's real identity for the
+			// technical-failure case is still recoverable from
+			// approval_requests.approved_by (mutable, not tamper-evident,
+			// for deeper investigation) -- this row just doesn't assert a
+			// misleading attribution inside the hash chain itself.
+			if re.Decision == "allowed" || holdOutcome.Status != "approved" {
+				re.ApprovedBy = holdOutcome.ApprovedBy
+			}
+			// Timestamp/LatencyMS deliberately NOT cloned from auditEntry:
+			// this row describes an event that happened later (resolution),
+			// not at the original escalation instant -- reusing the old
+			// Timestamp would assert a false fact into the hash chain
+			// (Write's hash formula includes Timestamp). LatencyMS here
+			// measures the real approval wait, a genuinely different and
+			// more useful metric than the original row's policy-eval
+			// latency.
+			re.Timestamp = time.Now()
+			re.LatencyMS = time.Since(holdStart).Milliseconds()
+			// re.ID is already uuid.Nil (auditEntry never set it either --
+			// the original write's own local copy was never mutated by
+			// Writer.Write, which takes Entry by value), so Write() assigns
+			// this row a genuinely fresh id, distinct from the original.
+			resolutionEntry = &re
+		}
+
 		outcome = DispatchOutcome{
-			Decision:       "escalated",
-			Result:         result,
-			Err:            holdErr,
-			EpisodeSteps:   []episode.Step{newEpisodeStep(ac, "escalated", result)},
-			EpisodeOutcome: episodeOutcome,
-			AuditWriteErr:  auditWriteErr,
-			AuditDecision:  auditEntry.Decision,
+			Decision:             "escalated",
+			Result:               holdOutcome.Result,
+			Err:                  holdOutcome.Err,
+			EpisodeSteps:         []episode.Step{newEpisodeStep(ac, "escalated", holdOutcome.Result)},
+			EpisodeOutcome:       episodeOutcome,
+			AuditWriteErr:        auditWriteErr,
+			AuditDecision:        auditEntry.Decision,
+			ResolutionAuditEntry: resolutionEntry,
 		}
 
 	default: // policy.ActionAllow

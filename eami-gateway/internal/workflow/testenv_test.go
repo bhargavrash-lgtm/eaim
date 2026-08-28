@@ -25,6 +25,16 @@
 // token-usage HTTP write, irrelevant to anything this package tests) but
 // is otherwise the same real pipeline, not a mock.
 //
+// A second, newer disclosed simplification (code-review finding on
+// B-124/125): this reconstruction does NOT write a second, resolution
+// audit_log row when an escalation resolves (approved/denied/expired) --
+// dispatcher.go's real Dispatch does, via recordEscalationResolutionAuditHook.
+// Before B-124/125 this file's Escalate branch matched production exactly;
+// now it doesn't, for that one behavior. A test written against THIS
+// harness asserting a workflow escalation's audit_log row count will
+// undercount by one versus what production actually writes -- know this
+// before adding one.
+//
 // Run against the project's docker-compose Postgres:
 //
 //	docker compose up -d postgres
@@ -275,14 +285,22 @@ func newDispatchEnv(t *testing.T, e *workflowTestEnv, adapters map[string]aiprov
 			if submitErr != nil {
 				return nil, submitErr
 			}
-			result, holdErr := approvalRouter.Hold(ctx, approvalID, approvalReq)
+			// Compile-compatibility update only (B-124/125's Hold() signature
+			// change) -- this file's own reconstructed dispatch shape does
+			// NOT build a resolution audit_log row; that's dispatcher.go's
+			// job (the real production code path, which this file exists to
+			// approximate for internal/workflow's own tests -- see this
+			// file's header). Confirmed with the user before touching this
+			// file at all, same MAY-MODIFY-exception precedent as B-121's
+			// apikey.go.
+			holdOutcome := approvalRouter.Hold(ctx, approvalID, approvalReq)
 			outcome := "success"
-			if holdErr != nil {
+			if holdOutcome.Err != nil {
 				outcome = "failed"
 			}
 			go episodeRecorder.Record(context.Background(), ac.OrgID, ac.AgentUUID, ac.AgentName,
-				[]episode.Step{{ToolName: ac.Tool, Action: ac.Action, Params: ac.Parameters, Result: result, Decision: "escalated", Timestamp: ac.ReceivedAt}}, outcome)
-			return result, holdErr
+				[]episode.Step{{ToolName: ac.Tool, Action: ac.Action, Params: ac.Parameters, Result: holdOutcome.Result, Decision: "escalated", Timestamp: ac.ReceivedAt}}, outcome)
+			return holdOutcome.Result, holdOutcome.Err
 
 		default: // ActionAllow
 			toolReq := proxy.ToolRequest{ToolName: ac.Tool, Action: ac.Action, Params: ac.Parameters, SessionID: ac.SessionID}

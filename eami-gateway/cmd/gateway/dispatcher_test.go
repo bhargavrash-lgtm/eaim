@@ -110,18 +110,35 @@ func newDispatcherTestEnv(t *testing.T, action string, extraHooks ...DispatchHoo
 	if err != nil {
 		t.Fatalf("audit.NewWriter: %v", err)
 	}
-	return newDispatcherTestEnvFromEnv(t, env, action, auditWriter, extraHooks...)
+	return newDispatcherTestEnvFromEnv(t, env, action, auditWriter, 5*time.Second, extraHooks...)
 }
 
-// newDispatcherTestEnvFromEnv is the shared constructor both
-// newDispatcherTestEnv (real Postgres-backed audit.Writer, every
-// pre-existing test) and newDispatcherTestEnvFailingAudit (B-121, a
-// fake-WriterDB-backed audit.Writer that always fails) delegate to, given
-// an already-built *mainTestEnv -- identical wiring for everything except
-// which *audit.Writer is passed to NewDispatcher. Takes env rather than
-// building its own, since newDispatcherTestEnv already needs a real env.pool
-// to construct its own real audit.Writer before this function runs.
-func newDispatcherTestEnvFromEnv(t *testing.T, env *mainTestEnv, action string, auditWriter *audit.Writer, extraHooks ...DispatchHook) *dispatcherTestEnv {
+// newDispatcherTestEnvShortHold (B-124/125) is newDispatcherTestEnv with a
+// caller-supplied holdTimeout instead of the fixed 5s every pre-existing
+// test uses -- needed to exercise Hold()'s REAL genuine-timeout path
+// deterministically (a short holdTimeout with nobody ever deciding) rather
+// than simulating it.
+func newDispatcherTestEnvShortHold(t *testing.T, action string, holdTimeout time.Duration, extraHooks ...DispatchHook) *dispatcherTestEnv {
+	t.Helper()
+	env := newMainTestEnv(t)
+	auditWriter, err := audit.NewWriter(context.Background(), env.pool)
+	if err != nil {
+		t.Fatalf("audit.NewWriter: %v", err)
+	}
+	return newDispatcherTestEnvFromEnv(t, env, action, auditWriter, holdTimeout, extraHooks...)
+}
+
+// newDispatcherTestEnvFromEnv is the shared constructor newDispatcherTestEnv
+// (real Postgres-backed audit.Writer, every pre-existing test),
+// newDispatcherTestEnvFailingAudit (B-121, a fake-WriterDB-backed
+// audit.Writer that always fails), and newDispatcherTestEnvShortHold
+// (B-124/125, a configurable holdTimeout) all delegate to, given an
+// already-built *mainTestEnv -- identical wiring for everything except
+// which *audit.Writer is passed to NewDispatcher and how long Hold() waits.
+// Takes env rather than building its own, since newDispatcherTestEnv
+// already needs a real env.pool to construct its own real audit.Writer
+// before this function runs.
+func newDispatcherTestEnvFromEnv(t *testing.T, env *mainTestEnv, action string, auditWriter *audit.Writer, holdTimeout time.Duration, extraHooks ...DispatchHook) *dispatcherTestEnv {
 	t.Helper()
 	agentID, agentName := env.insertAgent(t)
 
@@ -135,7 +152,6 @@ func newDispatcherTestEnvFromEnv(t *testing.T, env *mainTestEnv, action string, 
 	toolRouter := toolrouter.New(env.pool, nil)
 	aiProviderRouter := aiprovider.New(env.pool, nil, map[string]aiprovider.Adapter{})
 
-	holdTimeout := 5 * time.Second
 	approvalRouter := approval.New(env.pool, fwd, holdTimeout, "", "", toolRouter, aiProviderRouter)
 	runCtx, cancel := context.WithCancel(context.Background())
 	go approvalRouter.Run(runCtx)
@@ -187,7 +203,7 @@ func newDispatcherTestEnvFailingAudit(t *testing.T, action string, injectedErr e
 	t.Helper()
 	env := newMainTestEnv(t)
 	auditWriter := audit.NewWithDB(&failingAuditDB{err: injectedErr})
-	return newDispatcherTestEnvFromEnv(t, env, action, auditWriter, extraHooks...)
+	return newDispatcherTestEnvFromEnv(t, env, action, auditWriter, 5*time.Second, extraHooks...)
 }
 
 func (e *dispatcherTestEnv) actionContext(tool string) mcp.ActionContext {

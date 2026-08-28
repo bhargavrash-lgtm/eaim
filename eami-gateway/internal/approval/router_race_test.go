@@ -140,8 +140,8 @@ func TestHold_ResolveRace_DoesNotDoubleDispatch(t *testing.T) {
 	}
 	holdDone := make(chan holdOutcome, 1)
 	go func() {
-		_, holdErr := env.router.Hold(context.Background(), approvalID, req)
-		holdDone <- holdOutcome{err: holdErr}
+		outcome := env.router.Hold(context.Background(), approvalID, req)
+		holdDone <- holdOutcome{err: outcome.Err}
 	}()
 
 	waitForPendingEntry(t, env.router, approvalID)
@@ -200,8 +200,8 @@ func TestHold_ResolveRace_NormalTiming_SingleDispatch(t *testing.T) {
 
 	holdDone := make(chan error, 1)
 	go func() {
-		_, holdErr := env.router.Hold(context.Background(), approvalID, req)
-		holdDone <- holdErr
+		outcome := env.router.Hold(context.Background(), approvalID, req)
+		holdDone <- outcome.Err
 	}()
 
 	waitForPendingEntry(t, env.router, approvalID)

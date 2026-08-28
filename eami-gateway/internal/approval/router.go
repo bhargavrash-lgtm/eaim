@@ -107,16 +107,49 @@ func ComputeConfigHash(toolType, baseURLOrProvider string, credentialsEncrypted 
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// decisionResult carries the resolved outcome of an approval to a waiting Hold().
-type decisionResult struct {
-	data json.RawMessage
-	err  error
+// HoldOutcome (B-124/125) is Hold()'s complete return value, replacing the
+// former (json.RawMessage, error) pair -- carries not just the dispatch
+// result but whether/how the escalation genuinely resolved, so a caller
+// (cmd/gateway/dispatcher.go's Escalate branch) can write a second, real
+// audit_log row covering exactly what the original pre-Hold "escalated"
+// row structurally cannot: it's written before Submit() even creates the
+// approval_requests row, so ApprovalID/ApprovedBy don't exist yet at that
+// write's own moment (confirmed by investigation, not assumed).
+type HoldOutcome struct {
+	// Result/Err are exactly what the old two-value return carried.
+	Result json.RawMessage
+	Err    error
+
+	// Resolved is true only when a real, confirmed outcome exists to
+	// record: an approval/denial actually landed (via resolve() or the
+	// race-window backstop), or the hold genuinely, confirmed-committed
+	// expired. False for: a ctx-cancelled Hold() (no decision was ever
+	// made -- by design, per this brief's own explicit scope, the
+	// original "escalated" row already stands as the complete record);
+	// and the rare case where the DB interaction needed to CONFIRM the
+	// outcome itself failed (e.g. the expiry UPDATE errored with something
+	// other than "no rows" and the fallback fetch also failed) -- writing
+	// a resolution row asserting an outcome that was never actually
+	// confirmed would be worse than writing none, the same principle
+	// audit.Writer.Write already applies to its own hash chain (never
+	// advance lastHash on a failed write).
+	Resolved bool
+	// Status is the approval_requests.status value this resolution
+	// reflects ("approved" | "denied" | "expired"), empty when !Resolved.
+	Status string
+	// ApprovedBy is approval_requests.approved_by (the deciding user's id,
+	// as text -- the column itself is TEXT, no FK, matching audit_log's
+	// own snapshot-column convention). Empty for "expired" (no human ever
+	// decided) and whenever !Resolved.
+	ApprovedBy string
+	// DecisionReason is approval_requests.decision_reason, if any.
+	DecisionReason string
 }
 
 // pendingEntry tracks one blocked Hold() call.
 type pendingEntry struct {
-	ch  chan decisionResult // buffered(1); sender never blocks
-	req Request             // kept so resolve() can call proxy.Forward on approval
+	ch  chan HoldOutcome // buffered(1); sender never blocks
+	req Request          // kept so resolve() can call proxy.Forward on approval
 
 	// once/result close a real double-dispatch race (B-100): resolve()
 	// (the LISTEN/NOTIFY path) and Hold()'s own timeout backstop can both
@@ -152,7 +185,7 @@ type pendingEntry struct {
 	// equally unbounded by holdTimeout -- this fix changes WHICH
 	// in-flight call the loser waits on, not whether it's bounded.
 	once   sync.Once
-	result decisionResult
+	result HoldOutcome
 }
 
 // Router manages escalation approvals via Postgres LISTEN/NOTIFY.
@@ -325,9 +358,19 @@ func (r *Router) Submit(ctx context.Context, req Request) (string, error) {
 //   - holdTimeout elapses → marks the request expired and returns an error,
 //     unless a decision already committed in the same instant (see below)
 //   - ctx is cancelled (not a timeout) → returns ctx.Err(), no DB write
-func (r *Router) Hold(ctx context.Context, approvalID string, req Request) (json.RawMessage, error) {
+//
+// Converges on exactly one return point (B-124/125, mirroring
+// cmd/gateway/dispatcher.go's own B-102 convergence) -- every one of
+// Hold()'s branches now builds a HoldOutcome instead of returning
+// independently. Found and fixed as this brief's own explicit
+// prerequisite: before this, the genuine-timeout branch built its error
+// inline and never went through outcomeFromStatus at all, the exact
+// asymmetry that would have made a resolution-audit hook (built on top of
+// HoldOutcome.Resolved) silently miss that one exit -- precisely B-099's
+// bug shape, one level down.
+func (r *Router) Hold(ctx context.Context, approvalID string, req Request) HoldOutcome {
 	entry := &pendingEntry{
-		ch:  make(chan decisionResult, 1),
+		ch:  make(chan HoldOutcome, 1),
 		req: req,
 	}
 	r.pending.Store(approvalID, entry)
@@ -336,69 +379,130 @@ func (r *Router) Hold(ctx context.Context, approvalID string, req Request) (json
 	holdCtx, cancel := context.WithTimeout(ctx, r.holdTimeout)
 	defer cancel()
 
+	var outcome HoldOutcome
 	select {
 	case res := <-entry.ch:
-		return res.data, res.err
-
+		outcome = res
 	case <-holdCtx.Done():
-		// Security review (this task) flagged a real timing race: Go's
-		// select doesn't have to prefer entry.ch just because a decision
-		// technically arrived a moment earlier, so a genuinely approved
-		// action could otherwise be reported as "timed out" and never
-		// forwarded even though the DB itself was never wrong. One last
-		// non-blocking check before falling through to the timeout path.
-		select {
-		case res := <-entry.ch:
-			return res.data, res.err
-		default:
-		}
-
-		if holdCtx.Err() != context.DeadlineExceeded {
-			// Parent ctx was cancelled (e.g. caller disconnected), not a
-			// real timeout -- don't write a misleading 'expired' status
-			// for what was actually a cancellation.
-			return nil, holdCtx.Err()
-		}
-
-		// Only commit 'expired' if the row is still genuinely pending. If
-		// eami-api's DecideApproval already committed a real decision in
-		// this same narrow window (after resolve() started but before it
-		// reached entry.ch, or before resolve() ran at all), honor that
-		// decision instead of overwriting it with a stale 'expired'
-		// status and reporting a bogus timeout for an action that was
-		// actually approved.
-		var status, decisionReason string
-		bg := context.Background()
-		err := r.pool.QueryRow(bg, `
-			UPDATE approval_requests
-			SET status = 'expired', decision_reason = 'timed out', decided_at = now()
-			WHERE id = $1 AND status = 'pending'
-			RETURNING status, COALESCE(decision_reason, '')
-		`, approvalID).Scan(&status, &decisionReason)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				// The UPDATE's WHERE clause matched nothing -- status was
-				// already something other than 'pending'. Fetch the real
-				// decision and honor it rather than declaring a timeout.
-				if fetchErr := r.pool.QueryRow(bg, `
-					SELECT status, COALESCE(decision_reason, '') FROM approval_requests WHERE id = $1
-				`, approvalID).Scan(&status, &decisionReason); fetchErr == nil {
-					// B-100: guard against resolve() having already
-					// started (or being about to start) the real dispatch
-					// for this exact approvalID concurrently -- see
-					// pendingEntry's once/result doc comment.
-					entry.once.Do(func() {
-						entry.result = r.outcomeFromStatus(ctx, approvalID, req, status, decisionReason)
-					})
-					return entry.result.data, entry.result.err
-				}
-			}
-			slog.Warn("approval: failed to record timeout", "approval_id", approvalID, "err", err)
-		}
-
-		slog.Warn("approval: hold timed out", "approval_id", approvalID, "timeout", r.holdTimeout)
-		return nil, fmt.Errorf("approval timed out after %s", r.holdTimeout)
+		outcome = r.resolveHoldTimeout(ctx, holdCtx, approvalID, entry)
 	}
+	return outcome
+}
+
+// resolveHoldTimeout builds the HoldOutcome for every path reachable once
+// holdCtx fires: the race-window backstop (a decision landed right at the
+// deadline), a genuine ctx cancellation (caller disconnected -- not a
+// timeout), and the genuine timeout itself. All three paths that produce a
+// confirmed outcome now go through outcomeFromStatus -- including the
+// genuine-timeout path, which previously built `fmt.Errorf("approval timed
+// out after %s", ...)` inline and never touched that function. Routing it
+// through changes that error's exact text to outcomeFromStatus's own
+// "approval %s: %s" shape ("approval expired: timed out") -- confirmed via
+// repo-wide grep no test or caller depends on the old exact string;
+// explicit user decision to accept this in exchange for true single-
+// function convergence across all three resolving paths, not just two.
+func (r *Router) resolveHoldTimeout(ctx, holdCtx context.Context, approvalID string, entry *pendingEntry) HoldOutcome {
+	// Security review (B-100) flagged a real timing race: Go's select
+	// doesn't have to prefer entry.ch just because a decision technically
+	// arrived a moment earlier, so a genuinely approved action could
+	// otherwise be reported as "timed out" and never forwarded even though
+	// the DB itself was never wrong. One last non-blocking check before
+	// falling through to the timeout path.
+	select {
+	case res := <-entry.ch:
+		return res
+	default:
+	}
+
+	if holdCtx.Err() != context.DeadlineExceeded {
+		// Parent ctx was cancelled (e.g. caller disconnected), not a real
+		// timeout -- don't write a misleading 'expired' status for what
+		// was actually a cancellation. Resolved stays false (zero value):
+		// per this brief's explicit scope, no decision was ever made, so
+		// no resolution audit row should be written -- the original
+		// "escalated" row already stands as the complete record.
+		return HoldOutcome{Err: holdCtx.Err()}
+	}
+
+	// Only commit 'expired' if the row is still genuinely pending. If
+	// eami-api's DecideApproval already committed a real decision in this
+	// same narrow window (after resolve() started but before it reached
+	// entry.ch, or before resolve() ran at all), honor that decision
+	// instead of overwriting it with a stale 'expired' status and
+	// reporting a bogus timeout for an action that was actually approved.
+	var status, decisionReason string
+	bg := context.Background()
+	err := r.pool.QueryRow(bg, `
+		UPDATE approval_requests
+		SET status = 'expired', decision_reason = 'timed out', decided_at = now()
+		WHERE id = $1 AND status = 'pending'
+		RETURNING status, COALESCE(decision_reason, '')
+	`, approvalID).Scan(&status, &decisionReason)
+	if err == nil {
+		// Genuine timeout, confirmed committed by this call -- no
+		// concurrent resolve() could have changed the status first
+		// (Postgres serializes the competing UPDATEs on this row; whichever
+		// commits first is authoritative, and the loser's WHERE clause
+		// simply won't match, landing in the ErrNoRows branch below
+		// instead). No once-guard needed here, unlike the race-window
+		// branch: "expired" never calls dispatchApproved
+		// (outcomeFromStatus's default case), so there's no double-
+		// dispatch risk this specific call site could ever trigger.
+		//
+		// That last guarantee rests on a cross-module invariant, named
+		// explicitly here per this fix's own mandatory code-review pass
+		// (an earlier version of this comment didn't): once THIS statement
+		// commits status='expired', eami-api's DecideApproval
+		// (approvals.sql's UPDATE ... WHERE id=$1 AND status='pending')
+		// can no longer match this row, so it can never flip status to
+		// 'approved' afterward -- the row is permanently past the point
+		// where a real dispatch could ever be triggered for it. If that
+		// WHERE clause ever changes in the eami-api module, this
+		// reasoning needs re-verifying, not just this comment trusting it
+		// silently forever.
+		slog.Warn("approval: hold timed out", "approval_id", approvalID, "timeout", r.holdTimeout)
+		return r.outcomeFromStatus(ctx, approvalID, entry.req, status, decisionReason, "")
+	}
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The UPDATE's WHERE clause matched nothing -- status was already
+		// something other than 'pending'. Fetch the real decision and
+		// honor it rather than declaring a timeout.
+		var approvedBy string
+		fetchErr := r.pool.QueryRow(bg, `
+			SELECT status, COALESCE(decision_reason, ''), COALESCE(approved_by::text, '')
+			FROM approval_requests WHERE id = $1
+		`, approvalID).Scan(&status, &decisionReason, &approvedBy)
+		if fetchErr == nil {
+			// B-100: guard against resolve() having already started (or
+			// being about to start) the real dispatch for this exact
+			// approvalID concurrently -- see pendingEntry's once/result
+			// doc comment.
+			entry.once.Do(func() {
+				entry.result = r.outcomeFromStatus(ctx, approvalID, entry.req, status, decisionReason, approvedBy)
+			})
+			return entry.result
+		}
+		// Code-review finding on this fix: err below used to still be the
+		// original ErrNoRows sentinel here, so the log line that follows
+		// reported the EXPECTED, already-understood outcome ("no rows,
+		// status wasn't pending") instead of the ACTUAL problem -- this
+		// fallback fetch itself failing, which is precisely the branch
+		// where knowing why matters most (it's the one that suppresses a
+		// resolution audit row). Reassigning err makes the log line below
+		// report the real cause.
+		err = fetchErr
+	}
+
+	slog.Warn("approval: failed to record timeout", "approval_id", approvalID, "err", err)
+	slog.Warn("approval: hold timed out", "approval_id", approvalID, "timeout", r.holdTimeout)
+	// The DB interaction itself failed and we couldn't confirm the real
+	// outcome either -- Resolved stays false (see HoldOutcome's own doc
+	// comment): asserting an outcome that was never actually confirmed
+	// would be worse than recording none. Err text unchanged from the
+	// pre-convergence version deliberately (this specific failure path
+	// isn't the one the user approved changing).
+	return HoldOutcome{Err: fmt.Errorf("approval timed out after %s", r.holdTimeout)}
 }
 
 // Run subscribes to the Postgres "approval_decision" channel and resolves
@@ -489,24 +593,30 @@ func (r *Router) resolve(ctx context.Context, approvalID string) {
 	}
 	entry := v.(*pendingEntry)
 
-	// status/decision_reason are the real approval_requests columns (the
-	// original code queried nonexistent decision/reason columns, which
-	// would have failed this query outright even with Submit()'s INSERT
-	// fixed). COALESCE keeps decisionReason as "" rather than NULL for
-	// the message-building below; status itself is NOT NULL in the
-	// schema so no COALESCE is needed for it.
-	var status, decisionReason string
+	// status/decision_reason/approved_by are the real approval_requests
+	// columns (the original code queried nonexistent decision/reason
+	// columns, which would have failed this query outright even with
+	// Submit()'s INSERT fixed). approved_by added (B-124/125) so the
+	// resolution audit row can carry the real deciding user, not just the
+	// pre-Hold "escalated" row's own necessarily-empty value -- same
+	// query, no new round trip. COALESCE keeps decisionReason/approvedBy
+	// as "" rather than NULL; status itself is NOT NULL in the schema so
+	// no COALESCE is needed for it.
+	var status, decisionReason, approvedBy string
 	err := r.pool.QueryRow(ctx, `
-		SELECT status, COALESCE(decision_reason, '')
+		SELECT status, COALESCE(decision_reason, ''), COALESCE(approved_by::text, '')
 		FROM approval_requests
 		WHERE id = $1
-	`, approvalID).Scan(&status, &decisionReason)
+	`, approvalID).Scan(&status, &decisionReason, &approvedBy)
 	if err != nil {
 		slog.Error("approval: fetch decision failed",
 			"approval_id", approvalID,
 			"err", err,
 		)
-		entry.ch <- decisionResult{err: fmt.Errorf("approval: fetch decision: %w", err)}
+		// Resolved stays false: the fetch itself failed, so there is no
+		// confirmed outcome to record a resolution audit row for (see
+		// HoldOutcome's own doc comment).
+		entry.ch <- HoldOutcome{Err: fmt.Errorf("approval: fetch decision: %w", err)}
 		return
 	}
 
@@ -515,17 +625,18 @@ func (r *Router) resolve(ctx context.Context, approvalID string) {
 	// approvalID concurrently -- see pendingEntry's once/result doc
 	// comment.
 	entry.once.Do(func() {
-		entry.result = r.outcomeFromStatus(ctx, approvalID, entry.req, status, decisionReason)
+		entry.result = r.outcomeFromStatus(ctx, approvalID, entry.req, status, decisionReason, approvedBy)
 	})
 	entry.ch <- entry.result
 }
 
 // outcomeFromStatus converts a fetched approval_requests status into a
-// decisionResult -- shared by resolve() (the LISTEN/NOTIFY path) and
-// Hold()'s timeout backstop (which re-checks the row directly if it was
-// already decided in the race window right at the timeout boundary), so
-// the two paths can never interpret the same status differently.
-func (r *Router) outcomeFromStatus(ctx context.Context, approvalID string, req Request, status, decisionReason string) decisionResult {
+// HoldOutcome -- shared by resolve() (the LISTEN/NOTIFY path) and both of
+// Hold()'s timeout-window paths (the race-window backstop AND, since
+// B-124/125's convergence, the genuine-timeout path too), so no path can
+// interpret the same status differently, and none can silently skip
+// setting Resolved/Status/ApprovedBy for a resolution audit hook to read.
+func (r *Router) outcomeFromStatus(ctx context.Context, approvalID string, req Request, status, decisionReason, approvedBy string) HoldOutcome {
 	switch status {
 	case "approved":
 		// eami-api's DecideApproval (approvals.go) validates and writes
@@ -534,28 +645,55 @@ func (r *Router) outcomeFromStatus(ctx context.Context, approvalID string, req R
 		// "allowed", which eami-api never writes.
 		slog.Info("approval: approved — resuming original call", "approval_id", approvalID)
 		tr, proxyErr := r.dispatchApproved(ctx, approvalID, req)
-		return decisionResult{data: tr.Body, err: proxyErr}
+		return HoldOutcome{
+			Result: tr.Body, Err: proxyErr,
+			Resolved: true, Status: status, ApprovedBy: approvedBy, DecisionReason: decisionReason,
+		}
 
 	case "pending":
 		// Notification arrived before eami-api's UPDATE actually
 		// committed (shouldn't happen -- NOTIFY fires after the row is
 		// written -- but defensive, not assumed impossible). Return an
 		// error; the waiter will see it, and Hold()'s own timeout is the
-		// backstop if this repeats.
+		// backstop if this repeats. Resolved stays false: "pending" is
+		// not a real outcome, nothing to record.
 		slog.Warn("approval: notified but status still pending", "approval_id", approvalID)
-		return decisionResult{err: fmt.Errorf("approval: status still pending for %s", approvalID)}
+		return HoldOutcome{Err: fmt.Errorf("approval: status still pending for %s", approvalID)}
 
 	default:
-		// "denied", "expired", or any other non-approved status all
-		// block the action the same way -- the original action must
-		// never proceed once anything other than an explicit approval
-		// has been recorded.
+		// "denied", "expired", or any other non-approved status all BLOCK
+		// the action the same way -- the original action must never
+		// proceed once anything other than an explicit approval has been
+		// recorded. That enforcement behavior (Err set, action blocked)
+		// applies to every non-approved status unconditionally, including
+		// one this code doesn't yet recognize.
+		//
+		// Resolved is narrower (code-review finding on this fix): only
+		// "denied" and "expired" -- the two statuses this codebase
+		// actually knows are confirmed, terminal outcomes today -- write a
+		// resolution row into the tamper-evident chain. A future status
+		// this switch doesn't yet know about (e.g. approval_requests.status
+		// permits 'cancelled', which the schema allows but nothing writes
+		// today) deliberately does NOT get Resolved=true just by falling
+		// into this default case -- an audit_log row is immutable and
+		// irrevocable once written, so asserting "denied" for a status
+		// whose real meaning this code was never taught would be worse
+		// than recording nothing. Both a real human denial and a genuine
+		// timeout (status="expired", passed in by resolveHoldTimeout) get
+		// a resolution audit row -- per this brief's explicit symmetry
+		// decision: "who denied this and why" (or "this expired
+		// unresolved") is exactly as much a governance fact as "who
+		// approved this."
 		msg := fmt.Sprintf("approval %s", status)
 		if decisionReason != "" {
 			msg += ": " + decisionReason
 		}
 		slog.Info("approval: not approved", "approval_id", approvalID, "status", status, "reason", decisionReason)
-		return decisionResult{err: fmt.Errorf("%s", msg)}
+		resolved := status == "denied" || status == "expired"
+		return HoldOutcome{
+			Err:      fmt.Errorf("%s", msg),
+			Resolved: resolved, Status: status, ApprovedBy: approvedBy, DecisionReason: decisionReason,
+		}
 	}
 }
 

@@ -186,9 +186,22 @@ func TestHold_Timeout_WritesExpiredStatusUsingRealColumns(t *testing.T) {
 		t.Fatalf("Submit: %v", err)
 	}
 
-	_, holdErr := env.router.Hold(context.Background(), approvalID, req)
-	if holdErr == nil {
+	outcome := env.router.Hold(context.Background(), approvalID, req)
+	if outcome.Err == nil {
 		t.Fatal("want Hold to return an error on timeout, got nil")
+	}
+	// B-124/125: the genuine-timeout path now converges through
+	// outcomeFromStatus like every other resolving path -- Resolved must
+	// be true (a confirmed outcome exists: it genuinely expired) so a
+	// resolution audit row gets written, with no human ApprovedBy.
+	if !outcome.Resolved {
+		t.Error("Resolved = false, want true -- a genuine timeout is a confirmed outcome")
+	}
+	if outcome.Status != "expired" {
+		t.Errorf("Status = %q, want \"expired\"", outcome.Status)
+	}
+	if outcome.ApprovedBy != "" {
+		t.Errorf("ApprovedBy = %q, want \"\" (nobody decided this, it timed out)", outcome.ApprovedBy)
 	}
 
 	var status, decisionReason string
@@ -234,16 +247,19 @@ func TestHold_TimeoutRace_HonorsAlreadyApprovedRow(t *testing.T) {
 		t.Fatalf("simulate DecideApproval: %v", err)
 	}
 
-	data, holdErr := env.router.Hold(context.Background(), approvalID, req)
-	if holdErr != nil {
-		t.Fatalf("want Hold to forward the already-approved action instead of timing out, got error: %v", holdErr)
+	outcome := env.router.Hold(context.Background(), approvalID, req)
+	if outcome.Err != nil {
+		t.Fatalf("want Hold to forward the already-approved action instead of timing out, got error: %v", outcome.Err)
+	}
+	if !outcome.Resolved || outcome.Status != "approved" {
+		t.Errorf("Resolved/Status = %v/%q, want true/\"approved\"", outcome.Resolved, outcome.Status)
 	}
 	var body map[string]bool
-	if err := json.Unmarshal(data, &body); err != nil {
+	if err := json.Unmarshal(outcome.Result, &body); err != nil {
 		t.Fatalf("unmarshal forwarded response: %v", err)
 	}
 	if !body["ok"] {
-		t.Errorf("want the fake downstream's {\"ok\":true} response, got %s", data)
+		t.Errorf("want the fake downstream's {\"ok\":true} response, got %s", outcome.Result)
 	}
 
 	// The row must still read "approved" -- not clobbered by a stale
@@ -274,9 +290,12 @@ func TestHold_TimeoutRace_HonorsAlreadyDeniedRow(t *testing.T) {
 		t.Fatalf("simulate DecideApproval: %v", err)
 	}
 
-	_, holdErr := env.router.Hold(context.Background(), approvalID, req)
-	if holdErr == nil {
+	outcome := env.router.Hold(context.Background(), approvalID, req)
+	if outcome.Err == nil {
 		t.Fatal("want an error for an already-denied row, got nil")
+	}
+	if !outcome.Resolved || outcome.Status != "denied" {
+		t.Errorf("Resolved/Status = %v/%q, want true/\"denied\"", outcome.Resolved, outcome.Status)
 	}
 
 	var status string
@@ -301,7 +320,7 @@ func TestResolve_ApprovedStatus_ForwardsViaProxy(t *testing.T) {
 		t.Fatalf("Submit: %v", err)
 	}
 
-	entry := &pendingEntry{ch: make(chan decisionResult, 1), req: req}
+	entry := &pendingEntry{ch: make(chan HoldOutcome, 1), req: req}
 	env.router.pending.Store(approvalID, entry)
 
 	// Simulate exactly what eami-api's DecideApproval writes on approval:
@@ -316,15 +335,15 @@ func TestResolve_ApprovedStatus_ForwardsViaProxy(t *testing.T) {
 
 	select {
 	case res := <-entry.ch:
-		if res.err != nil {
-			t.Fatalf("want no error forwarding an approved request, got: %v", res.err)
+		if res.Err != nil {
+			t.Fatalf("want no error forwarding an approved request, got: %v", res.Err)
 		}
 		var body map[string]bool
-		if err := json.Unmarshal(res.data, &body); err != nil {
+		if err := json.Unmarshal(res.Result, &body); err != nil {
 			t.Fatalf("unmarshal forwarded response: %v", err)
 		}
 		if !body["ok"] {
-			t.Errorf("want the fake downstream's {\"ok\":true} response to come through, got %s", res.data)
+			t.Errorf("want the fake downstream's {\"ok\":true} response to come through, got %s", res.Result)
 		}
 	default:
 		t.Fatal("resolve() did not signal the pending entry")
@@ -340,7 +359,7 @@ func TestResolve_DeniedStatus_ReturnsError(t *testing.T) {
 		t.Fatalf("Submit: %v", err)
 	}
 
-	entry := &pendingEntry{ch: make(chan decisionResult, 1), req: req}
+	entry := &pendingEntry{ch: make(chan HoldOutcome, 1), req: req}
 	env.router.pending.Store(approvalID, entry)
 
 	if _, err := env.pool.Exec(context.Background(),
@@ -353,7 +372,7 @@ func TestResolve_DeniedStatus_ReturnsError(t *testing.T) {
 
 	select {
 	case res := <-entry.ch:
-		if res.err == nil {
+		if res.Err == nil {
 			t.Fatal("want an error for a denied approval, got nil")
 		}
 	default:
@@ -370,7 +389,7 @@ func TestResolve_ExpiredStatus_ReturnsError(t *testing.T) {
 		t.Fatalf("Submit: %v", err)
 	}
 
-	entry := &pendingEntry{ch: make(chan decisionResult, 1), req: req}
+	entry := &pendingEntry{ch: make(chan HoldOutcome, 1), req: req}
 	env.router.pending.Store(approvalID, entry)
 
 	if _, err := env.pool.Exec(context.Background(),
@@ -383,7 +402,7 @@ func TestResolve_ExpiredStatus_ReturnsError(t *testing.T) {
 
 	select {
 	case res := <-entry.ch:
-		if res.err == nil {
+		if res.Err == nil {
 			t.Fatal("want an error for an expired approval (must block, same as denied), got nil")
 		}
 	default:
