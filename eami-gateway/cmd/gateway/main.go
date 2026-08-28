@@ -209,7 +209,13 @@ func run() error {
 	dispatcher := NewDispatcher(
 		toolRouter,
 		aiProviderRouter,
-		pLoader.Evaluator(),
+		// pLoader itself, NOT pLoader.Evaluator() -- B-129: calling
+		// .Evaluator() here would snapshot the rule set that exists at
+		// this instant and freeze it for the process's entire lifetime.
+		// *policyloader.Loader satisfies policy.EvaluatorSource, so
+		// Dispatch() calls pLoader.Evaluator() itself, fresh, on every
+		// dispatch, correctly observing every future pg_notify reload.
+		pLoader,
 		auditWriter,
 		episodeRecorder,
 		approvalRouter,
@@ -241,7 +247,10 @@ func run() error {
 	// value with the identical mcp.DecisionHandler signature) once per
 	// step, in order -- reusing policy/TOCTOU-pinning/audit/episode logic
 	// completely as-is. See internal/workflow's package doc.
-	workflowExecutor := workflow.New(pool, dispatcher.Dispatch, pLoader.Evaluator())
+	// pLoader itself, not pLoader.Evaluator() -- same B-129 reasoning as
+	// the Dispatcher above; Executor.Run's ProjectedDecision preview must
+	// re-read the live evaluator per step, not a startup snapshot.
+	workflowExecutor := workflow.New(pool, dispatcher.Dispatch, pLoader)
 	// agentRegistry (*registry.Registry) satisfies workflow.AgentResolver structurally.
 	workflowHTTP := workflow.NewHTTPHandler(idManager, agentRegistry, workflowExecutor)
 	slog.Info("workflow executor ready")

@@ -18,9 +18,9 @@ import (
 // Executor runs a workflow by calling the gateway's existing dispatch
 // closure once per step, in order.
 type Executor struct {
-	pool       *pgxpool.Pool
-	dispatch   mcp.DecisionHandler
-	policyEval policy.Evaluator
+	pool             *pgxpool.Pool
+	dispatch         mcp.DecisionHandler
+	policyEvalSource policy.EvaluatorSource
 }
 
 // New creates an Executor. dispatch is the SAME closure cmd/gateway/
@@ -28,11 +28,13 @@ type Executor struct {
 // just a function value), not reimplemented or wrapped, so every step
 // gets exactly the resolve+policy+TOCTOU-pin+dispatch+audit+episode
 // behavior a standalone MCP tool_call would get, completely unmodified.
-// policyEval is the same *pLoader.Evaluator() dispatch itself calls,
-// used here only for an informational pre-dispatch decision preview
-// (never for enforcement -- see StepResult.ProjectedDecision's comment).
-func New(pool *pgxpool.Pool, dispatch mcp.DecisionHandler, policyEval policy.Evaluator) *Executor {
-	return &Executor{pool: pool, dispatch: dispatch, policyEval: policyEval}
+// policyEvalSource is the same pLoader dispatch itself reads from (B-129:
+// held and re-queried fresh per step, not a policy.Evaluator snapshot --
+// see policy.EvaluatorSource's doc comment), used here only for an
+// informational pre-dispatch decision preview (never for enforcement --
+// see StepResult.ProjectedDecision's comment).
+func New(pool *pgxpool.Pool, dispatch mcp.DecisionHandler, policyEvalSource policy.EvaluatorSource) *Executor {
+	return &Executor{pool: pool, dispatch: dispatch, policyEvalSource: policyEvalSource}
 }
 
 // Run executes workflowID's steps in order against template's agent
@@ -175,7 +177,7 @@ func (e *Executor) runStep(ctx context.Context, template mcp.ActionContext, orgI
 		Parameters:  resolvedParams,
 		Scope:       template.AgentScope,
 	}
-	if decision, evalErr := e.policyEval.Evaluate(ctx, pc); evalErr == nil {
+	if decision, evalErr := e.policyEvalSource.Evaluator().Evaluate(ctx, pc); evalErr == nil {
 		sr.ProjectedDecision = decision.Action
 	}
 	e.insertRunStep(ctx, rowID, runID, sr)

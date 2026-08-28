@@ -313,9 +313,17 @@ func newDispatchEnv(t *testing.T, e *workflowTestEnv, adapters map[string]aiprov
 
 	return &dispatchEnv{
 		dispatch: dispatch,
-		exec:     New(e.pool, dispatch, evaluator),
+		exec:     New(e.pool, dispatch, staticEvaluatorSource{ev: evaluator}),
 	}
 }
+
+// staticEvaluatorSource implements policy.EvaluatorSource (B-129) by
+// returning the same, already-constructed Evaluator on every call --
+// this test harness's evaluator is built once per newDispatchEnv call
+// from e.rules, not backed by a live-reloading policyloader.Loader.
+type staticEvaluatorSource struct{ ev policy.Evaluator }
+
+func (s staticEvaluatorSource) Evaluator() policy.Evaluator { return s.ev }
 
 // resolveTestTool/resolveTestAIProvider mirror cmd/gateway/main.go's
 // resolveDynamicTool/resolveAIProviderTool exactly (same fail-open

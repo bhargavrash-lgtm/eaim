@@ -16,6 +16,21 @@ type Evaluator interface {
 	Evaluate(ctx context.Context, ac ActionContext) (Decision, error)
 }
 
+// EvaluatorSource returns the currently-live Evaluator. A caller that
+// enforces policy on a hot path (a dispatch, a workflow step) must call
+// Evaluator() fresh on every use, not just once at construction time --
+// holding an Evaluator value directly instead of an EvaluatorSource
+// freezes whatever rule set existed at the moment it was captured, and a
+// live-reloading rule source (a hot-reload loader backed by a database)
+// will silently stop taking effect for that caller (B-129: eami-gateway's
+// dispatcher and workflow executor both did exactly this -- captured
+// policyloader.Loader.Evaluator() once at process startup instead of
+// holding the Loader itself, so no policy change ever reached a live
+// dispatch decision without a full process restart).
+type EvaluatorSource interface {
+	Evaluator() Evaluator
+}
+
 // evaluatorConfig holds optional configuration for an Evaluator.
 type evaluatorConfig struct {
 	defaultAction string

@@ -130,7 +130,12 @@ type DispatchHook func(ctx context.Context, ac mcp.ActionContext, o DispatchOutc
 type Dispatcher struct {
 	toolRouter       *toolrouter.Router
 	aiProviderRouter *aiprovider.Router
-	policyEval       policy.Evaluator
+	// policyEvalSource is read fresh (policyEvalSource.Evaluator()) on
+	// every Dispatch call, not cached -- see policy.EvaluatorSource's doc
+	// comment (B-129: a Dispatcher that instead stored a plain
+	// policy.Evaluator captured once at construction silently never
+	// observed any policy change made after the process started).
+	policyEvalSource policy.EvaluatorSource
 	auditWriter      *audit.Writer
 	episodeRecorder  *episode.Recorder
 	approvalRouter   *approval.Router
@@ -152,7 +157,7 @@ type Dispatcher struct {
 func NewDispatcher(
 	toolRouter *toolrouter.Router,
 	aiProviderRouter *aiprovider.Router,
-	policyEval policy.Evaluator,
+	policyEvalSource policy.EvaluatorSource,
 	auditWriter *audit.Writer,
 	episodeRecorder *episode.Recorder,
 	approvalRouter *approval.Router,
@@ -164,7 +169,7 @@ func NewDispatcher(
 	d := &Dispatcher{
 		toolRouter:       toolRouter,
 		aiProviderRouter: aiProviderRouter,
-		policyEval:       policyEval,
+		policyEvalSource: policyEvalSource,
 		auditWriter:      auditWriter,
 		episodeRecorder:  episodeRecorder,
 		approvalRouter:   approvalRouter,
@@ -332,7 +337,7 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 	case resolvedProvider != nil:
 		pc.ToolServerID = resolvedProvider.ID
 	}
-	decision, evalErr := d.policyEval.Evaluate(reqCtx, pc)
+	decision, evalErr := d.policyEvalSource.Evaluator().Evaluate(reqCtx, pc)
 	if evalErr != nil {
 		// Semantic evaluation errors are non-fatal; log and default to allow.
 		slog.Warn("policy eval error — defaulting to allow", "err", evalErr)

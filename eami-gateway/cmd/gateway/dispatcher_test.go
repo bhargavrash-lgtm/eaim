@@ -74,6 +74,14 @@ func (f *fakeEvaluator) Evaluate(_ context.Context, _ policy.ActionContext) (pol
 	return policy.Decision{Action: f.action}, nil
 }
 
+// staticEvaluatorSource implements policy.EvaluatorSource by returning the
+// same, already-constructed Evaluator on every call -- for tests that
+// don't care about live-reload behavior (that's proven separately, see
+// TestDispatch_PolicyReload_TakesEffectWithoutRestart).
+type staticEvaluatorSource struct{ ev policy.Evaluator }
+
+func (s staticEvaluatorSource) Evaluator() policy.Evaluator { return s.ev }
+
 // dispatcherTestEnv bundles one test's real, wired Dispatcher.
 type dispatcherTestEnv struct {
 	env        *mainTestEnv
@@ -136,7 +144,7 @@ func newDispatcherTestEnvFromEnv(t *testing.T, env *mainTestEnv, action string, 
 	episodeRecorder := episode.New(env.pool)
 
 	dispatcher := NewDispatcher(
-		toolRouter, aiProviderRouter, &fakeEvaluator{action: action},
+		toolRouter, aiProviderRouter, staticEvaluatorSource{ev: &fakeEvaluator{action: action}},
 		auditWriter, episodeRecorder, approvalRouter, fwd,
 		"", "", holdTimeout, extraHooks...,
 	)
@@ -694,7 +702,7 @@ func TestDispatch_AuditWriteFailure_AllowProxyError_LoggedWithCorrectDecision(t 
 	auditWriter := audit.NewWithDB(&failingAuditDB{err: injectedErr})
 
 	dispatcher := NewDispatcher(
-		toolRouter, aiProviderRouter, &fakeEvaluator{action: policy.ActionAllow},
+		toolRouter, aiProviderRouter, staticEvaluatorSource{ev: &fakeEvaluator{action: policy.ActionAllow}},
 		auditWriter, episodeRecorder, approvalRouter, brokenFwd,
 		"", "", holdTimeout,
 	)

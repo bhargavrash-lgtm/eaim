@@ -40,6 +40,12 @@ func New(pool *pgxpool.Pool) *Loader {
 	return &Loader{pool: pool}
 }
 
+// var _ documents, at compile time, that *Loader satisfies
+// policy.EvaluatorSource (B-129) -- callers on a hot path should hold a
+// *Loader (or any EvaluatorSource) and call .Evaluator() fresh on every
+// use, never hold the result of one .Evaluator() call.
+var _ policy.EvaluatorSource = (*Loader)(nil)
+
 // Evaluator returns the current live evaluator. Safe for concurrent use.
 func (l *Loader) Evaluator() policy.Evaluator {
 	if h := l.current.Load(); h != nil {
