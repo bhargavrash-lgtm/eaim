@@ -66,6 +66,7 @@ type ActionContext struct {
 // ToPolicyContext converts an ActionContext to the policy library's type.
 func (a ActionContext) ToPolicyContext() policy.ActionContext {
 	return policy.ActionContext{
+		OrgID:       a.OrgID,
 		AgentName:   a.AgentName,
 		ToolName:    a.Tool,
 		ActionType:  a.Action,

@@ -86,7 +86,11 @@ func TestLoad_ToolServerIDs_RealDBRoundTrip(t *testing.T) {
 
 	ev := loader.Evaluator()
 
-	matching, err := ev.Evaluate(ctx, policy.ActionContext{ToolServerID: targetServerID})
+	// OrgID set to the org this test itself seeded (B-128) -- isolates
+	// ToolServerID as the one variable under test in each case below,
+	// rather than incidentally relying on the org guard to also produce
+	// a "not deny" result for the wrong reason.
+	matching, err := ev.Evaluate(ctx, policy.ActionContext{OrgID: orgID.String(), ToolServerID: targetServerID})
 	if err != nil {
 		t.Fatalf("Evaluate (matching): %v", err)
 	}
@@ -94,7 +98,7 @@ func TestLoad_ToolServerIDs_RealDBRoundTrip(t *testing.T) {
 		t.Errorf("Evaluate with matching ToolServerID: Action = %q, want %q", matching.Action, policy.ActionDeny)
 	}
 
-	nonMatching, err := ev.Evaluate(ctx, policy.ActionContext{ToolServerID: uuid.New().String()})
+	nonMatching, err := ev.Evaluate(ctx, policy.ActionContext{OrgID: orgID.String(), ToolServerID: uuid.New().String()})
 	if err != nil {
 		t.Fatalf("Evaluate (non-matching): %v", err)
 	}
@@ -102,11 +106,107 @@ func TestLoad_ToolServerIDs_RealDBRoundTrip(t *testing.T) {
 		t.Errorf("Evaluate with a different ToolServerID: Action = %q, want default (not deny)", nonMatching.Action)
 	}
 
-	unresolved, err := ev.Evaluate(ctx, policy.ActionContext{ToolServerID: ""})
+	unresolved, err := ev.Evaluate(ctx, policy.ActionContext{OrgID: orgID.String(), ToolServerID: ""})
 	if err != nil {
 		t.Fatalf("Evaluate (unresolved): %v", err)
 	}
 	if unresolved.Action == policy.ActionDeny {
 		t.Errorf("Evaluate with an unresolved (empty) ToolServerID: Action = %q, want default (not deny)", unresolved.Action)
+	}
+}
+
+// TestLoad_OrgScoping_CrossOrgDispatchNoLongerMatches is B-128's negative-
+// control proof (AC2). It reproduces, almost verbatim, the exact
+// adversarial repro used in the original investigation (a throwaway probe
+// program run once against the real dev DB, then deleted): an
+// ActionContext structurally belonging to Org B, calling a tool name
+// ("claude") that matches an active policy actually owned by Org A --
+// mirroring the investigation's real find of a dispatch for
+// "b121-liveverify" matching Dev Org's own "Escalate Claude connector
+// calls" policy. Before the B-128 fix this matched and returned escalate;
+// after the fix, queryRules scans Rule.OrgID and matchesRule's org guard
+// must reject it, falling through to the default (not escalate). A
+// same-org positive control runs in the same test so a passing negative
+// control can't be explained by an org filter that's simply too broad
+// (e.g. one that broke the tool_names match itself).
+func TestLoad_OrgScoping_CrossOrgDispatchNoLongerMatches(t *testing.T) {
+	dsn := loaderTestDSN(t)
+	ctx := context.Background()
+
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		t.Skipf("skipping: could not reach test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	orgA := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, $2, $3)`,
+		orgA, "b128-neg-org-a-"+orgA.String()[:8], "b128-neg-org-a-"+orgA.String()); err != nil {
+		t.Fatalf("insert org A: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgA)
+	})
+	orgB := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, $2, $3)`,
+		orgB, "b128-neg-org-b-"+orgB.String()[:8], "b128-neg-org-b-"+orgB.String()); err != nil {
+		t.Fatalf("insert org B: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgB)
+	})
+
+	// Org A owns a real active policy matching a tool literally named
+	// "claude" -- the exact shape of the investigation's real repro
+	// against Dev Org's own "Escalate Claude connector calls" policy.
+	policyID := uuid.New()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO policies (id, org_id, name, priority, action, status)
+		VALUES ($1, $2, $3, 2, 'escalate', 'active')
+	`, policyID, orgA, "b128-neg-escalate-claude"); err != nil {
+		t.Fatalf("insert org A policy: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO policy_conditions (id, policy_id, tool_names)
+		VALUES ($1, $2, $3)
+	`, uuid.New(), policyID, []string{"claude"}); err != nil {
+		t.Fatalf("insert org A conditions: %v", err)
+	}
+
+	loader := New(pool)
+	if err := loader.Load(ctx); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ev := loader.Evaluator()
+
+	// Org B's dispatch, calling the same tool name -- pre-fix, this
+	// matched Org A's policy and returned escalate. Post-fix it must not.
+	d, err := ev.Evaluate(ctx, policy.ActionContext{
+		OrgID: orgB.String(), AgentName: "b128-neg-org-b-agent", ToolName: "claude", ActionType: "execute",
+	})
+	if err != nil {
+		t.Fatalf("Evaluate (cross-org): %v", err)
+	}
+	if d.Action == policy.ActionEscalate {
+		t.Errorf("Org B's dispatch matched Org A's policy: action=%s policyID=%v -- "+
+			"cross-org policy match is still possible, the B-128 fix did not close it",
+			d.Action, d.PolicyID)
+	}
+
+	// Positive control: Org A's OWN dispatch on the same tool must still
+	// match its own policy -- proves the fix filters by org, not that it
+	// accidentally broke the tool_names match itself.
+	dOwn, err := ev.Evaluate(ctx, policy.ActionContext{
+		OrgID: orgA.String(), AgentName: "b128-neg-org-a-agent", ToolName: "claude", ActionType: "execute",
+	})
+	if err != nil {
+		t.Fatalf("Evaluate (own org): %v", err)
+	}
+	if dOwn.Action != policy.ActionEscalate || dOwn.PolicyID == nil || *dOwn.PolicyID != policyID.String() {
+		t.Errorf("Org A's own dispatch: action=%s policyID=%v, want escalate/%s -- "+
+			"the org filter must not break same-org matching", dOwn.Action, dOwn.PolicyID, policyID)
 	}
 }

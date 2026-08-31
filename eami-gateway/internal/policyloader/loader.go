@@ -120,7 +120,7 @@ func (l *Loader) Listen(ctx context.Context) {
 func (l *Loader) queryRules(ctx context.Context) ([]policy.Rule, error) {
 	const q = `
 		SELECT
-			p.id, p.name, p.priority, p.action, p.alert,
+			p.id, p.org_id, p.name, p.priority, p.action, p.alert,
 			pc.agent_name_pattern,
 			pc.tool_names,
 			pc.action_types,
@@ -145,20 +145,20 @@ func (l *Loader) queryRules(ctx context.Context) ([]policy.Rule, error) {
 
 	for rows.Next() {
 		var (
-			id, name, action string
-			priority         int
-			alert            bool
-			agentPattern     *string
-			toolNames        []string
-			actionTypes      []string
-			environments     []string
-			recordCountGT    *int
-			semanticRule     *string
-			scopeDrift       bool
-			toolServerIDs    []string
+			id, orgID, name, action string
+			priority                int
+			alert                   bool
+			agentPattern            *string
+			toolNames               []string
+			actionTypes             []string
+			environments            []string
+			recordCountGT           *int
+			semanticRule            *string
+			scopeDrift              bool
+			toolServerIDs           []string
 		)
 		if err := rows.Scan(
-			&id, &name, &priority, &action, &alert,
+			&id, &orgID, &name, &priority, &action, &alert,
 			&agentPattern, &toolNames, &actionTypes, &environments,
 			&recordCountGT, &semanticRule, &scopeDrift, &toolServerIDs,
 		); err != nil {
@@ -195,6 +195,7 @@ func (l *Loader) queryRules(ctx context.Context) ([]policy.Rule, error) {
 
 		rules = append(rules, policy.Rule{
 			ID:         id,
+			OrgID:      orgID,
 			Name:       name,
 			Priority:   priority,
 			Conditions: cond,

@@ -305,6 +305,80 @@ func TestExecutor_Run_StepEscalates_ApprovedResumesRun(t *testing.T) {
 	}
 }
 
+// escalateRiskyRulesOrgScoped is escalateRiskyRules with a real, non-empty
+// OrgID set on both rules -- unlike escalateRiskyRules' rules (whose empty
+// OrgID is the deliberate any-org wildcard, see eami-policy/structural.go),
+// this proves runStep's independent policy-preview ActionContext actually
+// carries OrgID (a B-128 mandatory-review-pass finding: it originally
+// didn't, so once every real rule got a non-empty OrgID, this exact rule
+// shape could never match again, and ProjectedDecision silently fell
+// through to the evaluator's default "allow" regardless of the step's
+// real outcome).
+func escalateRiskyRulesOrgScoped(orgID string) []policy.Rule {
+	return []policy.Rule{
+		{ID: "escalate-risky-scoped", OrgID: orgID, Name: "escalate-risky-scoped", Priority: 1, Action: policy.ActionEscalate,
+			Conditions: policy.Conditions{ActionTypes: []string{"risky-action"}}},
+		{ID: "allow-rest-scoped", OrgID: orgID, Name: "allow-rest-scoped", Priority: 100, Action: policy.ActionAllow},
+	}
+}
+
+// TestExecutor_Run_ProjectedDecision_OrgScopedRule_StillMatches closes the
+// coverage gap escalateRiskyRules() leaves: its rules' OrgID is left at
+// "", the deliberate any-org wildcard, which happens to match an equally
+// empty pc.OrgID by coincidence even if runStep's preview never set it.
+// This test uses a rule set scoped to the real env.orgID specifically, so
+// a regression (runStep's pc losing its OrgID again) would show up as
+// ProjectedDecision reverting to "allow" here, not silently passing.
+func TestExecutor_Run_ProjectedDecision_OrgScopedRule_StillMatches(t *testing.T) {
+	env := newWorkflowTestEnv(t)
+	env.rules = escalateRiskyRulesOrgScoped(env.orgID.String())
+	toolA := env.insertAIProviderTool(t, "ac3-org-scoped-a", "provider-a")
+	toolB := env.insertAIProviderTool(t, "ac3-org-scoped-b", "provider-b")
+	adapterB := &fakeAdapter{name: "provider-b"}
+	de := newDispatchEnv(t, env, map[string]aiprovider.Adapter{
+		"provider-a": &fakeAdapter{name: "provider-a"}, "provider-b": adapterB,
+	})
+	wfID := seedWorkflow(t, env, "ac3-org-scoped-workflow", []struct {
+		toolID uuid.UUID
+		action string
+		params map[string]any
+	}{
+		{toolA, "query", nil},
+		{toolB, "risky-action", nil},
+	})
+
+	type runOutcome struct {
+		result *RunResult
+		err    error
+	}
+	done := make(chan runOutcome, 1)
+	go func() {
+		r, err := de.exec.Run(context.Background(), env.template(), wfID)
+		done <- runOutcome{r, err}
+	}()
+
+	approvalID := waitForPendingApproval(t, env.pool, env.orgID, 5*time.Second)
+	decideTestApproval(t, env.pool, approvalID, "approved")
+
+	select {
+	case out := <-done:
+		if out.err != nil {
+			t.Fatalf("Run: %v", out.err)
+		}
+		if len(out.result.Steps) != 2 {
+			t.Fatalf("len(Steps) = %d, want 2", len(out.result.Steps))
+		}
+		if out.result.Steps[1].ProjectedDecision != "escalate" {
+			t.Errorf("ProjectedDecision = %q, want escalate -- runStep's preview ActionContext "+
+				"must carry OrgID so it can match a real, org-scoped policy rule, not just "+
+				"the OrgID-less wildcard rules escalateRiskyRules() uses elsewhere in this file",
+				out.result.Steps[1].ProjectedDecision)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return after approval decided -- Hold() likely stuck")
+	}
+}
+
 func TestExecutor_Run_StepEscalates_DeniedStopsRun(t *testing.T) {
 	env := newWorkflowTestEnv(t)
 	env.rules = escalateRiskyRules()

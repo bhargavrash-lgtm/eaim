@@ -14,6 +14,12 @@ const (
 // ActionContext describes a single tool call from an AI agent.
 // It is the input to every policy evaluation.
 type ActionContext struct {
+	// OrgID is the tenant-owning org for this dispatch. Must come from
+	// server-resolved agent/session identity (B-098's JWT-bound agent
+	// resolution), never client input -- Evaluate() trusts this value to
+	// scope which rules can match (B-128).
+	OrgID string
+
 	AgentID    string
 	AgentName  string
 	// Scope is the canonical declared task scope (preferred over AgentScope).
@@ -98,7 +104,13 @@ type Conditions struct {
 
 // Rule represents a single policy rule loaded from the database.
 type Rule struct {
-	ID         string
+	ID string
+	// OrgID is the tenant-owning org for this rule (policies.org_id).
+	// matchesRule() rejects any ActionContext whose OrgID differs (B-128)
+	// -- always non-empty for a real DB-loaded rule (policies.org_id is
+	// NOT NULL); empty is treated as a wildcard only to keep hand-built
+	// Rule literals in existing tests working unchanged.
+	OrgID      string
 	Name       string
 	Priority   int        // lower number = higher priority (1 is highest)
 	Conditions Conditions

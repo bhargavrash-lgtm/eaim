@@ -170,6 +170,7 @@ func (e *Executor) runStep(ctx context.Context, template mcp.ActionContext, orgI
 	// own return alone can't distinguish that from "always allowed").
 	// Never used to skip or alter dispatch()'s own enforcement below.
 	pc := policy.ActionContext{
+		OrgID:       template.OrgID,
 		AgentName:   template.AgentName,
 		ToolName:    conn.name,
 		ActionType:  step.Action,

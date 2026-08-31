@@ -67,6 +67,17 @@ func toolCategory(toolName string) string {
 // matchesRule returns true if ac satisfies all non-empty conditions in r.
 // ALL conditions must match (AND logic). An empty/nil condition is a wildcard.
 func matchesRule(ac ActionContext, r Rule) bool {
+	// --- OrgID (tenant scope, B-128) ---
+	// A rule never matches a dispatch from a different org. Checked first,
+	// unconditionally, ahead of every Conditions field below -- the
+	// cheapest possible check, and the one whose absence let any org's
+	// dispatch be decided by any other org's policy. Empty is a wildcard
+	// only for hand-built Rule literals in existing tests; a real
+	// DB-loaded rule's OrgID is never empty (policies.org_id is NOT NULL).
+	if r.OrgID != "" && r.OrgID != ac.OrgID {
+		return false
+	}
+
 	c := r.Conditions
 
 	// --- AgentNamePattern (glob) ---

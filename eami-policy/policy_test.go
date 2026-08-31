@@ -69,6 +69,41 @@ func TestMatchesRule_AgentNameGlob(t *testing.T) {
 	}
 }
 
+// TestMatchesRule_OrgID is B-128's unit-level proof of the org guard added
+// to matchesRule: a rule never matches an ActionContext from a different
+// org, regardless of how permissive its other Conditions are. Empty
+// Rule.OrgID is a wildcard only to keep every other table test in this
+// file (which builds Rule literals with no OrgID at all) passing unchanged
+// -- a real DB-loaded rule's OrgID is never empty (policies.org_id is NOT
+// NULL, see policyloader.queryRules).
+func TestMatchesRule_OrgID(t *testing.T) {
+	cases := []struct {
+		name    string
+		ruleOrg string
+		acOrg   string
+		want    bool
+	}{
+		{"same org matches", "org-a", "org-a", true},
+		{"different org never matches", "org-a", "org-b", false},
+		{"empty rule org is a wildcard (test-literal convention)", "", "org-a", true},
+		{"empty ac org against a real rule org never matches", "org-a", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ac := baseAC()
+			ac.OrgID = tc.acOrg
+			rule := Rule{
+				OrgID:      tc.ruleOrg,
+				Conditions: Conditions{}, // maximally permissive otherwise
+				Action:     ActionDeny,
+			}
+			if got := matchesRule(ac, rule); got != tc.want {
+				t.Errorf("ruleOrg=%q acOrg=%q: got %v, want %v", tc.ruleOrg, tc.acOrg, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMatchesRule_ToolNames(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -445,6 +480,62 @@ func TestEvaluate_PriorityOrdering(t *testing.T) {
 	}
 	if d.PolicyID == nil || *d.PolicyID != "high-priority-deny" {
 		t.Errorf("expected high-priority-deny rule to match, got %v", d.PolicyID)
+	}
+}
+
+// TestEvaluate_OrgScoping_PriorityOrderingIndependentPerOrg is B-128's
+// AC5 proof: Org A and Org B's rules sit in the SAME evaluator's sorted
+// rule slice (exactly how policyloader.Loader builds one process-wide
+// evaluator from every org's rows combined). Org A has two rules of its
+// own (priority 1 deny, priority 10 allow) interleaved with Org B's own
+// priority-1 rule (allow) on the identical tool/action. Each org's
+// dispatch must resolve using ONLY its own priority ordering -- Org A's
+// priority-1 deny must win for Org A regardless of what priority Org B's
+// rule holds, and Org B's rule must never even be considered for Org A's
+// dispatch. Proves the B-128 org filter has zero interaction with
+// B-086/090's priority-ordering guarantees.
+func TestEvaluate_OrgScoping_PriorityOrderingIndependentPerOrg(t *testing.T) {
+	rules := []Rule{
+		{
+			ID: "org-b-allow-p1", OrgID: "org-b", Name: "Org B allow", Priority: 1,
+			Action:     ActionAllow,
+			Conditions: Conditions{ToolNames: []string{"shared-tool"}},
+		},
+		{
+			ID: "org-a-deny-p1", OrgID: "org-a", Name: "Org A deny", Priority: 1,
+			Action:     ActionDeny,
+			Conditions: Conditions{ToolNames: []string{"shared-tool"}},
+		},
+		{
+			ID: "org-a-allow-p10", OrgID: "org-a", Name: "Org A allow (lower priority)", Priority: 10,
+			Action:     ActionAllow,
+			Conditions: Conditions{ToolNames: []string{"shared-tool"}},
+		},
+	}
+	ev := NewEvaluator(rules)
+
+	acA := baseAC()
+	acA.OrgID = "org-a"
+	acA.ToolName = "shared-tool"
+	dA, err := ev.Evaluate(context.Background(), acA)
+	if err != nil {
+		t.Fatalf("Org A Evaluate: %v", err)
+	}
+	if dA.Action != ActionDeny || dA.PolicyID == nil || *dA.PolicyID != "org-a-deny-p1" {
+		t.Errorf("Org A: got action=%q policyID=%v, want deny/org-a-deny-p1 (its own priority-1 rule, "+
+			"unaffected by Org B's priority-1 rule)", dA.Action, dA.PolicyID)
+	}
+
+	acB := baseAC()
+	acB.OrgID = "org-b"
+	acB.ToolName = "shared-tool"
+	dB, err := ev.Evaluate(context.Background(), acB)
+	if err != nil {
+		t.Fatalf("Org B Evaluate: %v", err)
+	}
+	if dB.Action != ActionAllow || dB.PolicyID == nil || *dB.PolicyID != "org-b-allow-p1" {
+		t.Errorf("Org B: got action=%q policyID=%v, want allow/org-b-allow-p1 (its own rule, "+
+			"never Org A's rules)", dB.Action, dB.PolicyID)
 	}
 }
 
