@@ -72,3 +72,14 @@ if [ "$COUNT" -gt "$BACKUP_RETENTION_COUNT" ]; then
         rm -f "$f"
     done
 fi
+
+# Optional offsite transport (B-144) — no-ops by construction unless a
+# customer has configured all of OFFSITE_AGE_RECIPIENT/
+# OFFSITE_RCLONE_REMOTE/OFFSITE_RCLONE_CONFIG (see backup-offsite.sh for
+# the exact gating condition). Runs after the local backup above is
+# already complete and safe; its exit code is propagated below so a
+# configured-but-failing offsite step is never silent, even though the
+# local backup this run produced remains valid either way.
+if [ -f "$(dirname "$0")/backup-offsite.sh" ]; then
+    sh "$(dirname "$0")/backup-offsite.sh" "$OUT_FILE"
+fi

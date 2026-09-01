@@ -86,17 +86,35 @@ services:
   # postgres_backups volume. See RECOVERY.md for the restore procedure.
   # ──────────────────────────────────────────────────────────────
   eami-backup:
-    image: postgres:16-alpine
+    build:
+      context: .
+      dockerfile: docker/eami-backup/Dockerfile
     environment:
       DATABASE_URL: postgresql://eami_app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set — see .env.example}@postgres:5432/eami
       BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-0 3 * * *}
       BACKUP_RETENTION_COUNT: ${BACKUP_RETENTION_COUNT:-14}
+      # Optional offsite transport (B-144) — all empty by default, meaning
+      # backup-offsite.sh no-ops and behavior is unchanged from B-029/B-143.
+      # See RECOVERY.md for setup. OFFSITE_RCLONE_CONFIG points at a file
+      # inside the ${EAMI_OFFSITE_SECRETS_DIR} bind mount below, never
+      # baked into the image.
+      OFFSITE_AGE_RECIPIENT: ${OFFSITE_AGE_RECIPIENT:-}
+      OFFSITE_RCLONE_REMOTE: ${OFFSITE_RCLONE_REMOTE:-}
+      OFFSITE_RCLONE_CONFIG: /rclone/rclone.conf
     entrypoint: ["sh", "/scripts/backup-entrypoint.sh"]
     volumes:
       - postgres_backups:/backups
       - ./scripts/backup-db.sh:/scripts/backup-db.sh:ro
       - ./scripts/backup-entrypoint.sh:/scripts/backup-entrypoint.sh:ro
       - ./scripts/restore-db.sh:/scripts/restore-db.sh:ro
+      - ./scripts/backup-offsite.sh:/scripts/backup-offsite.sh:ro
+      - ./scripts/restore-offsite.sh:/scripts/restore-offsite.sh:ro
+      # Customer-supplied rclone.conf (their own remote credentials) --
+      # gitignored, never an EAMI-held secret. A directory mount, same
+      # ${EAMI_CERT_DIR}/custom pattern used below for TLS certs, so a
+      # customer who hasn't created it yet doesn't break container
+      # startup. Absent/empty means offsite backup stays a no-op.
+      - ${EAMI_OFFSITE_SECRETS_DIR:-./secrets}:/rclone:ro
     depends_on:
       postgres:
         condition: service_healthy

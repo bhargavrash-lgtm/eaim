@@ -37,6 +37,10 @@ certs/
 collector_data/
 gateway_certs/
 
+# Customer-supplied offsite-backup transport credentials (B-144) — never
+# an EAMI-held secret, same treatment as certs/ above
+secrets/
+
 # OS
 .DS_Store
 Thumbs.db

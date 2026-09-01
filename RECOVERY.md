@@ -28,17 +28,13 @@ the immutable audit trail that is this product's core value proposition.
   the script exits non-zero; no partial/corrupt file is ever left in
   place (writes to a `.tmp` file, only `mv`s it into place on success).
   Check with `docker compose logs eami-backup`.
+- **Offsite transport (optional, B-144):** off by default — see
+  ["Offsite backup"](#offsite-backup-b-144) below. When configured, each
+  local backup is additionally encrypted with your own key and sent to a
+  remote destination you control.
 
 ## What this does NOT cover (v1 — explicitly out of scope)
 
-- **Offsite/cloud backup storage.** Backups currently live only on the
-  same Docker host as Postgres. If that host is lost entirely (not just
-  its Postgres data volume), the backups are lost too. **This is the
-  biggest gap in the current setup** — offloading `postgres_backups` to
-  S3/GCS/Azure Blob (or even just an `rsync`/`rclone` step after each
-  backup) is the natural next step and should be prioritized before this
-  is relied on as a real disaster-recovery story for production data, not
-  just a local-disk-corruption story.
 - **Point-in-time recovery / WAL archiving.** v1 is periodic full dumps
   only — you can restore to the moment of the last successful backup, not
   to an arbitrary point in time. Data written after the last backup and
@@ -251,14 +247,135 @@ If you just need *a* working login to poke around a fresh/empty
 deployment, `reseed.sql` is fine. If you actually lost data you care
 about, use the restore procedure above.
 
+## Offsite backup (B-144)
+
+Local backups (above) protect against Postgres data-volume loss or
+corruption, but not against losing the whole host — `postgres_backups`
+lives on that same host. This section covers the optional offsite
+transport that closes that gap.
+
+**Disabled by default.** If you don't configure anything below, every
+local backup behaves exactly as documented above — there is no separate
+on/off flag; the offsite step simply doesn't run unless it's fully
+configured (see `scripts/backup-offsite.sh`'s gating condition).
+
+**Trust boundary, matching ADR-020 Model A:** EAMI ships the mechanism;
+you control the destination and every credential involved. EAMI's own
+process never holds your remote storage credentials, and never holds
+your decryption key — only your *public* encryption key ever reaches it.
+The backup file is fully encrypted, on this host, before any network
+request is made.
+
+### Setup
+
+**1. Generate an age keypair** (do this once, anywhere — not inside a
+container):
+
+```bash
+age-keygen -o identity.txt
+# Prints your public key, e.g.: Public key: age1qyqs...
+```
+
+Keep `identity.txt` (the **private** key) somewhere outside any EAMI
+container or the `secrets/` directory below entirely — a password
+manager, an offline USB key, whatever your organization already uses for
+secrets like this. You'll only need it again at restore time.
+
+**2. Set the public key and remote in `.env`:**
+
+```bash
+OFFSITE_AGE_RECIPIENT=age1qyqs...            # from step 1
+OFFSITE_RCLONE_REMOTE=eami-offsite:my-bucket/eami-backups
+```
+
+**3. Create `secrets/rclone.conf`** (gitignored, holds your actual remote
+credentials — the remote name must match what you used in
+`OFFSITE_RCLONE_REMOTE` above, `eami-offsite` here):
+
+S3-compatible:
+
+```ini
+[eami-offsite]
+type = s3
+provider = Other
+access_key_id = <your access key>
+secret_access_key = <your secret key>
+endpoint = <your S3-compatible endpoint, e.g. https://s3.us-east-1.amazonaws.com>
+```
+
+SFTP:
+
+```ini
+[eami-offsite]
+type = sftp
+host = <your sftp host>
+user = <your sftp user>
+key_file = /rclone/id_ed25519
+```
+
+(For SFTP with a key file, also add the key itself into `secrets/` and
+reference it as shown — it rides along on the same directory mount as
+`rclone.conf`.)
+
+**4. Restart `eami-backup`** (`docker compose up -d eami-backup`, or a
+plain `docker compose up -d` for the whole stack) so the rebuilt image
+(carrying `age`/`rclone`, see `docker/eami-backup/Dockerfile`) and the
+new env vars/mount take effect. The next backup — scheduled or manual —
+will encrypt and upload automatically; check
+`docker compose logs eami-backup` for a `backup-offsite:` line confirming
+success (or a clear `ERROR` if something's misconfigured).
+
+### Restoring from the offsite copy
+
+Two steps: recover the plaintext dump from the offsite copy, then hand
+it to the existing, **unmodified** local restore procedure above.
+
+**1. Recover the plaintext dump** (needs your `identity.txt` from setup
+step 1 — supply it however you actually store it; it does not live in
+any container by default):
+
+```bash
+docker compose cp identity.txt eami-backup:/tmp/identity.txt
+docker compose exec eami-backup sh /scripts/restore-offsite.sh \
+    eami-offsite:my-bucket/eami-backups/eami_20260901T030000Z.dump.age \
+    /tmp/identity.txt \
+    /backups/from-offsite.dump
+docker compose exec eami-backup rm /tmp/identity.txt   # don't leave it sitting in the container
+```
+
+**2. Restore it exactly like a local backup** — `restore-db.sh` doesn't
+know or care whether the dump came from `/backups` locally or via
+`restore-offsite.sh`:
+
+```bash
+docker compose exec eami-backup sh /scripts/restore-db.sh /backups/from-offsite.dump
+```
+
+Then continue with steps 4–5 of the local restore procedure above
+(verify data integrity, restart application services).
+
+### Why whole-file encryption is enough
+
+`gateway_tools.credentials_encrypted` is already AES-256-GCM-sealed at
+the application layer and stays that way inside the dump either way. But
+`audit_log` content and tool-call `parameters` (JSONB) are **not**
+encrypted at the application layer — they'd be fully readable in a raw,
+unencrypted dump. This isn't a gap specific to the offsite path: it's
+true of the plain local `.dump` file too, which is why encrypting the
+*entire* file before it leaves the host (rather than, say, encrypting
+only specific columns) is the right fix here — every byte, including
+that JSONB content, becomes opaque ciphertext the moment `age` runs,
+before any network request is made. Confirmed empirically, not just
+argued: a known plaintext string present in the raw local dump is absent
+from the corresponding `.age` file (see B-144's live verification in
+`BUILT.md`).
+
 ## Future work (not v1)
 
-- Offsite/cloud backup storage (S3/GCS/Azure Blob or similar) — see
-  "What this does NOT cover" above. This is the most important follow-up.
 - Point-in-time recovery via WAL archiving, if continuous (not just
   periodic) recovery points become a real requirement.
 - Automated restore tooling, once the manual procedure has enough
-  real-world mileage to be confidently scripted.
-- Backup encryption at rest, if `postgres_backups` ever needs to leave
-  the trust boundary of the host it's created on (relevant once offsite
-  storage lands).
+  real-world mileage to be confidently scripted (the offsite path above
+  already automates its own encrypt/transport and download/decrypt
+  sub-steps, but the overall trigger — which backup, which target
+  database — is still a human decision by design, same as local restore).

@@ -13,6 +13,10 @@ scripts/migrate.sh text eol=lf
 # container as the two backup scripts above, for the same reason.
 scripts/restore-db.sh text eol=lf
 
+# Same class of fix, B-144: same eami-backup Alpine container again.
+scripts/backup-offsite.sh text eol=lf
+scripts/restore-offsite.sh text eol=lf
+
 # Same class of fix, B-053: appliance provisioning/boot scripts, run inside
 # a Debian VM via Packer (upload) and systemd (boot) -- not Windows at all.
 appliance/scripts/*.sh text eol=lf
