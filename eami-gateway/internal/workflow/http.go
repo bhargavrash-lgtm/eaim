@@ -15,12 +15,16 @@ import (
 	"github.com/eami/gateway/internal/registry"
 )
 
-// AgentResolver resolves a JWT subject's agent name to its registry
-// record. *registry.Registry satisfies this structurally, matching
-// episode/http.go's own identical AgentResolver seam -- zero changes to
-// the registry package, and a test seam for the bearer-JWT auth branch.
+// AgentResolver resolves a JWT subject's agent name, scoped to the
+// token's own org_id claim, to its registry record. *registry.Registry
+// satisfies this structurally, matching episode/http.go's own identical
+// AgentResolver seam -- zero changes to the registry package, and a test
+// seam for the bearer-JWT auth branch. LookupByNameAndOrg, not
+// LookupByName (B-141): gateway_agents only enforces per-org name
+// uniqueness, so resolving by name alone can silently return a different
+// org's identically-named agent.
 type AgentResolver interface {
-	LookupByName(ctx context.Context, name string) (*registry.AgentRecord, error)
+	LookupByNameAndOrg(ctx context.Context, name, orgID string) (*registry.AgentRecord, error)
 }
 
 // HTTPHandler serves POST /v1/gateway/workflows/{workflowId}/run --
@@ -57,7 +61,13 @@ func (h *HTTPHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	agentName := strings.TrimPrefix(claims.Subject, "agent:")
-	agentRec, err := h.resolver.LookupByName(r.Context(), agentName)
+	// B-141: hard cutover -- a pre-cutover token (no org_id claim) is
+	// rejected outright, same reasoning as mcp/handler.go's ServeSSE.
+	if claims.OrgID == "" {
+		http.Error(w, "unauthorized: token missing org_id claim -- reissue a new token", http.StatusUnauthorized)
+		return
+	}
+	agentRec, err := h.resolver.LookupByNameAndOrg(r.Context(), agentName, claims.OrgID)
 	if err != nil {
 		http.Error(w, "agent not registered or suspended: "+err.Error(), http.StatusForbidden)
 		return

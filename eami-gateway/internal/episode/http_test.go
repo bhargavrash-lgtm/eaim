@@ -25,13 +25,20 @@ import (
 
 const testServiceKey = "test-episode-read-service-key"
 
-// fakeResolver is a hand-rolled episode.AgentResolver double.
+// fakeResolver is a hand-rolled episode.AgentResolver double. records is
+// keyed on name alone (not (name, org)) -- deliberately mirrors the real
+// registry.LookupByNameAndOrg contract loosely: the fake still requires a
+// non-empty orgID (matching the real method's signature and the B-141
+// hard-cutover check upstream of every call here) but doesn't itself
+// enforce the stored record's OrgID equals the org argument, since no
+// test in this file needs a same-name-different-org fixture at this
+// layer (that scenario is covered by the dedicated cross-org test suite).
 type fakeResolver struct {
 	records map[string]*registry.AgentRecord
 	err     error // when set, returned regardless of records (mirrors registry's suspended/not-found contract)
 }
 
-func (f *fakeResolver) LookupByName(_ context.Context, name string) (*registry.AgentRecord, error) {
+func (f *fakeResolver) LookupByNameAndOrg(_ context.Context, name, orgID string) (*registry.AgentRecord, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -54,8 +61,22 @@ func newTestManager(t *testing.T) *identity.Manager {
 
 // issueBearerFor issues a token whose subject is "agent:<agentName>",
 // matching the "agent:<name>" convention documented in internal/registry
-// and used by internal/mcp/handler.go's buildActionContext.
-func issueBearerFor(t *testing.T, m *identity.Manager, agentName string) string {
+// and used by internal/mcp/handler.go's buildActionContext. orgID is
+// required (B-141): a token missing its org_id claim is rejected outright
+// by authenticateCaller's hard cutover before the resolver is ever
+// consulted -- see issueBearerForNoOrg below for that specific case.
+func issueBearerFor(t *testing.T, m *identity.Manager, agentName, orgID string) string {
+	t.Helper()
+	resp, err := m.Issue(identity.IssueRequest{AgentID: "agent:" + agentName, OrgID: orgID, TTLSeconds: 300})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	return resp.Token
+}
+
+// issueBearerForNoOrg issues a pre-cutover-shaped token (no org_id claim)
+// -- the exact shape every real token minted before B-141 shipped has.
+func issueBearerForNoOrg(t *testing.T, m *identity.Manager, agentName string) string {
 	t.Helper()
 	resp, err := m.Issue(identity.IssueRequest{AgentID: "agent:" + agentName, TTLSeconds: 300})
 	if err != nil {
@@ -164,7 +185,7 @@ func TestHandler_ListEpisodes_ValidBearerJWT_ResolvesOrgFromRegistry(t *testing.
 	h := newHandler(t, store, resolver, idm)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/gateway/episodes", nil)
-	req.Header.Set("Authorization", "Bearer "+issueBearerFor(t, idm, "test-agent"))
+	req.Header.Set("Authorization", "Bearer "+issueBearerFor(t, idm, "test-agent", orgID.String()))
 	rec := httptest.NewRecorder()
 
 	h.ListEpisodes(rec, req)
@@ -184,7 +205,7 @@ func TestHandler_ListEpisodes_BearerJWT_UnknownAgent_ReturnsForbidden(t *testing
 	h := newHandler(t, &fakeStore{}, &fakeResolver{}, idm)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/gateway/episodes", nil)
-	req.Header.Set("Authorization", "Bearer "+issueBearerFor(t, idm, "ghost-agent"))
+	req.Header.Set("Authorization", "Bearer "+issueBearerFor(t, idm, "ghost-agent", uuid.New().String()))
 	rec := httptest.NewRecorder()
 
 	h.ListEpisodes(rec, req)
@@ -200,13 +221,38 @@ func TestHandler_ListEpisodes_BearerJWT_SuspendedAgent_ReturnsForbidden(t *testi
 	h := newHandler(t, &fakeStore{}, resolver, idm)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/gateway/episodes", nil)
-	req.Header.Set("Authorization", "Bearer "+issueBearerFor(t, idm, "suspended-agent"))
+	req.Header.Set("Authorization", "Bearer "+issueBearerFor(t, idm, "suspended-agent", uuid.New().String()))
 	rec := httptest.NewRecorder()
 
 	h.ListEpisodes(rec, req)
 
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", rec.Code)
+	}
+}
+
+// TestHandler_ListEpisodes_BearerJWT_PreCutoverToken_ReturnsUnauthorized is
+// B-141's hard-cutover regression test: a token minted before Claims
+// gained OrgID (or, equivalently, one whose org_id claim is otherwise
+// empty) is rejected outright, before the resolver is ever consulted --
+// never falls back to an unscoped lookup.
+func TestHandler_ListEpisodes_BearerJWT_PreCutoverToken_ReturnsUnauthorized(t *testing.T) {
+	idm := newTestManager(t)
+	orgID := uuid.New()
+	resolver := &fakeResolver{records: map[string]*registry.AgentRecord{
+		"test-agent": {ID: uuid.New().String(), OrgID: orgID.String(), Name: "test-agent", Status: "active"},
+	}}
+	h := newHandler(t, &fakeStore{}, resolver, idm)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/gateway/episodes", nil)
+	req.Header.Set("Authorization", "Bearer "+issueBearerForNoOrg(t, idm, "test-agent"))
+	rec := httptest.NewRecorder()
+
+	h.ListEpisodes(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 -- a pre-cutover token (no org_id claim) must be rejected "+
+			"outright, even for an agent name that would otherwise resolve successfully", rec.Code)
 	}
 }
 
@@ -227,7 +273,7 @@ func TestHandler_ListEpisodes_BearerJWT_ClientSuppliedOrgIDIgnored_UsesRegistryO
 	h := episode.NewHTTPHandler(reader, idm, resolver, testServiceKey)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/gateway/episodes?org_id="+forgedOrg.String(), nil)
-	req.Header.Set("Authorization", "Bearer "+issueBearerFor(t, idm, "test-agent"))
+	req.Header.Set("Authorization", "Bearer "+issueBearerFor(t, idm, "test-agent", realOrg.String()))
 	rec := httptest.NewRecorder()
 
 	h.ListEpisodes(rec, req)

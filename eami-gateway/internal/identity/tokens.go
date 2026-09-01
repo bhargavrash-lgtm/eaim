@@ -51,8 +51,26 @@ const (
 )
 
 // Claims are the custom JWT claims for an AI token.
+//
+// OrgID (B-141) is the tenant-owning org for the agent this token was
+// issued to -- server-resolved at issuance (HandleIssue sets it from the
+// validated API key's own org_id, never client input), same trust model
+// as Scope/Task/Model/Owner/RiskTier below. Every consumer that resolves
+// this token's agent identity (internal/mcp, internal/workflow,
+// internal/episode) must use this value to scope that resolution via
+// registry.LookupByNameAndOrg, never the bare Subject name alone --
+// gateway_agents only enforces per-org name uniqueness (UNIQUE(org_id,
+// name)), so two different orgs can have an identically-named agent, and
+// resolving by name alone can silently return the WRONG org's row. A
+// token minted before this field existed has OrgID == "" -- treated as
+// invalid by every consumer, a deliberate hard cutover (not a graceful
+// fallback): a fallback would mean knowingly keeping this exact
+// vulnerability exploitable for the remainder of any in-flight token's
+// lifetime (max 4 hours, maxTTL below) for a compatibility benefit that
+// only matters for those few hours.
 type Claims struct {
 	jwt.RegisteredClaims
+	OrgID    string `json:"org_id"`
 	Scope    string `json:"scope"`
 	Task     string `json:"task"`
 	Model    string `json:"model"`
@@ -62,7 +80,14 @@ type Claims struct {
 
 // IssueRequest is the request body for POST /v1/gateway/tokens.
 type IssueRequest struct {
-	AgentID    string `json:"agent_id"`
+	AgentID string `json:"agent_id"`
+	// OrgID (B-141) is never client-settable -- IssueRequest has no JSON
+	// tag for it deliberately (unlike Scope/Task/Model/Owner/RiskTier,
+	// which the request body genuinely accepts and HandleIssue then
+	// overwrites from the DB record). OrgID is set exactly once, by
+	// HandleIssue, from the validated API key's own org_id, immediately
+	// before calling Manager.Issue -- see Claims' doc comment above.
+	OrgID      string `json:"-"`
 	Scope      string `json:"scope"`
 	Task       string `json:"task"`
 	Model      string `json:"model"`
@@ -269,6 +294,7 @@ func (m *Manager) Issue(req IssueRequest) (*IssueResponse, error) {
 			ExpiresAt: jwt.NewNumericDate(exp),
 			ID:        jti,
 		},
+		OrgID:    req.OrgID,
 		Scope:    req.Scope,
 		Task:     req.Task,
 		Model:    req.Model,

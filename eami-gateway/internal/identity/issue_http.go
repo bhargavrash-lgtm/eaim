@@ -236,6 +236,14 @@ func (h *IssueHandler) HandleIssue(w http.ResponseWriter, r *http.Request) {
 	// precedent. Task is the one field deliberately left client-supplied:
 	// it's a per-request purpose string, not an agent-identity attribute,
 	// and gateway_agents has no matching column to rebuild it from.
+	// B-141: OrgID comes from the validated API key's own org_id (key.OrgID,
+	// already resolved above by ValidateAndResolveAgent's org-scoped query),
+	// never from client input -- IssueRequest.OrgID has no JSON tag
+	// specifically so a request body can't set it. Every consumer that
+	// later resolves this token's agent identity (ServeSSE, HandleRun,
+	// RateLimitRunMiddleware, episode's authenticateCaller) uses this claim
+	// to scope that resolution instead of the bare Subject name alone.
+	req.OrgID = key.OrgID
 	req.AgentID = "agent:" + rec.Name
 	req.Scope = rec.Scope
 	req.Model = rec.Model

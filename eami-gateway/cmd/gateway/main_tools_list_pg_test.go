@@ -307,7 +307,7 @@ func newToolsListTestEnv(t *testing.T, dispatch mcp.DecisionHandler) *toolsListT
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
-	resp, err := idm.Issue(identity.IssueRequest{AgentID: "agent:" + agentName, TTLSeconds: 300})
+	resp, err := idm.Issue(identity.IssueRequest{AgentID: "agent:" + agentName, OrgID: env.orgID.String(), TTLSeconds: 300})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}

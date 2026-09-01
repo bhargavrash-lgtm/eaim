@@ -112,9 +112,15 @@ func RateLimitRunMiddleware(idm *identity.Manager, resolver AgentResolver, limit
 	return func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
 		if token, ok := strings.CutPrefix(auth, "Bearer "); ok {
-			if claims, err := idm.Validate(token); err == nil {
+			if claims, err := idm.Validate(token); err == nil && claims.OrgID != "" {
+				// B-141: claims.OrgID == "" (a pre-cutover token) falls
+				// through to next unchanged, same as any other lookup
+				// failure below -- this middleware is best-effort rate
+				// limiting, not a security boundary; HandleRun's own
+				// LookupByNameAndOrg call performs the real, authoritative
+				// rejection of a pre-cutover token.
 				agentName := strings.TrimPrefix(claims.Subject, "agent:")
-				if agentRec, err := resolver.LookupByName(r.Context(), agentName); err == nil {
+				if agentRec, err := resolver.LookupByNameAndOrg(r.Context(), agentName, claims.OrgID); err == nil {
 					if ok, retryAfter := limiter.Allow(agentRec.ID); !ok {
 						setRetryAfter(w, retryAfter)
 						http.Error(w, "too many workflow-run requests for this agent -- try again later", http.StatusTooManyRequests)

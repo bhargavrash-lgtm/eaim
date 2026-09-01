@@ -16,12 +16,18 @@ import (
 	"github.com/eami/gateway/internal/registry"
 )
 
-// AgentResolver resolves a JWT subject's agent name to its registry record.
-// *registry.Registry satisfies this structurally (Go duck typing) with zero
-// changes to the registry package. Defined here purely as a test seam for
-// the bearer-JWT auth branch.
+// AgentResolver resolves a JWT subject's agent name, scoped to the
+// token's own org_id claim, to its registry record. *registry.Registry
+// satisfies this structurally (Go duck typing) with zero changes to the
+// registry package. Defined here purely as a test seam for the bearer-JWT
+// auth branch. LookupByNameAndOrg, not LookupByName (B-141): this is the
+// confirmed cross-tenant episode-content read path -- gateway_agents only
+// enforces per-org name uniqueness, so resolving by name alone could
+// silently return a different org's identically-named agent, and this
+// resolution's OrgID is exactly what scopes which org's episode content
+// gets returned below.
 type AgentResolver interface {
-	LookupByName(ctx context.Context, name string) (*registry.AgentRecord, error)
+	LookupByNameAndOrg(ctx context.Context, name, orgID string) (*registry.AgentRecord, error)
 }
 
 // Handler serves the dual-auth HTTP surface for full episode content:
@@ -75,9 +81,16 @@ func NewHTTPHandler(reader *Reader, idm *identity.Manager, resolver AgentResolve
 // "verify the requesting user actually has access to org_id" as a hard
 // requirement of its own, not an assumption inherited from here.
 //
-// The bearer-JWT path has no such gap: org_id is always resolved server-side
-// from the validated token's subject via the agent registry, never taken
-// from a client-supplied param, so a forged org_id cannot cross orgs.
+// The bearer-JWT path takes no client-supplied org_id param -- but note
+// (B-141) that alone did NOT make it safe before this fix: org_id was
+// resolved via the agent registry keyed by name alone, and gateway_agents
+// only enforces per-org name uniqueness (UNIQUE(org_id, name), not a
+// global unique name), so two different orgs' identically-named agents
+// could have the wrong org's row resolved -- a real, traced cross-tenant
+// episode-content read, not a theoretical one. Fixed by trusting the
+// token's own signed org_id claim (Claims.OrgID, set server-side at
+// issuance, B-141) and resolving via LookupByNameAndOrg, scoped to it,
+// instead of the bare Subject name.
 func (h *Handler) authenticateCaller(r *http.Request) (orgID uuid.UUID, status int, err error) {
 	if key := r.Header.Get("X-Service-Key"); key != "" {
 		if subtle.ConstantTimeCompare([]byte(key), []byte(h.serviceKey)) != 1 {
@@ -99,7 +112,15 @@ func (h *Handler) authenticateCaller(r *http.Request) (orgID uuid.UUID, status i
 		return uuid.Nil, http.StatusUnauthorized, fmt.Errorf("invalid bearer token: %w", err)
 	}
 	agentName := strings.TrimPrefix(claims.Subject, "agent:")
-	rec, err := h.resolver.LookupByName(r.Context(), agentName)
+	// B-141: hard cutover -- a pre-cutover token (no org_id claim) is
+	// rejected outright rather than falling back to the unscoped lookup.
+	// This is the confirmed cross-tenant episode-content read path: the
+	// resolved rec.OrgID below is the ONLY value that scopes which org's
+	// episode content this request can read.
+	if claims.OrgID == "" {
+		return uuid.Nil, http.StatusUnauthorized, errors.New("token missing org_id claim -- reissue a new token")
+	}
+	rec, err := h.resolver.LookupByNameAndOrg(r.Context(), agentName, claims.OrgID)
 	if err != nil {
 		return uuid.Nil, http.StatusForbidden, fmt.Errorf("agent not registered or suspended: %w", err)
 	}

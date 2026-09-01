@@ -182,7 +182,18 @@ func (h *Handler) ServeSSE(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agentName := strings.TrimPrefix(claims.Subject, "agent:")
-	agentRec, err := h.reg.LookupByName(r.Context(), agentName)
+	// B-141: a pre-cutover token (minted before Claims gained OrgID) is
+	// rejected outright rather than falling back to the unscoped lookup --
+	// gateway_agents only enforces per-org name uniqueness, so resolving by
+	// name alone can silently return a DIFFERENT org's identically-named
+	// agent. A hard cutover, not a graceful fallback: max token TTL is 4
+	// hours, so the compatibility cost is bounded and short-lived.
+	if claims.OrgID == "" {
+		slog.Warn("mcp/sse: rejected pre-cutover token with no org_id claim", "agent", agentName)
+		http.Error(w, "unauthorized: token missing org_id claim -- reissue a new token", http.StatusUnauthorized)
+		return
+	}
+	agentRec, err := h.reg.LookupByNameAndOrg(r.Context(), agentName, claims.OrgID)
 	if err != nil {
 		slog.Warn("mcp/sse: agent lookup failed", "agent", agentName, "err", err)
 		http.Error(w, "agent not registered or suspended: "+err.Error(), http.StatusForbidden)
