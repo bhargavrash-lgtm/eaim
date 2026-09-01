@@ -98,22 +98,41 @@ up to a full day for the first backup to exist.
 
 ## Restore procedure
 
-**Tested end-to-end on 2026-07-25** — see the B-029 completion report /
-`BUILT.md` for the exact commands run and their output. The steps below
-are that tested procedure, not a theoretical one.
+**Tested end-to-end on 2026-07-25** (B-029) and **re-verified fresh against
+the current schema on 2026-09-01** (B-134/B-143 — see `BUILT.md` for both).
+The steps below are that tested procedure, not a theoretical one.
 
 ### ⚠️ Important: don't use `pg_restore --clean` here
 
-A naive `pg_restore --clean ... backup.dump` against a `postgres`
-container that already ran its own `docker-entrypoint-initdb.d/schema.sql`
-on first boot **fails partway through** with
-`ERROR: ONLY option not supported on hypertable operations` — TimescaleDB
-hypertables (e.g. tables converted via `create_hypertable()`) don't
-support the `ALTER TABLE ... ONLY DROP CONSTRAINT` statements
+A naive `pg_restore --clean ... backup.dump` **fails partway through**
+with `ERROR: ONLY option not supported on hypertable operations` —
+TimescaleDB hypertables (e.g. tables converted via `create_hypertable()`)
+don't support the `ALTER TABLE ... ONLY DROP CONSTRAINT` statements
 `pg_restore --clean` generates, so cleanup stops partway and you're left
 with a mix of old and new objects. This was discovered by actually
 running the naive version first — do not repeat it. Step 2 below (wiping
 the schema directly) avoids the whole problem.
+
+### ⚠️ A second, related TimescaleDB/`pg_restore` issue — now handled automatically
+
+Even *without* `--clean`, `pg_restore` still fails to apply foreign key
+constraints that target a hypertable — same root cause (it always
+generates single-table `ALTER TABLE ONLY ...`, and hypertables reject
+`ONLY`), just hit on `ADD CONSTRAINT` instead of `DROP CONSTRAINT`.
+Confirmed live (B-134/B-143, 2026-09-01) against the current schema: 4 FK
+constraints on `gateway_node_metrics` and `paste_events` silently fail to
+apply this way. Row *data* is unaffected (`pg_restore` loads data before
+applying constraints), but the affected tables lose FK enforcement until
+this is fixed. **`scripts/restore-db.sh` (below) handles this
+automatically** — it isn't a manual step to remember. It parses
+`pg_restore`'s own error output for exactly this error shape (an error
+message mentioning "hypertable", paired with a failed
+`ALTER TABLE ONLY ... ADD CONSTRAINT` statement), re-applies each one
+without `ONLY`, and — this is the important part for a disaster-recovery
+tool — **fails loudly and stops** if it hits any `pg_restore` error that
+doesn't match that exact shape, rather than guessing. If that happens,
+the raw diagnostics are left in the temp directory the script logs, for
+a human to look at before trusting the restore.
 
 ### Steps
 
@@ -136,11 +155,18 @@ docker compose up -d postgres
 docker compose exec postgres pg_isready -U eami_app -d eami   # wait until this succeeds
 ```
 
-`docker-entrypoint-initdb.d/schema.sql` runs automatically on this fresh
-volume, so the target now has the full application schema — which is
-exactly why the next step wipes it before restoring (see the warning
-above): restoring is expected to fully recreate the schema from the dump,
-not layer on top of what's already there.
+A fresh `postgres_data` volume starts **completely empty** — no tables,
+no schema (confirmed empirically, 2026-09-01: `\dt` on a truly fresh
+volume returns "Did not find any relations"). Schema provisioning is
+owned entirely by the `migrate` service (`docker-compose.yml`, B-051),
+which applies `schema/migrations-v2/*.sql` — there is no
+`docker-entrypoint-initdb.d/schema.sql` auto-apply step any more (an
+earlier version of this doc claimed there was; that stopped being true
+when B-051 moved schema ownership to `migrate`). **You do not need to run
+`migrate` before restoring** — `pg_restore` recreates the complete schema
+(tables, extensions, everything) directly from the dump regardless of
+what's already there. Step 3's schema wipe below is what actually matters
+before restoring, on a fresh volume or not.
 
 If you're restoring into an *already-running* stack instead (e.g. to
 recover from a bad migration or bad data, not full disk loss), skip the
@@ -150,26 +176,27 @@ currently in that database first.
 
 **3. Wipe the schema cleanly, then restore.**
 
-```bash
-docker compose exec postgres psql -U eami_app -d eami -c "
-DROP SCHEMA public CASCADE;
-CREATE SCHEMA public;
-GRANT ALL ON SCHEMA public TO eami_app;
-"
+Use `scripts/restore-db.sh` rather than a raw `pg_restore` invocation —
+it performs the same schema wipe as before, but also automatically
+detects and repairs the hypertable-FK-constraint issue described above
+(and fails loudly, without guessing, on any other kind of restore error):
 
-docker compose exec postgres pg_restore -U eami_app -d eami \
-    --no-owner --no-privileges \
-    /backups/eami_20260725T030000Z.dump
+```bash
+docker compose exec eami-backup sh /scripts/restore-db.sh /backups/eami_20260725T030000Z.dump
 ```
 
-(`--no-owner --no-privileges`: the dump's original role names may not
-exist on the target; restoring without them keeps everything owned by
-`eami_app`, the role the application actually connects as.)
+Requires `DATABASE_URL` to be set in the `eami-backup` container's
+environment — it already is, via `docker-compose.yml`/`docker-compose.prod.yml`,
+same as `backup-db.sh`.
 
-A clean run produces **no errors**. If you see errors here, do not
-proceed to step 4 — something is wrong (wrong backup file, schema drift
-between the dump and this Postgres version, etc.) and needs investigating
-first.
+A clean run ends with `restore complete` and exit code 0 — either because
+`pg_restore` reported zero errors, or because the only errors were the
+known hypertable-constraint case and they were automatically repaired
+(the log line says which). If the script exits non-zero, **do not proceed
+to step 4** — it means a restore error it didn't recognize occurred; the
+raw `pg_restore` output and diagnostics are left in the temp directory
+named in its last log line, and that needs investigating before trusting
+anything in the target database.
 
 **4. Verify data integrity before trusting the restore.**
 
@@ -185,6 +212,20 @@ SELECT (SELECT count(*) FROM orgs) AS orgs,
 Compare against what you expect (a known row count, a specific org's
 `slug`, etc.) — an empty-but-schema-valid database would pass step 3
 without error, so step 4 is not optional.
+
+If `restore-db.sh` logged that it repaired any constraints, you can
+confirm they actually landed:
+
+```bash
+docker compose exec postgres psql -U eami_app -d eami -c "
+SELECT conname, conrelid::regclass FROM pg_constraint
+WHERE conrelid IN ('gateway_node_metrics'::regclass, 'paste_events'::regclass)
+ORDER BY conname;
+"
+```
+
+Expect `gateway_node_metrics_node_id_fkey`, `paste_events_org_id_fkey`,
+and `paste_events_source_endpoint_id_fkey` in the output.
 
 **5. Restart the application services** (they were likely stopped or are
 failing to connect during steps 2–4):

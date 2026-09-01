@@ -96,6 +96,7 @@ services:
       - postgres_backups:/backups
       - ./scripts/backup-db.sh:/scripts/backup-db.sh:ro
       - ./scripts/backup-entrypoint.sh:/scripts/backup-entrypoint.sh:ro
+      - ./scripts/restore-db.sh:/scripts/restore-db.sh:ro
     depends_on:
       postgres:
         condition: service_healthy
