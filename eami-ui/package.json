@@ -22,6 +22,8 @@
     "react-hook-form": "^7.53.0",
     "react-router-dom": "^6.26.2",
     "recharts": "^2.12.7",
+    "sequential-workflow-designer": "^0.40.0",
+    "sequential-workflow-designer-react": "^0.40.0",
     "zod": "^3.23.8",
     "zustand": "^4.5.5"
   },
