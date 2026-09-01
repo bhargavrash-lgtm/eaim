@@ -11,8 +11,9 @@
 // with up/down reorder controls since a workflow's step order is load-
 // bearing (ActionPathsEditor's rows have no inherent order).
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQueries } from '@tanstack/react-query'
-import { Plus, Trash2, Pencil, ArrowUp, ArrowDown, AlertTriangle, Settings2, ChevronDown, CheckCircle2 } from 'lucide-react'
+import { Plus, Trash2, Pencil, ArrowUp, ArrowDown, AlertTriangle, Settings2, ChevronDown, CheckCircle2, Eye } from 'lucide-react'
 import {
   PageHeader,
   ConfirmDialog,
@@ -763,6 +764,7 @@ function formatDate(iso?: string): string {
 }
 
 export function WorkflowsPage() {
+  const navigate = useNavigate()
   const { data, isLoading, error } = useWorkflows()
   const deleteWorkflow = useDeleteWorkflow()
 
@@ -789,6 +791,14 @@ export function WorkflowsPage() {
       className: 'text-right',
       render: (wf) => (
         <div className="flex items-center justify-end gap-3">
+          {/* Preview (read-only) -- Workflow Canvas rebuild, B-145. Purely
+              additive: navigates to the read-only sequential-workflow-
+              designer route, never touches this page's own edit/delete
+              state or the card editor below. */}
+          <button onClick={(e) => { e.stopPropagation(); navigate(`/gateway/workflows/${wf.id}/canvas-preview`) }}
+            className="text-gray-400 hover:text-indigo-600" title="Preview (read-only)">
+            <Eye className="h-4 w-4" />
+          </button>
           <button onClick={(e) => { e.stopPropagation(); setEditTargetId(wf.id) }}
             className="text-gray-400 hover:text-indigo-600" title="Edit">
             <Pencil className="h-4 w-4" />

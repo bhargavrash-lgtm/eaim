@@ -57,12 +57,36 @@ export function WorkflowCanvasPreviewPage() {
   }, [initialDefinition])
 
   return (
-    <div className="flex h-full flex-col">
+    <div>
       <PageHeader
         title={workflow ? `${workflow.name} — read-only canvas preview` : 'Workflow canvas preview'}
         subtitle="Brief 1: rendering only. No editing, no saving -- the card editor at Gateway / Workflows remains the real editing surface."
       />
-      <div className="flex-1 overflow-hidden">
+      {/* h-[75vh], not h-full/flex-1: sequential-workflow-designer's own
+          shipped CSS is `.sqd-designer { height: 100% }`, and the div its
+          React wrapper mounts into carries zero CSS of its own (confirmed
+          by grepping designer.css) -- it depends entirely on this
+          container having a real, DEFINITE resolved height. AppShell's
+          own main/flex chain (shared across every page, not touched here)
+          doesn't set min-height:0 at each level, so a pure h-full/flex-1
+          percentage cascade here is fragile -- this is the first page in
+          the app that ever needed one. A viewport-relative unit sidesteps
+          that ancestor-chain question entirely: it always resolves to a
+          real pixel value regardless of any parent's computed height.
+          `grid` (not `flex`, not `block`) on this wrapper matters too,
+          confirmed live via DevTools measurement -- `flex` only
+          auto-stretches the CROSS axis (height, via `align-items:stretch`
+          by default); the MAIN axis (width, in a row container) defaults
+          to content-based sizing (`flex-grow: 0`), and the div the
+          library's React wrapper renders (`sqd-designer-react`) carries
+          zero CSS of its own and starts empty, so its content-based width
+          measured exactly 0 -- propagating all the way down to the real
+          `<svg class="sqd-workspace-canvas">` (`width="0"`), a genuine
+          mount with genuinely zero width, not a mount failure. CSS Grid's
+          default `place-items` is `stretch` in BOTH axes, so an unstyled
+          single grid-cell child fills the full width and height with zero
+          extra CSS needed on the child -- unlike flex, no per-axis gap. */}
+      <div className="grid h-[75vh] w-full overflow-hidden">
         {isLoading && (
           <div className="flex h-full items-center justify-center">
             <LoadingSpinner size="lg" />
