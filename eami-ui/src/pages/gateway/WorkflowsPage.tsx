@@ -71,7 +71,7 @@ function StatusBadge({ status }: { status: string }) {
 // reorder/removal that leaves this reference pointing at a step that's
 // no longer earlier (or no longer exists, or still has no real id) --
 // surfaced visibly, never silently cleared (AC3).
-type ParamRow = {
+export type ParamRow = {
   key: string
   mode: 'static' | 'extract'
   value: string
@@ -89,7 +89,7 @@ type ParamRow = {
 // is exactly what makes it ineligible as an extraction SOURCE (no real
 // id for a later step to reference yet) while still being free to
 // itself extract FROM an already-real-id'd earlier step.
-type StepRow = {
+export type StepRow = {
   localId: string
   id?: string
   gatewayToolId: string
@@ -98,11 +98,11 @@ type StepRow = {
   params: ParamRow[]
 }
 
-function newStepRow(): StepRow {
+export function newStepRow(): StepRow {
   return { localId: crypto.randomUUID(), gatewayToolId: '', action: '', params: [] }
 }
 
-function newParamRow(): ParamRow {
+export function newParamRow(): ParamRow {
   return { key: '', mode: 'static', value: '', fromStepLocalId: '', path: '' }
 }
 
@@ -111,7 +111,7 @@ function newParamRow(): ParamRow {
 // reference that's no longer valid -- source step removed, or no longer
 // earlier than the referencing step (B-064 AC3). Run after every
 // row-order/row-set mutation (see StepsEditor's commit()).
-function revalidateExtractionRefs(rows: StepRow[]): StepRow[] {
+export function revalidateExtractionRefs(rows: StepRow[]): StepRow[] {
   return rows.map((row, i) => ({
     ...row,
     params: row.params.map(p => {
@@ -232,7 +232,12 @@ function summarizeParams(params: ParamRow[], rows: StepRow[]): string {
 // (what this replaces). Every mutation still goes through the SAME
 // commit()-wrapped callbacks StepsEditor already owns -- this component
 // holds zero state and zero validation logic of its own, purely a view.
-function StepConfigPanel({
+//
+// Exported (B-131 Brief 2) so WorkflowCanvasPage.tsx can reuse it
+// unmodified for click-to-configure -- this file otherwise stays exactly
+// as-is; this and the 5 other exports below are the ONLY changes here,
+// zero behavior change to this page's own card editor.
+export function StepConfigPanel({
   row, index, rows, tools, onClose, updateRow, updateParam, addParam, removeParam,
 }: {
   row: StepRow
@@ -791,12 +796,14 @@ export function WorkflowsPage() {
       className: 'text-right',
       render: (wf) => (
         <div className="flex items-center justify-end gap-3">
-          {/* Preview (read-only) -- Workflow Canvas rebuild, B-145. Purely
-              additive: navigates to the read-only sequential-workflow-
-              designer route, never touches this page's own edit/delete
-              state or the card editor below. */}
+          {/* Canvas link -- Workflow Canvas rebuild, B-145 (added, purely
+              additive, never touches this page's own edit/delete state or
+              the card editor below). B-131 Brief 2 made the destination
+              locally interactive (still zero backend writes) -- route
+              path deliberately left unchanged (bookmark/share stability,
+              B-146's own lesson), only this tooltip text updated. */}
           <button onClick={(e) => { e.stopPropagation(); navigate(`/gateway/workflows/${wf.id}/canvas-preview`) }}
-            className="text-gray-400 hover:text-indigo-600" title="Preview (read-only)">
+            className="text-gray-400 hover:text-indigo-600" title="Open canvas">
             <Eye className="h-4 w-4" />
           </button>
           <button onClick={(e) => { e.stopPropagation(); setEditTargetId(wf.id) }}

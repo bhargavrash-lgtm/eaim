@@ -8,7 +8,7 @@ import { AgentsPage } from '@/pages/gateway/AgentsPage'
 import { PoliciesPage } from '@/pages/gateway/PoliciesPage'
 import { ToolsPage } from '@/pages/gateway/ToolsPage'
 import { WorkflowsPage } from '@/pages/gateway/WorkflowsPage'
-import { WorkflowCanvasPreviewPage } from '@/pages/gateway/WorkflowCanvasPreviewPage'
+import { WorkflowCanvasPage } from '@/pages/gateway/WorkflowCanvasPage'
 import { NodesPage } from '@/pages/gateway/NodesPage'
 import ApprovalsPage from '@/pages/ops/ApprovalsPage'
 import { FinOpsPage } from '@/pages/finops/FinOpsPage'
@@ -32,7 +32,7 @@ export const router = createBrowserRouter([
       { path: '/gateway/policies', element: <PoliciesPage /> },
       { path: '/gateway/tools', element: <ToolsPage /> },
       { path: '/gateway/workflows', element: <WorkflowsPage /> },
-      { path: '/gateway/workflows/:id/canvas-preview', element: <WorkflowCanvasPreviewPage /> },
+      { path: '/gateway/workflows/:id/canvas-preview', element: <WorkflowCanvasPage /> },
       { path: '/gateway/nodes', element: <NodesPage /> },
       { path: '/approvals', element: <ApprovalsPage /> },
       { path: '/finops', element: <FinOpsPage /> },
