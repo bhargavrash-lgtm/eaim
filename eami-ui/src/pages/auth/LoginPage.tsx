@@ -3,7 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
-import { useAuthStore } from '@/stores/authStore'
+import { useAuthStore, consumeRedirectPath } from '@/stores/authStore'
 import { Logo } from '@/components/layout/Logo'
 
 const loginSchema = z.object({
@@ -40,7 +40,9 @@ export function LoginPage() {
     if (data.user) {
       setUser(data.user)
     }
-    navigate('/dashboard', { replace: true })
+    // B-146 AC2: return to the page the user originally tried to reach
+    // (captured by authStore.ts at module load) instead of always /dashboard.
+    navigate(consumeRedirectPath() ?? '/dashboard', { replace: true })
   }
 
   return (
