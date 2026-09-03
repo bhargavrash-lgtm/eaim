@@ -54,7 +54,27 @@ func New(pool *pgxpool.Pool) *Registry {
 	return &Registry{pool: pool, cache: make(map[string]cacheEntry)}
 }
 
-// LookupByName resolves an agent by its short name (JWT sub without "agent:" prefix).
+// LookupByName resolves an agent by its short name (JWT sub without "agent:"
+// prefix), with NO org scoping -- name alone is not unique in gateway_agents
+// (only (org_id, name) is, schema.sql's UNIQUE (org_id, name) constraint), so
+// this can resolve the wrong org's identically-named agent.
+//
+// B-141/B-142: this used to be the standard resolution path for
+// internal/mcp/internal/episode, on the reasoning that their name always
+// came from a signature-verified JWT sub whose issuing org could be trusted
+// implicitly -- that reasoning was never actually sound (a JWT's sub carries
+// only the name string, never an org id) and produced a real, confirmed
+// cross-tenant identity-resolution bug (B-141: a name collision between two
+// orgs' agents could resolve the wrong org's record, including in
+// internal/episode's own content-read path). Every real caller has since
+// been migrated to the org-scoped LookupByNameAndOrg below -- confirmed by a
+// repo-wide grep (production AND test code) that this method now has ZERO
+// remaining callers anywhere. Genuinely dead code as of B-141/B-142, not
+// removed here (out of this brief's doc-comment-only scope; a legitimate
+// small follow-up for whoever picks it up next, see BACKLOG.md's B-142
+// entry). Do not add a new caller of this method -- use LookupByNameAndOrg
+// instead, with a real org id from a trustworthy source (a JWT's own OrgID
+// claim, or a service-key-authenticated caller-supplied org_id).
 func (r *Registry) LookupByName(ctx context.Context, name string) (*AgentRecord, error) {
 	r.mu.RLock()
 	if e, ok := r.cache[name]; ok && time.Now().Before(e.expiresAt) {
@@ -98,27 +118,37 @@ func (r *Registry) queryByName(ctx context.Context, name string) (*AgentRecord, 
 	return &rec, nil
 }
 
-// LookupByNameAndOrg resolves an agent by name, scoped to a specific org.
+// LookupByNameAndOrg resolves an agent by name, scoped to a specific org --
+// this is the correct, real resolution path for every current production
+// caller (internal/mcp's ServeSSE, internal/episode's authenticateCaller,
+// internal/identity's revoke handler, internal/workflow's HandleRun and
+// RateLimitRunMiddleware).
 //
 // name alone is NOT unique in gateway_agents -- only (org_id, name) is
-// (schema.sql's UNIQUE (org_id, name) constraint). LookupByName's
-// unscoped "WHERE name = $1 LIMIT 1" is safe for every existing caller
-// (internal/mcp, internal/episode) because their name always comes from a
-// signature-verified JWT sub, itself scoped to whichever single org issued
-// that token -- there is no cross-org ambiguity to exploit there, even
-// though the query itself doesn't enforce it. LookupByNameAndOrg exists
-// for callers where that guarantee doesn't hold: internal/identity's
-// revoke handler (B-042) accepts org_id as directly caller-supplied input
-// (no JWT backs it -- there's no session concept on that endpoint's
-// service-key auth path at all, matching internal/episode/http.go's own
-// documented org_id-is-caller-supplied trust boundary for its service-key
-// path), so an unscoped lookup there would let one org's caller resolve
-// -- and revoke a token for -- a different org's identically-named agent.
+// (schema.sql's UNIQUE (org_id, name) constraint), so an unscoped lookup can
+// resolve the wrong org's identically-named agent.
+//
+// B-141/B-142, correcting this comment's own prior stale reasoning: an
+// earlier version of this comment asserted LookupByName's unscoped query was
+// "safe" for internal/mcp/internal/episode because their name always came
+// from a signature-verified JWT sub, itself implicitly scoped to whichever
+// org issued the token. That reasoning was never actually sound -- a JWT's
+// sub carries only the name string, never an org id, so a name collision
+// between two orgs' agents could still resolve the wrong org's record
+// regardless of the JWT's own signature validity -- and it produced a real,
+// confirmed cross-tenant identity-resolution bug (B-141: this exact gap let
+// one org's caller read another org's episode content via
+// internal/episode's authenticateCaller). The fix: every real caller now
+// supplies a genuinely trustworthy org id -- either a JWT's own
+// server-set OrgID claim (B-141, never client-settable) for the JWT-backed
+// callers, or an explicit caller-supplied org_id on internal/identity's
+// revoke handler (B-042), whose service-key auth has no JWT/session concept
+// at all, matching internal/episode/http.go's own equivalent trust boundary
+// for its own service-key path.
 //
 // Deliberately bypasses the name-only cache above: caching by name alone
-// would either serve the wrong org's cached record or require a cache-key
-// scheme change affecting LookupByName's existing callers, and this is a
-// low-frequency admin action, not a hot path that needs the 30s cache.
+// would serve the wrong org's cached record, and every real caller here
+// needs a correct result on every call, not a 30s-stale one.
 func (r *Registry) LookupByNameAndOrg(ctx context.Context, name, orgID string) (*AgentRecord, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT id::text, org_id::text, name, scope, risk_tier, status

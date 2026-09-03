@@ -238,7 +238,16 @@ func run() error {
 	// lookup is now part of apiKeyValidator's own combined query
 	// (ValidateAndResolveAgent). agentRegistry (*registry.Registry) is
 	// still used, unmodified, by revokeHandler below.
-	issueHandler := identity.NewIssueHandler(idManager, apiKeyValidator, tokenEvents)
+	// B-119/B-120: both rate-limit thresholds are config-driven, mirroring
+	// WorkflowRunPerAgent's own wiring immediately below. Bundled into one
+	// named IssueRateLimits value (not four positional args) specifically
+	// to avoid a same-typed-pair transposition mistake -- a real risk
+	// flagged by this brief's own mandatory code review.
+	issueHandler := identity.NewIssueHandler(idManager, apiKeyValidator, tokenEvents, identity.IssueRateLimits{
+		PerAgentLimit:        cfg.RateLimit.TokenIssuePerAgent,
+		PerAgentWindow:       time.Duration(cfg.RateLimit.TokenIssuePerAgentWindowSeconds) * time.Second,
+		PreAuthMaxConcurrent: cfg.RateLimit.TokenIssuePreAuthMaxConcurrent,
+	})
 	revokeHandler := identity.NewRevokeHandler(idManager, agentRegistry, cfg.API.TokenRevokeServiceKey, tokenEvents)
 
 	// Multi-Hop Workflows Brief 2 (B-059): executes a B-058-defined workflow

@@ -14,20 +14,6 @@ import (
 	"github.com/eami/gateway/internal/safego"
 )
 
-// tokenIssueRateLimit/tokenIssueRateLimitWindow bound POST /v1/gateway/tokens
-// per resolved agent (B-118). Hardcoded rather than env-configurable like
-// B-070's WorkflowRunPerAgent/WorkflowRunPerAgentWindowSeconds -- a fully
-// tunable version is legitimate future work (see BACKLOG.md's B-118 entry
-// for the follow-up item, added at the same time this was built), but
-// closing the "no rate limiting exists at all" gap matters more than making
-// the threshold operator-tunable, and a same-file constant keeps this fix
-// inside issue_http.go/apikey.go, this brief's full MAY MODIFY scope,
-// without touching config.go/main.go.
-const (
-	tokenIssueRateLimit       = 20
-	tokenIssueRateLimitWindow = 60 * time.Second
-)
-
 // rateLimiter is a small in-memory, per-key fixed-window limiter, algorithm
 // deliberately reused from eami-gateway/internal/workflow/ratelimit.go
 // (B-070) rather than invented fresh -- same fixed-window/fail-closed/
@@ -52,8 +38,15 @@ func newRateLimiter(limit int, window time.Duration) *rateLimiter {
 // window's oldest surviving attempt ages out, suitable for a Retry-After
 // response header. A non-positive limit fails closed rather than panicking
 // on the kept[0] index below -- see workflow/ratelimit.go's identical
-// reasoning; tokenIssueRateLimit above is a positive compile-time constant,
-// but Allow() stays defensive independent of that, matching the precedent.
+// reasoning. This file's one rateLimiter instance (the per-agent limiter)
+// is now config-driven (B-119), not a compile-time constant: the real
+// production path (config.go's validate()) both rejects a negative value
+// at startup and treats an unset/zero env var as "use the default" (never
+// actually zero by the time it reaches NewIssueHandler), but this guard
+// stays independently defensive against any other caller (a test, a future
+// call site) constructing a rateLimiter directly with a non-positive value.
+// preAuthGate below is a separate mechanism (B-120, a concurrency bound,
+// not a request-rate limiter) with its own, independent fail-closed guard.
 func (rl *rateLimiter) Allow(key string) (ok bool, retryAfter time.Duration) {
 	if rl.limit <= 0 {
 		return false, rl.window
@@ -116,15 +109,122 @@ type IssueHandler struct {
 	manager *Manager
 	keys    APIKeyValidator
 	events  TokenEventStore
-	limiter *rateLimiter // B-118
+	limiter *rateLimiter // B-118, thresholds now config-driven (B-119)
+
+	// preAuthGate (B-120) bounds how many not-yet-authenticated
+	// ValidateAndResolveAgent calls can be in flight at once, protecting
+	// the shared pgxpool from a burst of concurrent DB round trips --
+	// limiter above by design only sees callers who already passed key
+	// validation and cross-agent scoping (see HandleIssue), so it
+	// structurally cannot protect this earlier stage. See preAuthGate's
+	// own doc comment for why this is a concurrency bound, not a
+	// request-rate limiter.
+	preAuthGate *preAuthGate
+}
+
+// IssueRateLimits bundles NewIssueHandler's rate-limit configuration into
+// one named argument, rather than positional int/time.Duration values a
+// caller could transpose without a compile error -- flagged by this
+// brief's own mandatory code review, since PerAgentLimit/PerAgentWindow and
+// an earlier draft's pre-auth pair shared exactly the same two types
+// back-to-back.
+type IssueRateLimits struct {
+	PerAgentLimit  int
+	PerAgentWindow time.Duration
+	// PreAuthMaxConcurrent (B-120) -- see preAuthGate's doc comment.
+	PreAuthMaxConcurrent int
 }
 
 // NewIssueHandler returns an IssueHandler. No AgentResolver parameter (B-107
 // removed the separate agent-lookup call this handler used to make) --
 // registry.Registry/AgentResolver itself is completely untouched and still
 // used unmodified by revoke_http.go.
-func NewIssueHandler(m *Manager, keys APIKeyValidator, events TokenEventStore) *IssueHandler {
-	return &IssueHandler{manager: m, keys: keys, events: events, limiter: newRateLimiter(tokenIssueRateLimit, tokenIssueRateLimitWindow)}
+//
+// limits (B-119/B-120) comes from config.RateLimitConfig's
+// TokenIssuePerAgent/TokenIssuePerAgentWindowSeconds/
+// TokenIssuePreAuthMaxConcurrent fields -- cmd/gateway/main.go is the one
+// production call site, threading the loaded config through. Replaces
+// B-118's original hardcoded tokenIssueRateLimit/tokenIssueRateLimitWindow
+// constants.
+func NewIssueHandler(m *Manager, keys APIKeyValidator, events TokenEventStore, limits IssueRateLimits) *IssueHandler {
+	return &IssueHandler{
+		manager:     m,
+		keys:        keys,
+		events:      events,
+		limiter:     newRateLimiter(limits.PerAgentLimit, limits.PerAgentWindow),
+		preAuthGate: newPreAuthGate(limits.PreAuthMaxConcurrent),
+	}
+}
+
+// preAuthGate bounds how many not-yet-authenticated ValidateAndResolveAgent
+// calls can run concurrently, protecting the shared pgxpool from a burst of
+// concurrent DB round trips -- the literal threat B-120 exists to close
+// (an unauthenticated flood of bogus X-API-Key values each still costing a
+// real indexed Postgres lookup).
+//
+// This is a CONCURRENCY bound, not a request-RATE limiter -- a real design
+// change made after this brief's own mandatory security review found a
+// real, High-severity problem with the original per-source-IP request-rate
+// design: this product's production topology (B-071) fronts the gateway
+// with one reverse proxy, so every external caller's r.RemoteAddr is that
+// proxy's own container IP -- collapsing a per-IP rate limiter here into
+// ONE shared bucket across every org's every agent. A fixed-window
+// request-rate limiter in that shape meant a single unauthenticated flood
+// (costing the attacker nothing -- a bogus key never needs to even look
+// plausible) could lock every legitimate agent in every org out of token
+// issuance for the rest of that window, and -- separately -- a handful of
+// legitimate agents each independently operating at their own normal
+// per-agent pace could sum to the shared threshold and start tripping it
+// with no attacker involved at all.
+//
+// A bounded concurrency gate doesn't have that failure mode: it only ever
+// rejects a request that arrives while every slot is genuinely occupied by
+// another in-flight DB call, and recovers the instant those calls complete
+// (each is a single fast indexed lookup, typically low-single-digit
+// milliseconds) -- there is no fixed window an attacker can "fill" and
+// walk away from. Deliberately global, not keyed per caller/IP: in the
+// same proxy-fronted topology a per-IP concurrency cap would degrade to
+// one shared gate anyway (every real caller shares one apparent IP), so
+// keying by IP would add complexity without adding real per-attacker
+// isolation; a single global gate achieves the actual goal (bounding total
+// concurrent DB pressure from this pre-auth stage) directly.
+type preAuthGate struct {
+	sem chan struct{}
+}
+
+// newPreAuthGate builds a gate with room for maxConcurrent in-flight calls.
+// A non-positive value fails closed (every TryAcquire call denied) rather
+// than panicking on a negative buffered-channel size -- same "fail closed,
+// never panic" contract as rateLimiter.Allow above; config.go's validate()
+// rejects a negative value at startup and defaults an unset/zero one, so
+// the real production path never actually passes zero here, but this stays
+// independently defensive for any other caller (a test, a future call
+// site).
+func newPreAuthGate(maxConcurrent int) *preAuthGate {
+	if maxConcurrent < 0 {
+		maxConcurrent = 0
+	}
+	return &preAuthGate{sem: make(chan struct{}, maxConcurrent)}
+}
+
+// TryAcquire reserves one slot without blocking. ok is false when every
+// slot is currently occupied -- the caller should reject the request
+// rather than wait (waiting would tie up the handler goroutine without
+// bounding anything, since the whole point is limiting concurrent DB work,
+// not queuing callers behind it). Release must be called exactly once for
+// every TryAcquire that returns true.
+func (g *preAuthGate) TryAcquire() bool {
+	select {
+	case g.sem <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// Release frees the slot reserved by a prior successful TryAcquire.
+func (g *preAuthGate) Release() {
+	<-g.sem
 }
 
 // HandleIssue handles POST /v1/gateway/tokens.
@@ -165,7 +265,22 @@ func (h *IssueHandler) HandleIssue(w http.ResponseWriter, r *http.Request) {
 	// caller can make this handler buffer.
 	agentName := strings.TrimPrefix(req.AgentID, "agent:")
 
+	// B-120: bounds concurrent in-flight ValidateAndResolveAgent calls,
+	// specifically -- not the whole handler -- so a flood of bogus
+	// X-API-Key values can't pile up unbounded concurrent DB round trips
+	// against the shared pgxpool. See preAuthGate's own doc comment for why
+	// this is a concurrency bound rather than a per-caller request-rate
+	// limiter. No fixed window exists to compute a real Retry-After from
+	// (a slot frees the instant any in-flight call completes, typically
+	// low-single-digit milliseconds); 1 second is a generic, honest
+	// backoff hint, not a real deadline.
+	if !h.preAuthGate.TryAcquire() {
+		setRetryAfter(w, time.Second)
+		http.Error(w, "gateway is busy validating other requests -- try again shortly", http.StatusTooManyRequests)
+		return
+	}
 	key, rec, err := h.keys.ValidateAndResolveAgent(r.Context(), r.Header.Get("X-API-Key"), agentName)
+	h.preAuthGate.Release()
 	if err != nil {
 		if errors.Is(err, ErrInvalidAPIKey) {
 			http.Error(w, "unauthorized: invalid, missing, revoked, or expired X-API-Key", http.StatusUnauthorized)

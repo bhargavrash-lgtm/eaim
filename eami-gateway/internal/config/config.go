@@ -22,11 +22,49 @@ type Config struct {
 	RateLimit   RateLimitConfig `yaml:"rate_limit"`
 }
 
-// RateLimitConfig configures the in-memory limiter guarding
-// POST /v1/gateway/workflows/{workflowId}/run (B-070, per-agent-identity).
+// RateLimitConfig configures the in-memory limiters guarding
+// POST /v1/gateway/workflows/{workflowId}/run (B-070, per-agent-identity)
+// and POST /v1/gateway/tokens (B-118/119/120: a per-agent-identity
+// post-auth rate limit, plus a global pre-auth concurrency bound).
 type RateLimitConfig struct {
 	WorkflowRunPerAgent              int `yaml:"workflow_run_per_agent"`
 	WorkflowRunPerAgentWindowSeconds int `yaml:"workflow_run_per_agent_window_seconds"`
+
+	// TokenIssuePerAgent/TokenIssuePerAgentWindowSeconds (B-119) replace
+	// issue_http.go's original hardcoded tokenIssueRateLimit/
+	// tokenIssueRateLimitWindow constants (B-118) with the same
+	// env-configurable pattern WorkflowRunPerAgent already established.
+	// Checked only AFTER a request is fully authenticated and scoped (see
+	// issue_http.go) -- same ordering precedent as WorkflowRunPerAgent.
+	TokenIssuePerAgent              int `yaml:"token_issue_per_agent"`
+	TokenIssuePerAgentWindowSeconds int `yaml:"token_issue_per_agent_window_seconds"`
+
+	// TokenIssuePreAuthMaxConcurrent (B-120) bounds how many
+	// not-yet-authenticated ValidateAndResolveAgent calls can run
+	// concurrently on this route, protecting the shared pgxpool from a
+	// burst of concurrent DB round trips caused by a flood of bogus API
+	// keys -- checked BEFORE ValidateAndResolveAgent's real DB round trip
+	// (see issue_http.go's preAuthGate).
+	//
+	// Deliberately a CONCURRENCY bound, not a request-RATE limit (a
+	// design correction made after this brief's own mandatory security
+	// review): an earlier draft used a per-remote-IP request-rate limiter
+	// here, matching TokenIssuePerAgent's shape, but this product's
+	// production topology (B-071, Caddy fronts the gateway directly) means
+	// every external caller's r.RemoteAddr is the proxy's own container
+	// IP -- a per-IP rate limiter there collapses to ONE shared bucket
+	// across every org's every agent, which the security review found
+	// created two real problems: (1) a single unauthenticated flood,
+	// costing the attacker nothing, could lock out token issuance for
+	// every legitimate agent in every org for a full window; (2) a
+	// handful of legitimate agents independently issuing at their own
+	// normal pace could sum to the shared threshold and trip it with no
+	// attacker at all. A bounded concurrency gate has neither failure
+	// mode: it only rejects a request arriving while every slot is
+	// genuinely busy, and recovers the instant those calls complete
+	// (each is one fast indexed lookup) -- no fixed window to exhaust and
+	// walk away from.
+	TokenIssuePreAuthMaxConcurrent int `yaml:"token_issue_preauth_max_concurrent"`
 }
 
 // TokenConfig controls AI token issuance (ADR-006).
@@ -173,6 +211,10 @@ func Load(path string) (*Config, error) {
 	// Rate limit overrides (B-070).
 	setIntEnv(os.Getenv("WORKFLOW_RUN_RATE_LIMIT_PER_AGENT"), &cfg.RateLimit.WorkflowRunPerAgent)
 	setIntEnv(os.Getenv("WORKFLOW_RUN_RATE_LIMIT_WINDOW_SECONDS"), &cfg.RateLimit.WorkflowRunPerAgentWindowSeconds)
+	// Rate limit overrides (B-119/B-120).
+	setIntEnv(os.Getenv("TOKEN_ISSUE_RATE_LIMIT_PER_AGENT"), &cfg.RateLimit.TokenIssuePerAgent)
+	setIntEnv(os.Getenv("TOKEN_ISSUE_RATE_LIMIT_WINDOW_SECONDS"), &cfg.RateLimit.TokenIssuePerAgentWindowSeconds)
+	setIntEnv(os.Getenv("TOKEN_ISSUE_PREAUTH_MAX_CONCURRENT"), &cfg.RateLimit.TokenIssuePreAuthMaxConcurrent)
 
 	// Policy rules file: default to empty (allows gateway to start without rules)
 	if cfg.Policy.RulesPath == "" {
@@ -280,6 +322,24 @@ func validate(cfg *Config) error {
 	if cfg.RateLimit.WorkflowRunPerAgentWindowSeconds == 0 {
 		cfg.RateLimit.WorkflowRunPerAgentWindowSeconds = 60
 	}
+	// B-119 defaults: byte-for-byte the same 20 requests/60s issue_http.go's
+	// original tokenIssueRateLimit/tokenIssueRateLimitWindow constants
+	// enforced (B-118) -- an operator who sets no env var must see
+	// unchanged behavior.
+	if cfg.RateLimit.TokenIssuePerAgent == 0 {
+		cfg.RateLimit.TokenIssuePerAgent = 20
+	}
+	if cfg.RateLimit.TokenIssuePerAgentWindowSeconds == 0 {
+		cfg.RateLimit.TokenIssuePerAgentWindowSeconds = 60
+	}
+	// B-120 default: a modest concurrency bound, not a request-count --
+	// each ValidateAndResolveAgent call is one fast indexed lookup, so 10
+	// concurrent in-flight calls is generous headroom for realistic
+	// legitimate concurrency (this pool is shared with dispatch, policy
+	// loading, and workflow runs too) while still bounding a burst.
+	if cfg.RateLimit.TokenIssuePreAuthMaxConcurrent == 0 {
+		cfg.RateLimit.TokenIssuePreAuthMaxConcurrent = 10
+	}
 
 	// Required fields
 	if cfg.PostgresDSN == "" {
@@ -316,6 +376,21 @@ func validate(cfg *Config) error {
 	}
 	if cfg.RateLimit.WorkflowRunPerAgentWindowSeconds < 0 {
 		return fmt.Errorf("config: rate_limit.workflow_run_per_agent_window_seconds (WORKFLOW_RUN_RATE_LIMIT_WINDOW_SECONDS) must not be negative, got %d", cfg.RateLimit.WorkflowRunPerAgentWindowSeconds)
+	}
+	// B-119/B-120: same "0 means use the default, negative is a real
+	// misconfiguration" reasoning as WorkflowRunPerAgent above -- a negative
+	// limit would make rateLimiter.Allow's kept[0] index panic-prone (see
+	// issue_http.go's own Allow doc comment on why it defends against this
+	// independently anyway; reject it at config load regardless, same as
+	// every other rate-limit field).
+	if cfg.RateLimit.TokenIssuePerAgent < 0 {
+		return fmt.Errorf("config: rate_limit.token_issue_per_agent (TOKEN_ISSUE_RATE_LIMIT_PER_AGENT) must not be negative, got %d", cfg.RateLimit.TokenIssuePerAgent)
+	}
+	if cfg.RateLimit.TokenIssuePerAgentWindowSeconds < 0 {
+		return fmt.Errorf("config: rate_limit.token_issue_per_agent_window_seconds (TOKEN_ISSUE_RATE_LIMIT_WINDOW_SECONDS) must not be negative, got %d", cfg.RateLimit.TokenIssuePerAgentWindowSeconds)
+	}
+	if cfg.RateLimit.TokenIssuePreAuthMaxConcurrent < 0 {
+		return fmt.Errorf("config: rate_limit.token_issue_preauth_max_concurrent (TOKEN_ISSUE_PREAUTH_MAX_CONCURRENT) must not be negative, got %d", cfg.RateLimit.TokenIssuePreAuthMaxConcurrent)
 	}
 
 	return nil

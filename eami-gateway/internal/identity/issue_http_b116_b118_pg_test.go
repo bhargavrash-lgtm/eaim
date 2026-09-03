@@ -107,8 +107,8 @@ func TestIssueHandler_ForgedClaims_OverwrittenFromDB(t *testing.T) {
 // ─── B-118: per-agent rate limiting ────────────────────────────────────────
 
 // TestIssueHandler_RateLimit_TripsAfterLimit_PerAgent proves
-// tokenIssueRateLimit (20 requests / tokenIssueRateLimitWindow) is enforced:
-// the (limit+1)th request from the same agent within the window is rejected
+// testTokenIssuePerAgentLimit (20 requests / testTokenIssuePerAgentWindow) is
+// enforced: the (limit+1)th request from the same agent within the window is rejected
 // with 429 and a real Retry-After header, while the first `limit` requests
 // all succeed.
 func TestIssueHandler_RateLimit_TripsAfterLimit_PerAgent(t *testing.T) {
@@ -118,7 +118,7 @@ func TestIssueHandler_RateLimit_TripsAfterLimit_PerAgent(t *testing.T) {
 
 	apiKey := issueTestAPIKeyReal(t, env, env.orgID, env.agentID)
 
-	for i := 0; i < tokenIssueRateLimit; i++ {
+	for i := 0; i < testTokenIssuePerAgentLimit; i++ {
 		req := issueRequestJSON(t, apiKey, "agent:identity-token-test-agent")
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
@@ -132,7 +132,7 @@ func TestIssueHandler_RateLimit_TripsAfterLimit_PerAgent(t *testing.T) {
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusTooManyRequests {
-		t.Fatalf("request %d: status = %d, body = %q, want 429 (over limit)", tokenIssueRateLimit+1, w.Code, w.Body.String())
+		t.Fatalf("request %d: status = %d, body = %q, want 429 (over limit)", testTokenIssuePerAgentLimit+1, w.Code, w.Body.String())
 	}
 	retryAfter := w.Header().Get("Retry-After")
 	if retryAfter == "" {
@@ -153,7 +153,7 @@ func TestIssueHandler_RateLimit_BucketIsolatedPerAgent(t *testing.T) {
 	mux := newIssueTestMux(h)
 
 	apiKey := issueTestAPIKeyReal(t, env, env.orgID, env.agentID)
-	for i := 0; i < tokenIssueRateLimit; i++ {
+	for i := 0; i < testTokenIssuePerAgentLimit; i++ {
 		req := issueRequestJSON(t, apiKey, "agent:identity-token-test-agent")
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)

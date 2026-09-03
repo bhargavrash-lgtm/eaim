@@ -85,13 +85,14 @@ func TestRateLimiter_DeniedAttempt_DoesNotExtendWindow(t *testing.T) {
 	}
 }
 
-// TestRateLimiter_NonPositiveLimit_FailsClosed: newRateLimiter is only ever
-// constructed with the positive tokenIssueRateLimit constant in production
-// code (unlike workflow.newRateLimiter, whose config-driven limit can in
-// principle be misconfigured to zero/negative at startup), but Allow() stays
-// defensive regardless, matching workflow/ratelimit.go's identical
-// precedent and its stated reasoning (a caller could still construct one
-// directly, as this test does).
+// TestRateLimiter_NonPositiveLimit_FailsClosed: in production, both of this
+// package's rateLimiter instances are now config-driven (B-119/B-120) --
+// config.go's validate() rejects a negative value and defaults an unset/
+// zero one, so NewIssueHandler never actually receives a non-positive limit
+// via the real Load() path, matching workflow.newRateLimiter's own
+// config-driven shape. Allow() stays defensive regardless (a caller could
+// still construct one directly, as this test does), matching
+// workflow/ratelimit.go's identical precedent and its stated reasoning.
 func TestRateLimiter_NonPositiveLimit_FailsClosed(t *testing.T) {
 	rl := newRateLimiter(0, time.Minute)
 	if ok, _ := rl.Allow("k"); ok {

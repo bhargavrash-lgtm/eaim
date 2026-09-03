@@ -103,6 +103,27 @@ func issueRequestJSON(t *testing.T, apiKey, agentID string) *http.Request {
 	return req
 }
 
+// testTokenIssuePerAgentLimit/testTokenIssuePerAgentWindow (B-119) are the
+// values newIssueHandlerForTest constructs its per-agent limiter with --
+// byte-for-byte B-118's original hardcoded tokenIssueRateLimit/
+// tokenIssueRateLimitWindow constants, so every existing B-098/116/118 test
+// built on this helper keeps observing exactly the same behavior (AC3: zero
+// regression), now arriving via explicit constructor args instead of a
+// package-level constant.
+const (
+	testTokenIssuePerAgentLimit  = 20
+	testTokenIssuePerAgentWindow = 60 * time.Second
+	// testTokenIssuePreAuthMaxConcurrent is deliberately generous -- these
+	// tests exercise B-098/116/118's authenticated per-agent behavior, not
+	// B-120's pre-auth concurrency gate, and every request in a given test
+	// runs sequentially anyway (net/http/httptest's ServeHTTP is called
+	// synchronously here), so even a tight gate would never actually
+	// engage -- generous purely for clarity of intent.
+	// issue_http_preauth_pg_test.go/issue_http_preauth_test.go exercise the
+	// pre-auth gate directly, with their own tightly-configured handlers.
+	testTokenIssuePreAuthMaxConcurrent = 1000
+)
+
 func newIssueHandlerForTest(t *testing.T, env *identityTestEnv) (*IssueHandler, *Manager) {
 	t.Helper()
 	keyPath := t.TempDir() + "/gateway.key"
@@ -110,7 +131,11 @@ func newIssueHandlerForTest(t *testing.T, env *identityTestEnv) (*IssueHandler, 
 	if err != nil {
 		t.Fatalf("NewManagerWithDB: %v", err)
 	}
-	h := NewIssueHandler(m, NewPostgresAPIKeyValidator(env.pool), NewPostgresTokenEventStore(env.pool))
+	h := NewIssueHandler(m, NewPostgresAPIKeyValidator(env.pool), NewPostgresTokenEventStore(env.pool), IssueRateLimits{
+		PerAgentLimit:        testTokenIssuePerAgentLimit,
+		PerAgentWindow:       testTokenIssuePerAgentWindow,
+		PreAuthMaxConcurrent: testTokenIssuePreAuthMaxConcurrent,
+	})
 	return h, m
 }
 

@@ -111,6 +111,103 @@ func TestValidate_AppliesDefaults(t *testing.T) {
 	}
 }
 
+// TestValidate_AppliesTokenIssueRateLimitDefaults (B-119/B-120) proves the
+// new config-driven thresholds default to byte-for-byte what issue_http.go's
+// original hardcoded constants enforced (B-118: 20 requests/60s per agent),
+// plus the new pre-auth concurrency default (B-120: 10 concurrent) -- an
+// operator who sets no env var must see unchanged per-agent behavior.
+func TestValidate_AppliesTokenIssueRateLimitDefaults(t *testing.T) {
+	cfg := validConfig()
+	if err := validate(cfg); err != nil {
+		t.Fatalf("validate() unexpected error: %v", err)
+	}
+	if cfg.RateLimit.TokenIssuePerAgent != 20 {
+		t.Errorf("RateLimit.TokenIssuePerAgent default = %d, want 20 (B-118's original hardcoded value)", cfg.RateLimit.TokenIssuePerAgent)
+	}
+	if cfg.RateLimit.TokenIssuePerAgentWindowSeconds != 60 {
+		t.Errorf("RateLimit.TokenIssuePerAgentWindowSeconds default = %d, want 60", cfg.RateLimit.TokenIssuePerAgentWindowSeconds)
+	}
+	if cfg.RateLimit.TokenIssuePreAuthMaxConcurrent != 10 {
+		t.Errorf("RateLimit.TokenIssuePreAuthMaxConcurrent default = %d, want 10", cfg.RateLimit.TokenIssuePreAuthMaxConcurrent)
+	}
+}
+
+// TestValidate_OverriddenTokenIssueRateLimits_NotOverwrittenByDefaults proves
+// AC1's real contract at the validate() layer: a non-zero caller-supplied
+// value (what Load() would have already set from an env var) survives
+// validate() unchanged, rather than being silently replaced by the default.
+func TestValidate_OverriddenTokenIssueRateLimits_NotOverwrittenByDefaults(t *testing.T) {
+	cfg := validConfig()
+	cfg.RateLimit.TokenIssuePerAgent = 5
+	cfg.RateLimit.TokenIssuePerAgentWindowSeconds = 30
+	cfg.RateLimit.TokenIssuePreAuthMaxConcurrent = 25
+	if err := validate(cfg); err != nil {
+		t.Fatalf("validate() unexpected error: %v", err)
+	}
+	if cfg.RateLimit.TokenIssuePerAgent != 5 {
+		t.Errorf("RateLimit.TokenIssuePerAgent = %d, want the overridden 5 (not the default)", cfg.RateLimit.TokenIssuePerAgent)
+	}
+	if cfg.RateLimit.TokenIssuePerAgentWindowSeconds != 30 {
+		t.Errorf("RateLimit.TokenIssuePerAgentWindowSeconds = %d, want the overridden 30", cfg.RateLimit.TokenIssuePerAgentWindowSeconds)
+	}
+	if cfg.RateLimit.TokenIssuePreAuthMaxConcurrent != 25 {
+		t.Errorf("RateLimit.TokenIssuePreAuthMaxConcurrent = %d, want the overridden 25", cfg.RateLimit.TokenIssuePreAuthMaxConcurrent)
+	}
+}
+
+// TestValidate_RejectsNegativeTokenIssueRateLimits proves the same
+// "0 means default, negative is a real misconfiguration" guard
+// WorkflowRunPerAgent already has, extended to all 3 new fields.
+func TestValidate_RejectsNegativeTokenIssueRateLimits(t *testing.T) {
+	cases := []struct {
+		name  string
+		apply func(*Config)
+	}{
+		{"TokenIssuePerAgent", func(c *Config) { c.RateLimit.TokenIssuePerAgent = -1 }},
+		{"TokenIssuePerAgentWindowSeconds", func(c *Config) { c.RateLimit.TokenIssuePerAgentWindowSeconds = -1 }},
+		{"TokenIssuePreAuthMaxConcurrent", func(c *Config) { c.RateLimit.TokenIssuePreAuthMaxConcurrent = -1 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			tc.apply(cfg)
+			if err := validate(cfg); err == nil {
+				t.Fatalf("validate() with negative %s: expected an error, got nil", tc.name)
+			}
+		})
+	}
+}
+
+// TestLoad_TokenIssueRateLimitEnvVars_OverrideDefaults (B-119/B-120) is
+// AC1's real, end-to-end proof: setting the documented env vars changes
+// Load()'s real returned config, not just validate()'s internal defaulting.
+func TestLoad_TokenIssueRateLimitEnvVars_OverrideDefaults(t *testing.T) {
+	clearSecretEnv(t)
+	t.Setenv("GATEWAY_API_SERVICE_KEY", "a-real-generated-service-key")
+	t.Setenv("GATEWAY_EPISODE_READ_SERVICE_KEY", "a-real-generated-episode-key")
+	t.Setenv("GATEWAY_TOKEN_REVOKE_SERVICE_KEY", "a-real-generated-revoke-key")
+	t.Setenv("GATEWAY_DB_HOST", "postgres")
+	t.Setenv("GATEWAY_DB_USER", "eami_app")
+	t.Setenv("GATEWAY_DB_PASSWORD", "S3cur3Pass")
+	t.Setenv("TOKEN_ISSUE_RATE_LIMIT_PER_AGENT", "3")
+	t.Setenv("TOKEN_ISSUE_RATE_LIMIT_WINDOW_SECONDS", "15")
+	t.Setenv("TOKEN_ISSUE_PREAUTH_MAX_CONCURRENT", "9")
+
+	cfg, err := Load(nonexistentConfigPath(t))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.RateLimit.TokenIssuePerAgent != 3 {
+		t.Errorf("RateLimit.TokenIssuePerAgent = %d, want 3 (from env)", cfg.RateLimit.TokenIssuePerAgent)
+	}
+	if cfg.RateLimit.TokenIssuePerAgentWindowSeconds != 15 {
+		t.Errorf("RateLimit.TokenIssuePerAgentWindowSeconds = %d, want 15 (from env)", cfg.RateLimit.TokenIssuePerAgentWindowSeconds)
+	}
+	if cfg.RateLimit.TokenIssuePreAuthMaxConcurrent != 9 {
+		t.Errorf("RateLimit.TokenIssuePreAuthMaxConcurrent = %d, want 9 (from env)", cfg.RateLimit.TokenIssuePreAuthMaxConcurrent)
+	}
+}
+
 // clearSecretEnv unsets every env var Load() reads, so each test starts from
 // a clean slate regardless of what's set in the host shell.
 func clearSecretEnv(t *testing.T) {
