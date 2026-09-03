@@ -19,58 +19,39 @@ package identity
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/eami/gateway/internal/testdb"
 )
 
 // ─── shared test env ────────────────────────────────────────────────────────
 
-func identityTestDSN(t *testing.T) string {
-	t.Helper()
-	if dsn := os.Getenv("TEST_DATABASE_URL"); dsn != "" {
-		return dsn
-	}
-	pw := os.Getenv("POSTGRES_PASSWORD")
-	if pw == "" {
-		t.Skip("skipping: set TEST_DATABASE_URL (or POSTGRES_PASSWORD, using the docker-compose eami_app/eami/127.0.0.1:5432 layout) to run identity revocation integration tests against a real Postgres")
-	}
-	return "postgresql://eami_app:" + pw + "@127.0.0.1:5432/eami"
-}
-
 // identityTestEnv wires a real *pgxpool.Pool against a real Postgres and a
 // throwaway org + gateway_agents row for revoked_ai_tokens.agent_id's FK
-// target. Everything created is cleaned up via t.Cleanup.
+// target.
 type identityTestEnv struct {
 	pool    *pgxpool.Pool
 	orgID   uuid.UUID
 	agentID uuid.UUID
 }
 
+// newIdentityTestEnv (B-122/B-140) provisions a fresh, isolated throwaway
+// database per test via internal/testdb -- see that package's doc comment
+// for why. No per-org DELETE cleanup is needed any more: the whole
+// database is dropped by testdb.NewThrowawayPool's own t.Cleanup.
 func newIdentityTestEnv(t *testing.T) *identityTestEnv {
 	t.Helper()
-	dsn := identityTestDSN(t)
+	pool := testdb.NewThrowawayPool(t)
 	ctx := context.Background()
-
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("skipping: could not reach test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
 
 	orgID := uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, $2, $3)`,
 		orgID, "identity-token-test-"+orgID.String()[:8], "identity-token-test-"+orgID.String()); err != nil {
 		t.Fatalf("insert test org: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
-	})
 
 	agentID := uuid.New()
 	if _, err := pool.Exec(ctx, `

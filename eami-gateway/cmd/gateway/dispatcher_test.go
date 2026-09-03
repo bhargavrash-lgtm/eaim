@@ -259,6 +259,39 @@ func decideTestApproval(t *testing.T, pool *pgxpool.Pool, approvalID, status str
 	}
 }
 
+// waitForEpisodeRow polls episodes for a row belonging to orgID with the
+// exact task string a recordEpisodeHook-spawned goroutine would have
+// written, returning its outcome/steps.
+//
+// B-127: recordEpisodeHook (dispatcher.go) always records via a detached
+// `go d.episodeRecorder.Record(...)` goroutine (B-027) that Dispatch itself
+// never waits on -- a test that reads episodes immediately after Dispatch
+// returns races that goroutine and can observe zero rows even after a
+// real, successful dispatch (visible historically as a recurring "episode:
+// db write failed" WARN once a test's org/database gets torn down before
+// the write lands). Polling here, synchronously inside the test function
+// itself -- and therefore strictly before any t.Cleanup fires, since
+// t.Cleanup only runs after the test function returns -- is what actually
+// closes that race for a test's own assertions. This is deliberately a
+// test-only synchronization point, not a production fix: recordEpisodeHook
+// and episode.Recorder are both out of this brief's MUST NOT MODIFY scope.
+func waitForEpisodeRow(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID, task string, timeout time.Duration) (outcome string, steps json.RawMessage) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		err := pool.QueryRow(context.Background(), `
+			SELECT outcome, steps FROM episodes WHERE org_id = $1 AND task = $2
+			ORDER BY created_at DESC LIMIT 1
+		`, orgID, task).Scan(&outcome, &steps)
+		if err == nil {
+			return outcome, steps
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for an episodes row (org=%s task=%q) -- the recordEpisodeHook goroutine (B-127) may not have completed", orgID, task)
+	return "", nil
+}
+
 // ---- AC1: Dispatch is directly constructable and callable, for each
 // decision type, with no full server running. ----
 
@@ -286,6 +319,38 @@ func TestDispatch_Allow_NoFullServerNeeded(t *testing.T) {
 	}
 	if string(result) != `{"ok":true}` {
 		t.Errorf("Result = %s, want the real downstream body", result)
+	}
+}
+
+// TestDispatch_Allow_EpisodeRow_LandsBeforeAssertion is B-127's regression
+// proof. Without waitForEpisodeRow's poll, reading episodes immediately
+// after Dispatch returns races recordEpisodeHook's detached goroutine; this
+// test proves the row reliably lands, with the expected content, when
+// waited for correctly.
+func TestDispatch_Allow_EpisodeRow_LandsBeforeAssertion(t *testing.T) {
+	e := newDispatcherTestEnv(t, policy.ActionAllow)
+
+	result, err := e.dispatcher.Dispatch(context.Background(), e.actionContext("episode-race-tool"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(result) != `{"ok":true}` {
+		t.Fatalf("Result = %s, want the real downstream body", result)
+	}
+
+	outcome, steps := waitForEpisodeRow(t, e.env.pool, e.env.orgID, "episode-race-tool/test-action", 2*time.Second)
+	if outcome != "success" {
+		t.Errorf("episodes.outcome = %q, want success", outcome)
+	}
+	var gotSteps []struct {
+		ToolName string `json:"tool_name"`
+		Decision string `json:"decision"`
+	}
+	if err := json.Unmarshal(steps, &gotSteps); err != nil {
+		t.Fatalf("unmarshal episodes.steps: %v", err)
+	}
+	if len(gotSteps) != 1 || gotSteps[0].ToolName != "episode-race-tool" || gotSteps[0].Decision != "allowed" {
+		t.Errorf("episodes.steps = %+v, want one step for episode-race-tool/allowed", gotSteps)
 	}
 }
 

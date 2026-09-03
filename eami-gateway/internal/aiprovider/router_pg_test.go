@@ -15,52 +15,32 @@ package aiprovider
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-)
 
-func aiproviderTestDSN(t *testing.T) string {
-	t.Helper()
-	if dsn := os.Getenv("TEST_DATABASE_URL"); dsn != "" {
-		return dsn
-	}
-	pw := os.Getenv("POSTGRES_PASSWORD")
-	if pw == "" {
-		t.Skip("skipping: set TEST_DATABASE_URL (or POSTGRES_PASSWORD, using the docker-compose eami_app/eami/127.0.0.1:5432 layout) to run aiprovider integration tests against a real Postgres")
-	}
-	return "postgresql://eami_app:" + pw + "@127.0.0.1:5432/eami"
-}
+	"github.com/eami/gateway/internal/testdb"
+)
 
 type aiproviderTestEnv struct {
 	pool  *pgxpool.Pool
 	orgID uuid.UUID
 }
 
+// newAIProviderTestEnv (B-122/B-140) provisions a fresh, isolated
+// throwaway database per test via internal/testdb -- see that package's
+// doc comment for why. No per-org DELETE cleanup is needed any more.
 func newAIProviderTestEnv(t *testing.T) *aiproviderTestEnv {
 	t.Helper()
-	dsn := aiproviderTestDSN(t)
+	pool := testdb.NewThrowawayPool(t)
 	ctx := context.Background()
-
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("skipping: could not reach test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
 
 	orgID := uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, $2, $3)`,
 		orgID, "aiprovider-test-"+orgID.String()[:8], "aiprovider-test-"+orgID.String()); err != nil {
 		t.Fatalf("insert test org: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
-	})
 
 	return &aiproviderTestEnv{pool: pool, orgID: orgID}
 }

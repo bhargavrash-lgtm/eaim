@@ -27,7 +27,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -35,25 +34,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/eami/gateway/internal/proxy"
+	"github.com/eami/gateway/internal/testdb"
 )
 
 // ─── shared test env ────────────────────────────────────────────────────────
 
-func approvalTestDSN(t *testing.T) string {
-	t.Helper()
-	if dsn := os.Getenv("TEST_DATABASE_URL"); dsn != "" {
-		return dsn
-	}
-	pw := os.Getenv("POSTGRES_PASSWORD")
-	if pw == "" {
-		t.Skip("skipping: set TEST_DATABASE_URL (or POSTGRES_PASSWORD, using the docker-compose eami_app/eami/localhost:5432 layout) to run approval router integration tests against a real Postgres")
-	}
-	return "postgresql://eami_app:" + pw + "@localhost:5432/eami"
-}
-
 // approvalTestEnv wires a real *pgxpool.Pool against a real Postgres, a
 // throwaway org + gateway_agents row for FK targets, and a Router backed
-// by that pool. Everything created is cleaned up via t.Cleanup.
+// by that pool.
 type approvalTestEnv struct {
 	pool    *pgxpool.Pool
 	router  *Router
@@ -61,28 +49,20 @@ type approvalTestEnv struct {
 	agentID uuid.UUID
 }
 
+// newApprovalTestEnv (B-122/B-140) provisions a fresh, isolated throwaway
+// database per test via internal/testdb -- see that package's doc comment
+// for why. No per-org DELETE cleanup is needed any more: the whole
+// database is dropped by testdb.NewThrowawayPool's own t.Cleanup.
 func newApprovalTestEnv(t *testing.T, holdTimeout time.Duration) *approvalTestEnv {
 	t.Helper()
-	dsn := approvalTestDSN(t)
+	pool := testdb.NewThrowawayPool(t)
 	ctx := context.Background()
-
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("skipping: could not reach test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
 
 	orgID := uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, $2, $3)`,
 		orgID, "approval-router-test-"+orgID.String()[:8], "approval-router-test-"+orgID.String()); err != nil {
 		t.Fatalf("seed org: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
-	})
 
 	agentID := uuid.New()
 	if _, err := pool.Exec(ctx, `

@@ -45,9 +45,9 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -60,21 +60,10 @@ import (
 	"github.com/eami/gateway/internal/episode"
 	"github.com/eami/gateway/internal/mcp"
 	"github.com/eami/gateway/internal/proxy"
+	"github.com/eami/gateway/internal/testdb"
 	"github.com/eami/gateway/internal/toolrouter"
 	policy "github.com/eami/policy"
 )
-
-func workflowTestDSN(t *testing.T) string {
-	t.Helper()
-	if dsn := os.Getenv("TEST_DATABASE_URL"); dsn != "" {
-		return dsn
-	}
-	pw := os.Getenv("POSTGRES_PASSWORD")
-	if pw == "" {
-		t.Skip("skipping: set TEST_DATABASE_URL (or POSTGRES_PASSWORD) to run workflow execution integration tests against a real Postgres")
-	}
-	return "postgresql://eami_app:" + pw + "@127.0.0.1:5432/eami"
-}
 
 type workflowTestEnv struct {
 	pool      *pgxpool.Pool
@@ -84,31 +73,24 @@ type workflowTestEnv struct {
 	rules     []policy.Rule // mutated per test before building the evaluator
 }
 
+// newWorkflowTestEnv (B-122/B-140) provisions a fresh, isolated throwaway
+// database per test via internal/testdb -- see that package's doc comment
+// for why. No per-org DELETE cleanup is needed any more: the whole database
+// is dropped by testdb.NewThrowawayPool's own t.Cleanup, registered before
+// this function ever returns, so the ordering hazard the old comment here
+// warned about (a plain defer pool.Close() racing ahead of a later
+// t.Cleanup-registered DELETE -- BACKLOG.md's B-056) no longer applies:
+// there is no DELETE left to race against.
 func newWorkflowTestEnv(t *testing.T) *workflowTestEnv {
 	t.Helper()
-	dsn := workflowTestDSN(t)
+	pool := testdb.NewThrowawayPool(t)
 	ctx := context.Background()
-
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("skipping: could not reach test database: %v", err)
-	}
-	// t.Cleanup, registered FIRST, so it runs LAST (after every later
-	// t.Cleanup-registered org delete) -- a plain defer pool.Close() here
-	// would close the pool before any cleanup DELETE ran, the exact bug
-	// this session's own B-058 work already found and fixed once
-	// (workflows_test.go) and BACKLOG.md's B-056 entry documents.
-	t.Cleanup(func() { pool.Close() })
 
 	orgID := uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, $2, $3)`,
 		orgID, "workflow-exec-test-"+orgID.String()[:8], "workflow-exec-test-"+orgID.String()); err != nil {
 		t.Fatalf("seed org: %v", err)
 	}
-	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID) })
 
 	agentID := uuid.New()
 	agentName := "wf-exec-agent-" + agentID.String()[:8]
@@ -212,6 +194,24 @@ func newDispatchEnv(t *testing.T, e *workflowTestEnv, adapters map[string]aiprov
 	}
 	episodeRecorder := episode.New(e.pool)
 
+	// logAuditWriteFailure (B-126) mirrors cmd/gateway/dispatcher.go's
+	// logAuditWriteFailureHook -- this closure's own reconstruction of
+	// dispatch()'s real shape (see file header) previously discarded
+	// auditWriter.Write's returned error at all 4 of its own call sites
+	// below (`_ = auditWriter.Write(...)`), identically to the asymmetry
+	// B-121 found and fixed in the real dispatcher.go. Fixed here purely so
+	// a future internal/workflow test could exercise this scenario the
+	// same way cmd/gateway's dispatcher_test.go now can -- not because any
+	// existing test in this package currently asserts on it.
+	logAuditWriteFailure := func(ac mcp.ActionContext, decision string, err error) {
+		if err == nil {
+			return
+		}
+		slog.Error("audit_log write failed",
+			"org_id", ac.OrgID, "agent_name", ac.AgentName, "tool", ac.Tool, "action", ac.Action,
+			"decision", decision, "session_id", ac.SessionID, "err", err)
+	}
+
 	dispatch := func(ctx context.Context, ac mcp.ActionContext) (json.RawMessage, error) {
 		resolvedTool := resolveTestTool(ctx, toolRouter, ac.OrgID, ac.Tool)
 		var resolvedProvider *aiprovider.ToolRow
@@ -252,14 +252,14 @@ func newDispatchEnv(t *testing.T, e *workflowTestEnv, adapters map[string]aiprov
 		switch decision.Action {
 		case policy.ActionDeny:
 			auditEntry.Decision = "denied"
-			_ = auditWriter.Write(ctx, auditEntry)
+			logAuditWriteFailure(ac, auditEntry.Decision, auditWriter.Write(ctx, auditEntry))
 			go episodeRecorder.Record(context.Background(), ac.OrgID, ac.AgentUUID, ac.AgentName,
 				[]episode.Step{{ToolName: ac.Tool, Action: ac.Action, Params: ac.Parameters, Decision: "blocked", Timestamp: ac.ReceivedAt}}, "blocked")
 			return nil, &mcp.PolicyDeniedError{Reason: decision.Reason, PolicyID: auditEntry.PolicyID}
 
 		case policy.ActionEscalate:
 			auditEntry.Decision = "escalated"
-			_ = auditWriter.Write(ctx, auditEntry)
+			logAuditWriteFailure(ac, auditEntry.Decision, auditWriter.Write(ctx, auditEntry))
 
 			approvalReq := approval.Request{
 				OrgID: ac.OrgID, AgentID: ac.AgentUUID, AgentName: ac.AgentName,
@@ -318,11 +318,11 @@ func newDispatchEnv(t *testing.T, e *workflowTestEnv, adapters map[string]aiprov
 			}
 			if proxyErr != nil {
 				auditEntry.Decision = "denied"
-				_ = auditWriter.Write(ctx, auditEntry)
+				logAuditWriteFailure(ac, auditEntry.Decision, auditWriter.Write(ctx, auditEntry))
 				return nil, proxyErr
 			}
 			auditEntry.Decision = "allowed"
-			_ = auditWriter.Write(ctx, auditEntry)
+			logAuditWriteFailure(ac, auditEntry.Decision, auditWriter.Write(ctx, auditEntry))
 			go episodeRecorder.Record(context.Background(), ac.OrgID, ac.AgentUUID, ac.AgentName,
 				[]episode.Step{{ToolName: ac.Tool, Action: ac.Action, Params: ac.Parameters, Result: tr.Body, Decision: "allowed", Timestamp: ac.ReceivedAt}}, "success")
 			return tr.Body, nil

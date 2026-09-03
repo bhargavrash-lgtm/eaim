@@ -133,10 +133,8 @@ func TestExecutor_Run_AllStepsAllowed_ExecutesInOrder(t *testing.T) {
 // matched rule's own ID -- gets written straight into audit_log's real
 // `uuid` policy_id column). None of them previously read back the
 // resulting row, so the failure went unnoticed. This test does read it
-// back, through allowAllRules() directly (NOT
-// allowAllRulesRealPolicyID(), B-093's separate local workaround) --
-// before the B-115 fix this test would fail on the INSERT; after it, the
-// row must exist with decision="allowed" and a policy_id matching the
+// back -- before the B-115 fix this test would fail on the INSERT; after
+// it, the row must exist with decision="allowed" and a policy_id matching the
 // matched rule's own (now-real-UUID) ID.
 func TestExecutor_Run_AllowPath_UsingAllowAllRules_AuditLogRowPersists(t *testing.T) {
 	env := newWorkflowTestEnv(t)
@@ -617,25 +615,6 @@ func TestExecutor_Run_WorkflowRunStepsRecordsAccurateAuditTrail(t *testing.T) {
 
 // ─── B-093: audit_log records which workflow run/step a dispatch came from ─
 
-// allowAllRulesRealPolicyID is allowAllRules() with a real-UUID-shaped rule
-// ID. Needed specifically here, not a pre-existing helper: audit_log.policy_id
-// is a real `uuid` column, and testenv_test.go's dispatch closure snapshots
-// decision.PolicyID (the matched rule's own ID) straight into the audit
-// write -- allowAllRules()'s literal "allow-all" string isn't a valid UUID,
-// so any test that (unlike every pre-existing one) actually reads back the
-// resulting audit_log row hits a real INSERT failure the existing tests
-// never noticed, since they never check audit_log content and the write
-// error is discarded (`_ = auditWriter.Write(...)`, matching main.go's own
-// fire-and-forget-from-dispatch's-perspective convention). A real loaded
-// policy's ID from the `policies` table is always a genuine UUID in
-// production, so this is a test-fixture-only gap, not fixed in the shared
-// helper to avoid touching every other test that already passes with it.
-func allowAllRulesRealPolicyID() []policy.Rule {
-	return []policy.Rule{
-		{ID: uuid.NewString(), Name: "allow-all", Priority: 100, Action: policy.ActionAllow},
-	}
-}
-
 // TestExecutor_Run_AuditLogRecordsWorkflowRunIDAndStepIndex is the AC3
 // centerpiece: a real 2-step workflow run's TWO real dispatches (through
 // the reconstructed real dispatch pipeline -- testenv_test.go's own header
@@ -647,7 +626,7 @@ func allowAllRulesRealPolicyID() []policy.Rule {
 // (writer_pg_test.go's own tests already cover that half).
 func TestExecutor_Run_AuditLogRecordsWorkflowRunIDAndStepIndex(t *testing.T) {
 	env := newWorkflowTestEnv(t)
-	env.rules = allowAllRulesRealPolicyID()
+	env.rules = allowAllRules()
 	toolA := env.insertAIProviderTool(t, "b093-tool-a", "b093-provider-a")
 	toolB := env.insertAIProviderTool(t, "b093-tool-b", "b093-provider-b")
 	de := newDispatchEnv(t, env, map[string]aiprovider.Adapter{
@@ -714,7 +693,7 @@ func TestExecutor_Run_AuditLogRecordsWorkflowRunIDAndStepIndex(t *testing.T) {
 // NULL -- unaffected by this brief's plumbing, not a stray zero value.
 func TestExecutor_Run_StandaloneDispatch_AuditLogWorkflowLinkageIsNull(t *testing.T) {
 	env := newWorkflowTestEnv(t)
-	env.rules = allowAllRulesRealPolicyID()
+	env.rules = allowAllRules()
 	env.insertAIProviderTool(t, "b093-standalone-tool", "b093-standalone-provider")
 	de := newDispatchEnv(t, env, map[string]aiprovider.Adapter{
 		"b093-standalone-provider": &fakeAdapter{name: "b093-standalone-provider"},

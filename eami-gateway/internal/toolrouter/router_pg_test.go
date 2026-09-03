@@ -21,56 +21,35 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/eami/gateway/internal/proxy"
+	"github.com/eami/gateway/internal/testdb"
 )
 
 // ─── shared test env ────────────────────────────────────────────────────────
-
-func toolrouterTestDSN(t *testing.T) string {
-	t.Helper()
-	if dsn := os.Getenv("TEST_DATABASE_URL"); dsn != "" {
-		return dsn
-	}
-	pw := os.Getenv("POSTGRES_PASSWORD")
-	if pw == "" {
-		t.Skip("skipping: set TEST_DATABASE_URL (or POSTGRES_PASSWORD, using the docker-compose eami_app/eami/127.0.0.1:5432 layout) to run toolrouter integration tests against a real Postgres")
-	}
-	return "postgresql://eami_app:" + pw + "@127.0.0.1:5432/eami"
-}
 
 type toolrouterTestEnv struct {
 	pool  *pgxpool.Pool
 	orgID uuid.UUID
 }
 
+// newToolrouterTestEnv (B-122/B-140) provisions a fresh, isolated
+// throwaway database per test via internal/testdb -- see that package's
+// doc comment for why. No per-org DELETE cleanup is needed any more.
 func newToolrouterTestEnv(t *testing.T) *toolrouterTestEnv {
 	t.Helper()
-	dsn := toolrouterTestDSN(t)
+	pool := testdb.NewThrowawayPool(t)
 	ctx := context.Background()
-
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("skipping: could not reach test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
 
 	orgID := uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, $2, $3)`,
 		orgID, "toolrouter-test-"+orgID.String()[:8], "toolrouter-test-"+orgID.String()); err != nil {
 		t.Fatalf("insert test org: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
-	})
 
 	return &toolrouterTestEnv{pool: pool, orgID: orgID}
 }

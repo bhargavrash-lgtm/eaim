@@ -21,55 +21,33 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/eami/gateway/internal/episode"
 	"github.com/eami/gateway/internal/identity"
 	"github.com/eami/gateway/internal/registry"
+	"github.com/eami/gateway/internal/testdb"
 )
 
-func episodeOrgScopingTestDSN(t *testing.T) string {
-	t.Helper()
-	if dsn := os.Getenv("TEST_DATABASE_URL"); dsn != "" {
-		return dsn
-	}
-	pw := os.Getenv("POSTGRES_PASSWORD")
-	if pw == "" {
-		t.Skip("skipping: set TEST_DATABASE_URL (or POSTGRES_PASSWORD, using the docker-compose eami_app/eami/127.0.0.1:5432 layout) to run episode org-scoping integration tests against a real Postgres")
-	}
-	return "postgresql://eami_app:" + pw + "@127.0.0.1:5432/eami"
-}
-
+// B-122/B-140: provisions its own fresh, isolated throwaway database via
+// internal/testdb -- no per-org DELETE cleanup needed any more.
 func TestListEpisodes_OrgScoping_TwoOrgsSameAgentName_NeverLeaksAcrossOrgs(t *testing.T) {
-	dsn := episodeOrgScopingTestDSN(t)
+	pool := testdb.NewThrowawayPool(t)
 	ctx := context.Background()
-
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("skipping: could not reach test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
 
 	orgA := uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, $2, $3)`,
 		orgA, "b141-ep-org-a-"+orgA.String()[:8], "b141-ep-org-a-"+orgA.String()); err != nil {
 		t.Fatalf("insert org A: %v", err)
 	}
-	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgA) })
 	orgB := uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, $2, $3)`,
 		orgB, "b141-ep-org-b-"+orgB.String()[:8], "b141-ep-org-b-"+orgB.String()); err != nil {
 		t.Fatalf("insert org B: %v", err)
 	}
-	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgB) })
 
 	const sharedName = "shared-episode-agent"
 	agentA := uuid.New()

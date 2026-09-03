@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"os"
 	"testing"
 	"time"
 
@@ -26,33 +25,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/eami/gateway/internal/audit"
+	"github.com/eami/gateway/internal/testdb"
 )
 
-func auditTestDSN(t *testing.T) string {
-	t.Helper()
-	if dsn := os.Getenv("TEST_DATABASE_URL"); dsn != "" {
-		return dsn
-	}
-	pw := os.Getenv("POSTGRES_PASSWORD")
-	if pw == "" {
-		t.Skip("skipping: set TEST_DATABASE_URL (or POSTGRES_PASSWORD, using the docker-compose eami_app/eami/127.0.0.1:5432 layout) to run audit integration tests against a real Postgres")
-	}
-	return "postgresql://eami_app:" + pw + "@127.0.0.1:5432/eami"
-}
-
+// newAuditTestPool (B-122/B-140) provisions a fresh, isolated throwaway
+// database per test via internal/testdb -- see that package's doc comment
+// for why. This closes the exact race B-140 traced to this package: every
+// test here constructs a fresh audit.Writer, whose lazy first-write
+// GetLastHash() queries the global chain tip with no org scoping -- with a
+// throwaway database per test, there is no other package's rows to
+// possibly observe or race against any more.
 func newAuditTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := auditTestDSN(t)
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("skipping: could not reach test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
+	return testdb.NewThrowawayPool(t)
 }
 
 func readDataHandling(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) *string {

@@ -15,53 +15,31 @@ package policyloader
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/eami/gateway/internal/testdb"
 	policy "github.com/eami/policy"
 )
-
-func loaderTestDSN(t *testing.T) string {
-	t.Helper()
-	if dsn := os.Getenv("TEST_DATABASE_URL"); dsn != "" {
-		return dsn
-	}
-	pw := os.Getenv("POSTGRES_PASSWORD")
-	if pw == "" {
-		t.Skip("skipping: set TEST_DATABASE_URL (or POSTGRES_PASSWORD, using the docker-compose eami_app/eami/127.0.0.1:5432 layout) to run policyloader integration tests against a real Postgres")
-	}
-	return "postgresql://eami_app:" + pw + "@127.0.0.1:5432/eami"
-}
 
 // TestLoad_ToolServerIDs_RealDBRoundTrip proves AC2's DB-level wiring: a
 // policy rule authored with tool_server_ids in Postgres is correctly
 // scanned into Conditions.ToolServerIDs by queryRules, and the resulting
 // evaluator honors it -- matches a call resolved to that specific
 // gateway_tools.id, does not match a different one or an unresolved call.
+//
+// B-122/B-140: provisions its own fresh, isolated throwaway database via
+// internal/testdb -- no per-org DELETE cleanup needed any more.
 func TestLoad_ToolServerIDs_RealDBRoundTrip(t *testing.T) {
-	dsn := loaderTestDSN(t)
+	pool := testdb.NewThrowawayPool(t)
 	ctx := context.Background()
-
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("skipping: could not reach test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
 
 	orgID := uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, $2, $3)`,
 		orgID, "policyloader-test-"+orgID.String()[:8], "policyloader-test-"+orgID.String()); err != nil {
 		t.Fatalf("insert test org: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
-	})
 
 	targetServerID := uuid.New().String()
 
@@ -129,35 +107,22 @@ func TestLoad_ToolServerIDs_RealDBRoundTrip(t *testing.T) {
 // same-org positive control runs in the same test so a passing negative
 // control can't be explained by an org filter that's simply too broad
 // (e.g. one that broke the tool_names match itself).
+// B-122/B-140: provisions its own fresh, isolated throwaway database via
+// internal/testdb -- no per-org DELETE cleanup needed any more.
 func TestLoad_OrgScoping_CrossOrgDispatchNoLongerMatches(t *testing.T) {
-	dsn := loaderTestDSN(t)
+	pool := testdb.NewThrowawayPool(t)
 	ctx := context.Background()
-
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("skipping: could not reach test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
 
 	orgA := uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, $2, $3)`,
 		orgA, "b128-neg-org-a-"+orgA.String()[:8], "b128-neg-org-a-"+orgA.String()); err != nil {
 		t.Fatalf("insert org A: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgA)
-	})
 	orgB := uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, $2, $3)`,
 		orgB, "b128-neg-org-b-"+orgB.String()[:8], "b128-neg-org-b-"+orgB.String()); err != nil {
 		t.Fatalf("insert org B: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgB)
-	})
 
 	// Org A owns a real active policy matching a tool literally named
 	// "claude" -- the exact shape of the investigation's real repro

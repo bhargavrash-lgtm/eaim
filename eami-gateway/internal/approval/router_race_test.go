@@ -33,9 +33,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/eami/gateway/internal/proxy"
+	"github.com/eami/gateway/internal/testdb"
 )
 
 // newRacyApprovalTestEnv mirrors newApprovalTestEnv (router_pg_test.go)
@@ -46,28 +46,20 @@ import (
 // downstream hit increments hitCount atomically, the test's actual proof
 // of dispatch count (independent of which of the two competing callers'
 // result the test observes).
+//
+// B-122/B-140: provisions its own fresh, isolated throwaway database via
+// internal/testdb, same as newApprovalTestEnv -- no per-org DELETE cleanup
+// needed any more.
 func newRacyApprovalTestEnv(t *testing.T, holdTimeout, responseDelay time.Duration) (*approvalTestEnv, *int32) {
 	t.Helper()
-	dsn := approvalTestDSN(t)
+	pool := testdb.NewThrowawayPool(t)
 	ctx := context.Background()
-
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("skipping: could not reach test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
 
 	orgID := uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, slug) VALUES ($1, $2, $3)`,
 		orgID, "approval-race-test-"+orgID.String()[:8], "approval-race-test-"+orgID.String()); err != nil {
 		t.Fatalf("seed org: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
-	})
 
 	agentID := uuid.New()
 	if _, err := pool.Exec(ctx, `
