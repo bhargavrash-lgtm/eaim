@@ -1549,4 +1549,25 @@ No schema/migration work (`policies.org_id` has existed since the original schem
 **Severity/Priority:** Low — real, validated gap, narrower use case than B-158, no urgency.
 **Status:** logged 2026-09-03, sourced from direct competitor UX research. B-ID confirmed free before minting (counter stood at B-158 at the time B-158 above was minted; this is the next number, no collision). Zero investigation or code started.
 
-## Next B-ID: B-160
+### B-160 — EPIC: Enterprise AI Operating System — persona-based workflows — **logged, investigation not started**
+**Vision:** the platform serves every team in an organization — Compliance, Finance, Data Science, Legal, HR, Procurement, business leaders, executives, and individual employees — not just security/platform admins. **Core architectural insight:** this requires new WORKFLOWS and VIEWS on top of the existing Identity → Action → Tool → Policy → Cost/Audit pipeline (`CLAUDE.md`'s one-spine rule), not new underlying data or a parallel system. This is presented as the largest, most transformative epic identified this entire session — recommend its own dedicated strategic session, not built casually.
+**Real personas identified, each needing a genuinely different workflow, not a simplified admin view:**
+1. **Compliance/Legal** — regulatory mapping, attestation workflows, auditor-ready reports. **The single most concrete, immediately valuable piece — worth its own priority investigation, recommended as this epic's first standalone brief** (see Recommendation below).
+2. **Finance** — department-level chargeback, outcome-tied cost reporting. Extends the existing FinOps/cost-tracking surface rather than building a new one.
+3. **Data Science/ML** — the experimentation workflow already scoped separately: **B-147** (customer-controlled LLM training orchestration) and **B-151** (GPU-based model hosting/serving) are the existing homes for this persona's needs, not new scope introduced here.
+4. **Business leaders** — a simplified, outcome-only view (not raw policy/audit detail).
+5. **Individual employees** — **confirmed as B-130's existing scope** (the native governed AI desktop client, "the Claude Desktop replacement") — the right home for this persona, not new scope.
+6. **Executives** — a high-level risk-posture summary view.
+7. **Procurement/Vendor management** — extends **B-078**'s data-handling-designation work (per-connector `data_handling_designation`/`data_handling_note`, DONE 2026-08-20) into a real vendor-risk workflow, rather than inventing a new vendor-tracking mechanism.
+8. **HR/People teams** — flagged as a distinct, legally significant case: AI used in employment decisions falls under specific regulatory regimes (NYC Local Law 144, EU AI Act's high-risk employment classification) that the other personas don't carry — needs its own dedicated regulatory investigation, not folded generically into the Compliance/Legal workflow above.
+**Connects to and elevates existing epics, not additive scope creep:**
+- **B-157** (modular licensing & entitlement system) — this epic's persona workflows are the natural consumer of B-157's RBAC × Licensing component: which workflow a person sees becomes a function of their role, the same mechanism already needed to gate which buttons/modules they see, not a second, parallel access-control system.
+- **B-078** (vendor management / data-handling designation) — direct dependency for the Procurement persona, per item 7 above.
+- **B-130** (Native Governed AI Desktop Client) — confirmed as the employee-facing home, per item 5 above.
+**Recommendation:** regulatory mapping/compliance reporting (persona 1, Compliance/Legal) as the first real, standalone investigation to spin out of this epic — concrete, buildable entirely on data the pipeline already produces (audit log, policy decisions, cost/token usage), and the most differentiated, valuable piece for the vision's stated "compliance" pillar. Not started here — this entry is the epic-level scoping record only.
+**Acceptance criteria:** none yet — this entry is a scoping placeholder, not an actionable brief. First step for whoever picks this up is the recommended regulatory-mapping/compliance-reporting investigation above.
+**Dependencies:** B-157 (RBAC × Licensing, the mechanism that would select which workflow a person sees), B-078 (vendor management, extended by the Procurement persona), B-130 (confirmed employee-facing home), B-147/B-151 (existing homes for the Data Science/ML persona's needs — referenced, not modified).
+**Severity/Priority:** the largest, most transformative epic identified this session — strategic, foundational, explicitly NOT to be built casually or piecemeal without a dedicated strategic session first.
+**Status:** vision articulated 2026-09-03, zero investigation started. B-ID confirmed free before minting (counter stood at B-160, no collision). No code changes.
+
+## Next B-ID: B-161
