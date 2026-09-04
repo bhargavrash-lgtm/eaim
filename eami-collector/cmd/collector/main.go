@@ -120,7 +120,7 @@ func runServer() {
 	}()
 
 	staticKey := cfg.Forwarder.APIKey
-	handler := api.Router(database, staticKey, cfg.Forwarder.SAASURL, cfg.Forwarder.APIKey, log)
+	handler := api.Router(database, staticKey, cfg.Forwarder.SAASURL, cfg.Forwarder.ServiceKey, log)
 	addr := fmt.Sprintf(":%d", cfg.Collector.ListenPort)
 	srv := &http.Server{Addr: addr, Handler: handler}
 

@@ -2,10 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/eami/api/internal/store"
 )
@@ -27,6 +29,12 @@ type agentEndpointListItem struct {
 	LocalModelCount int64  `json:"local_model_count"`
 	MCPServerCount int64   `json:"mcp_server_count"`
 	GPUCount       int64   `json:"gpu_count"`
+	// GatewayAgentID/GatewayAgentName (B-164/B-165): nil unless an admin has
+	// explicitly linked this endpoint to a real gateway_agents row via
+	// PATCH /v1/endpoints/{endpointId}/link-agent -- there is no automatic
+	// derivation.
+	GatewayAgentID   *string `json:"gateway_agent_id,omitempty"`
+	GatewayAgentName *string `json:"gateway_agent_name,omitempty"`
 }
 
 // agentEndpointDetail is the shape returned by GET /v1/endpoints/{endpointId}.
@@ -137,5 +145,80 @@ func toAgentEndpointItem(e store.AgentEndpoint) agentEndpointListItem {
 		item.FirstSeen = e.FirstSeen.Time.UTC().Format("2006-01-02T15:04:05Z")
 	}
 
+	if e.GatewayAgentID != nil {
+		id := e.GatewayAgentID.String()
+		item.GatewayAgentID = &id
+	}
+	item.GatewayAgentName = e.GatewayAgentName
+
 	return item
+}
+
+// ── Endpoint ↔ gateway agent link (B-164/B-165) ─────────────────────────────
+
+// linkEndpointAgentRequest is the PATCH body for LinkEndpointAgent.
+// GatewayAgentID nil or "" clears the link; a real gateway_agents UUID
+// (string form) sets it.
+type linkEndpointAgentRequest struct {
+	GatewayAgentID *string `json:"gateway_agent_id"`
+}
+
+// LinkEndpointAgent handles PATCH /v1/endpoints/{endpointId}/link-agent.
+// Auth: JWT (admin or operator -- same write-access gating this file's
+// sibling gateway/* write routes use).
+//
+// This is the ONLY write path for endpoints.gateway_agent_id -- there is no
+// automatic derivation between eami-agent's own free-text discovery
+// identity and a governed gateway_agents identity (see
+// 000013_endpoint_gateway_agent_link.up.sql's own doc comment for why), so
+// linking is always an explicit admin decision, never inferred.
+func (s *Server) LinkEndpointAgent(w http.ResponseWriter, r *http.Request) {
+	uc := claimsFromContext(r)
+	endpointID, err := parseUUIDParam(r, "endpointId")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid endpointId")
+		return
+	}
+
+	var req linkEndpointAgentRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+
+	var gatewayAgentID *uuid.UUID
+	if req.GatewayAgentID != nil && *req.GatewayAgentID != "" {
+		id, err := uuid.Parse(*req.GatewayAgentID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "gateway_agent_id must be a valid UUID or null")
+			return
+		}
+		gatewayAgentID = &id
+	}
+
+	err = s.queries.LinkEndpointToGatewayAgent(r.Context(), store.LinkEndpointToGatewayAgentParams{
+		EndpointID:     endpointID,
+		OrgID:          uc.OrgID,
+		GatewayAgentID: gatewayAgentID,
+	})
+	switch {
+	case err == nil:
+		// fall through to read-back below
+	case errors.Is(err, pgx.ErrNoRows):
+		writeError(w, http.StatusNotFound, "not_found", "endpoint not found")
+		return
+	case errors.Is(err, store.ErrGatewayAgentNotFound):
+		writeError(w, http.StatusBadRequest, "bad_request", "gateway agent not found in this org")
+		return
+	default:
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update endpoint link")
+		return
+	}
+
+	e, err := s.queries.GetAgentEndpoint(r.Context(), endpointID, uc.OrgID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to read back updated endpoint")
+		return
+	}
+	writeJSON(w, http.StatusOK, toAgentEndpointItem(*e))
 }

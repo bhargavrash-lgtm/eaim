@@ -1232,8 +1232,53 @@ or prior context suggests otherwise, it is wrong; trust this line.
   unaffected. Full writeup in `BUILT.md`'s `eami-api`/`eami-ui` sections
   and `BACKLOG.md`'s B-077/B-087/B-091 entries.
 
+- **2026-09-04 — B-164/B-165 built and live-verified end-to-end** (the
+  bundled brief B-164's own Part E and B-165's own recommendation asked
+  for): Discovery's identity-fragmentation gap closed via a nullable
+  `endpoints.gateway_agent_id UUID` FK (migration `000013`) + a new
+  `PATCH /v1/endpoints/{endpointId}/link-agent` admin route + a Discover-
+  drawer link control — B-074's `gateway_agents` identity model
+  deliberately untouched (`ON DELETE SET NULL`, no columns added there).
+  eami-agent's remote-config polling fixed via a brand-new service-key-
+  authenticated route, `GET /v1/agents/{agent_id}/config`
+  (`agent_config_remote.go`), resolving eami-agent's free-text `agent_id`
+  to a real `gateway_agents.id` via the new link — not a URL correction on
+  the existing JWT-gated route, which is structurally incompatible
+  (`requireRole` vs. `requireServiceKey`, confirmed via `middleware.go`).
+  **A second, independent bug in the same call chain found only by live-
+  verifying the real deployed proxy path, not eami-api's route in
+  isolation:** `eami-collector/cmd/collector/main.go` was wiring the wrong
+  config field (`APIKey` instead of `ServiceKey`, dead code since it was
+  parsed) into `ConfigProxyHandler`'s outbound credential — every real
+  collector-proxied config request would have 401'd even with the new
+  route in place. Fixed (one line). **A third, wholly unrelated production
+  bug found during this brief's own mandated live verification, logged
+  and fixed as B-166:** `GET /v1/endpoints` 500'd whenever a report's
+  `gpus` field is a genuine JSON `null` (`jsonb_array_length` throws on a
+  JSON-null scalar, which `COALESCE` cannot catch) — exactly what happens
+  whenever `enabled_scanners` excludes the GPU scanner, i.e. exactly the
+  config this brief's own feature delivers. Fixed via `NULLIF(...,
+  'null'::jsonb)` in the same 3 queries already being modified for the
+  identity link.
+  **Live-verified with a real running `eami-agent` binary, not just
+  curl:** the real collector's own server logs show repeated genuine
+  `POST /v1/ingest status=202` → `GET /v1/agent-config/{id} status=200`
+  cycles from an actual agent process on its real polling interval, after
+  a real `PATCH .../link-agent` linked its endpoint to a real
+  `gateway_agents` row. AC3 (no regression) confirmed live across
+  Discover/Agents/Paste Detection. A live recurrence of already-logged
+  B-021 (CRLF in `eami-collector/docker-entrypoint.sh`, the exact file
+  B-020 fixed) was hit and worked around to unblock verification —
+  disclosed as a recurrence, not a new B-ID; the real fix
+  (`.gitattributes` `eol=lf` pinning) is still not done. Full writeup in
+  `BUILT.md`'s `eami-api` section and `BACKLOG.md`'s B-164/B-165/B-166
+  entries.
+
 ## Last updated
-2026-09-04 by Claude Code — B-165 logged, HIGH priority, not fixed: two
+2026-09-04 by Claude Code — B-164/B-165 built and live-verified (see Active
+decision thread above); B-166 (a newly-discovered gpu_count 500 bug) found
+and fixed along the way. Previous entry, preserved below: B-165 logged,
+HIGH priority, not fixed: two
 priority clarifications on B-164's own findings, per explicit user
 direction. (1) eami-agent's remote-config polling has been silently,
 completely non-functional since it was built -- it calls a URL that does

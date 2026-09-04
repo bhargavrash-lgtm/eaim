@@ -185,6 +185,11 @@ func (s *Server) Handler() http.Handler {
 	r.With(s.requireServiceKey).Post("/v1/ingest/batch", s.IngestBatch)
 	r.With(s.requireServiceKey).Post("/v1/internal/token-usage", s.IngestTokenUsage)
 	r.With(s.requireServiceKey).Post("/v1/reports/paste-events", s.IngestPasteEvents)
+	// eami-agent's own remote-config poll (B-165) -- read-only, but still
+	// service-key gated like every other collector-facing route above: an
+	// eami-agent instance authenticates as the fleet/collector identity,
+	// never as a user.
+	r.With(s.requireServiceKey).Get("/v1/agents/{agent_id}/config", s.AgentRemoteConfig)
 
 	r.Group(func(r chi.Router) {
 		r.Use(s.jwtMiddleware)
@@ -221,6 +226,9 @@ func (s *Server) Handler() http.Handler {
 			r.Patch("/v1/gateway/agents/{agentId}", s.UpdateAgent)
 			r.Delete("/v1/gateway/agents/{agentId}", s.DeleteAgent)
 			r.Put("/v1/gateway/agents/{agentId}/config", s.UpdateAgentConfig)
+			// Endpoint <-> gateway agent identity link (B-164/B-165) --
+			// the only write path for endpoints.gateway_agent_id.
+			r.Patch("/v1/endpoints/{endpointId}/link-agent", s.LinkEndpointAgent)
 			r.Post("/v1/gateway/policies", s.CreatePolicy)
 			r.Put("/v1/gateway/policies/reorder", s.ReorderPolicies)
 			r.Post("/v1/gateway/policies/reorder", s.ReorderPolicies)

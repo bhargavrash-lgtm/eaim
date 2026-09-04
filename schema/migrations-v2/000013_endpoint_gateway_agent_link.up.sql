@@ -1,0 +1,24 @@
+-- B-164/B-165: endpoints.agent_id (eami-agent's own free-text config/
+-- hostname identity) and gateway_agents.id (a governed AI dispatch
+-- identity, UUID) share zero relationship today -- there is no way to
+-- trace a specific shadow-AI discovery event back to a specific governed
+-- agent identity. This sits at the literal seam between Discovery
+-- (Module 1) and Gateway (Module 2), now that they are separately-
+-- purchasable tiers.
+--
+-- Nullable, no automatic derivation: the two registration flows (IT
+-- deploys eami-agent; an admin registers a gateway agent via Settings)
+-- are structurally uncoordinated, so this is deliberately an explicit,
+-- admin-driven link, not an inferred one -- setting/clearing it is the
+-- new PATCH /v1/endpoints/{endpointId}/link-agent endpoint's whole job.
+-- ON DELETE SET NULL, not CASCADE: deleting a gateway_agents row must
+-- never delete discovery history for the endpoint that was linked to it.
+--
+-- A single nullable FK column, not a many-to-many join table: no
+-- evidence anywhere in the product of a real need for one endpoint to
+-- link to multiple governed agents (or vice versa) -- matches this
+-- codebase's own established preference for the simplest structure that
+-- solves the stated problem (B-078's single added column, action_paths'
+-- nullable-JSONB pattern) over speculative normalization.
+ALTER TABLE endpoints ADD COLUMN IF NOT EXISTS gateway_agent_id UUID REFERENCES gateway_agents(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_endpoints_gateway_agent ON endpoints(gateway_agent_id) WHERE gateway_agent_id IS NOT NULL;

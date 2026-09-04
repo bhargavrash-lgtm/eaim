@@ -3,9 +3,10 @@ import { Topbar } from '@/components/layout/Topbar'
 import { PageHeader } from '@/components/common/PageHeader'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
-import { useEndpoints, useEndpoint } from '@/hooks/useEndpoints'
+import { useEndpoints, useEndpoint, useLinkEndpointAgent } from '@/hooks/useEndpoints'
+import { useAgents } from '@/hooks/useAgents'
 import type { components } from '@/api/schema'
-import { Monitor, ChevronDown, ChevronRight, X, Search } from 'lucide-react'
+import { Monitor, ChevronDown, ChevronRight, X, Search, Link2, Link2Off } from 'lucide-react'
 
 type Endpoint = components['schemas']['Endpoint']
 type EndpointReport = components['schemas']['EndpointReport']
@@ -56,6 +57,56 @@ function Section({ title, count, children }: { title: string; count: number; chi
   )
 }
 
+// ── Linked governed agent (B-164/B-165) ─────────────────────────────────────
+//
+// endpoints.gateway_agent_id has no automatic derivation -- eami-agent's
+// own free-text discovery identity (agent_id/hostname) shares no
+// relationship with a real gateway_agents.id. This control is the only
+// place that link is ever set or cleared: an explicit admin decision, not
+// an inferred one.
+function LinkedAgentControl({ endpoint }: { endpoint: Endpoint }) {
+  const { data: agentsData } = useAgents()
+  const linkMutation = useLinkEndpointAgent()
+  const [pendingSelection, setPendingSelection] = useState<string | null>(null)
+
+  const agents = agentsData?.data ?? []
+  const linkedId = endpoint.gateway_agent_id ?? ''
+
+  function handleChange(value: string) {
+    setPendingSelection(value)
+    linkMutation.mutate(
+      { endpointId: endpoint.id, gatewayAgentId: value === '' ? null : value },
+      { onSettled: () => setPendingSelection(null) },
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 px-4 py-3">
+      <div className="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+        {linkedId ? <Link2 className="h-3.5 w-3.5" /> : <Link2Off className="h-3.5 w-3.5" />}
+        Linked governed agent
+      </div>
+      <select
+        value={pendingSelection ?? linkedId}
+        onChange={(e) => handleChange(e.target.value)}
+        disabled={linkMutation.isPending}
+        className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+      >
+        <option value="">Not linked</option>
+        {agents.map((a) => (
+          <option key={a.id} value={a.id}>{a.name}</option>
+        ))}
+      </select>
+      {linkMutation.isError && (
+        <p className="mt-1 text-xs text-red-600">Failed to update link. Try again.</p>
+      )}
+      <p className="mt-1.5 text-[11px] text-gray-400">
+        No automatic match exists between this endpoint's discovery identity and a governed agent — link it manually if you know who operates it.
+      </p>
+    </div>
+  )
+}
+
 // ── Slide-out drawer ─────────────────────────────────────────────────────────
 
 function EndpointDrawer({ endpointId, onClose }: { endpointId: string; onClose: () => void }) {
@@ -94,6 +145,14 @@ function EndpointDrawer({ endpointId, onClose }: { endpointId: string; onClose: 
                 </div>
               ))}
             </div>
+
+            {/* Linked governed agent (B-164/B-165). key={endpoint.id}
+                forces a fresh component instance per endpoint -- the
+                drawer never unmounts between row clicks (only its
+                endpointId prop changes), so without this key a pending
+                mutation/selection for one endpoint could briefly leak
+                into another endpoint's control (code-review finding). */}
+            <LinkedAgentControl key={endpoint.id} endpoint={endpoint} />
 
             {/* MCP Servers — now MCPServer[] directly */}
             <Section title="MCP Servers" count={report.mcp_servers?.length ?? 0}>

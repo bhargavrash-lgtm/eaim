@@ -4,6 +4,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -223,12 +224,34 @@ type AgentEndpoint struct {
 	ModelCount   int64
 	MCPCount     int64
 	GPUCount     int64 // from latest report JSONB
+	// GatewayAgentID/GatewayAgentName (B-164/B-165) are nil unless this
+	// endpoint has been explicitly linked, via LinkEndpointToGatewayAgent,
+	// to a real gateway_agents row -- there is no automatic derivation
+	// (see 000013_endpoint_gateway_agent_link.up.sql's own doc comment for
+	// why). GatewayAgentName is denormalised via a LEFT JOIN purely for
+	// display; the FK is the only real, load-bearing link.
+	GatewayAgentID   *uuid.UUID
+	GatewayAgentName *string
 }
 
 // AgentEndpointWithReport extends AgentEndpoint with the latest report blob.
 type AgentEndpointWithReport struct {
 	AgentEndpoint
 	LatestReport json.RawMessage // nil when no reports have been ingested yet
+}
+
+// applyGatewayAgentLink copies a scanned (nullable) gateway_agent_id/name
+// pair onto e, leaving both fields nil when unset -- shared by every
+// AgentEndpoint-scanning query so the nil-vs-set convention stays
+// identical everywhere it's read (B-164/B-165).
+func applyGatewayAgentLink(e *AgentEndpoint, id pgtype.UUID, name pgtype.Text) {
+	if id.Valid {
+		v := uuid.UUID(id.Bytes)
+		e.GatewayAgentID = &v
+	}
+	if name.Valid {
+		e.GatewayAgentName = &name.String
+	}
 }
 
 // GetDefaultOrgID returns the UUID of the oldest org. Used by service-key-
@@ -390,13 +413,15 @@ SELECT
 	(SELECT COUNT(*) FROM endpoint_model_files WHERE endpoint_id = e.id) AS model_count,
 	(SELECT COUNT(*) FROM endpoint_mcp_servers WHERE endpoint_id = e.id) AS mcp_count,
 	COALESCE(
-		(SELECT jsonb_array_length(er.report->'gpus')
+		(SELECT jsonb_array_length(NULLIF(er.report->'gpus', 'null'::jsonb))
 		 FROM endpoint_reports er
 		 WHERE er.endpoint_id = e.id
 		 ORDER BY er.collected_at DESC LIMIT 1),
 		0
-	) AS gpu_count
+	) AS gpu_count,
+	e.gateway_agent_id, ga.name
 FROM endpoints e
+LEFT JOIN gateway_agents ga ON ga.id = e.gateway_agent_id
 WHERE e.org_id = $1
 ORDER BY e.last_seen DESC
 LIMIT $2 OFFSET $3`
@@ -436,30 +461,35 @@ SELECT
 	(SELECT COUNT(*) FROM endpoint_model_files WHERE endpoint_id = e.id) AS model_count,
 	(SELECT COUNT(*) FROM endpoint_mcp_servers WHERE endpoint_id = e.id) AS mcp_count,
 	COALESCE(
-		(SELECT jsonb_array_length(er.report->'gpus')
+		(SELECT jsonb_array_length(NULLIF(er.report->'gpus', 'null'::jsonb))
 		 FROM endpoint_reports er
 		 WHERE er.endpoint_id = e.id
 		 ORDER BY er.collected_at DESC LIMIT 1),
 		0
-	) AS gpu_count
+	) AS gpu_count,
+	e.gateway_agent_id, ga.name
 FROM endpoints e
+LEFT JOIN gateway_agents ga ON ga.id = e.gateway_agent_id
 WHERE e.id = $1 AND e.org_id = $2`
 
 // GetAgentEndpoint returns a single agent endpoint by ID.
 func (q *Queries) GetAgentEndpoint(ctx context.Context, id, orgID uuid.UUID) (*AgentEndpoint, error) {
 	var e AgentEndpoint
-	var aid, aorgID pgtype.UUID
+	var aid, aorgID, gatewayAgentID pgtype.UUID
+	var gatewayAgentName pgtype.Text
 	if err := q.db.QueryRow(ctx, getAgentEndpointSQL,
 		toPgtypeUUID(id), toPgtypeUUID(orgID),
 	).Scan(
 		&aid, &aorgID, &e.AgentID, &e.Hostname, &e.AgentVersion, &e.OSInfo,
 		&e.LastSeen, &e.FirstSeen, &e.RiskScore,
 		&e.AIAppCount, &e.ModelCount, &e.MCPCount, &e.GPUCount,
+		&gatewayAgentID, &gatewayAgentName,
 	); err != nil {
 		return nil, err
 	}
 	e.ID = uuid.UUID(aid.Bytes)
 	e.OrgID = uuid.UUID(aorgID.Bytes)
+	applyGatewayAgentLink(&e, gatewayAgentID, gatewayAgentName)
 	return &e, nil
 }
 
@@ -471,49 +501,135 @@ SELECT
 	(SELECT COUNT(*) FROM endpoint_model_files WHERE endpoint_id = e.id) AS model_count,
 	(SELECT COUNT(*) FROM endpoint_mcp_servers WHERE endpoint_id = e.id) AS mcp_count,
 	COALESCE(
-		(SELECT jsonb_array_length(er.report->'gpus')
+		(SELECT jsonb_array_length(NULLIF(er.report->'gpus', 'null'::jsonb))
 		 FROM endpoint_reports er
 		 WHERE er.endpoint_id = e.id
 		 ORDER BY er.collected_at DESC LIMIT 1),
 		0
 	) AS gpu_count,
+	e.gateway_agent_id, ga.name,
 	(SELECT er.report
 	 FROM endpoint_reports er
 	 WHERE er.endpoint_id = e.id
 	 ORDER BY er.collected_at DESC LIMIT 1) AS latest_report
 FROM endpoints e
+LEFT JOIN gateway_agents ga ON ga.id = e.gateway_agent_id
 WHERE e.id = $1 AND e.org_id = $2`
 
 // GetAgentEndpointWithReport returns an endpoint including its latest report blob.
 func (q *Queries) GetAgentEndpointWithReport(ctx context.Context, id, orgID uuid.UUID) (*AgentEndpointWithReport, error) {
 	var e AgentEndpointWithReport
-	var aid, aorgID pgtype.UUID
+	var aid, aorgID, gatewayAgentID pgtype.UUID
+	var gatewayAgentName pgtype.Text
 	if err := q.db.QueryRow(ctx, getAgentEndpointWithReportSQL,
 		toPgtypeUUID(id), toPgtypeUUID(orgID),
 	).Scan(
 		&aid, &aorgID, &e.AgentID, &e.Hostname, &e.AgentVersion, &e.OSInfo,
 		&e.LastSeen, &e.FirstSeen, &e.RiskScore,
 		&e.AIAppCount, &e.ModelCount, &e.MCPCount, &e.GPUCount,
+		&gatewayAgentID, &gatewayAgentName,
 		&e.LatestReport,
 	); err != nil {
 		return nil, err
 	}
 	e.ID = uuid.UUID(aid.Bytes)
 	e.OrgID = uuid.UUID(aorgID.Bytes)
+	applyGatewayAgentLink(&e.AgentEndpoint, gatewayAgentID, gatewayAgentName)
 	return &e, nil
 }
 
 func scanAgentEndpointRows(rows pgx.Rows) (AgentEndpoint, error) {
 	var e AgentEndpoint
-	var id, orgID pgtype.UUID
+	var id, orgID, gatewayAgentID pgtype.UUID
+	var gatewayAgentName pgtype.Text
 	if err := rows.Scan(
 		&id, &orgID, &e.AgentID, &e.Hostname, &e.AgentVersion, &e.OSInfo,
 		&e.LastSeen, &e.FirstSeen, &e.RiskScore,
 		&e.AIAppCount, &e.ModelCount, &e.MCPCount, &e.GPUCount,
+		&gatewayAgentID, &gatewayAgentName,
 	); err != nil {
 		return e, err
 	}
 	e.ID = uuid.UUID(id.Bytes)
 	e.OrgID = uuid.UUID(orgID.Bytes)
+	applyGatewayAgentLink(&e, gatewayAgentID, gatewayAgentName)
 	return e, nil
+}
+
+// ── Endpoint ↔ gateway agent link (B-164/B-165) ─────────────────────────────
+//
+// endpoints.gateway_agent_id has no automatic derivation -- an admin's
+// explicit action via LinkEndpointToGatewayAgent is the only write path.
+// ResolveEndpointGatewayAgent is the read path the new service-key remote-
+// config route (B-165) uses, keyed on eami-agent's own free-text agent_id
+// rather than an endpoints.id, since that's all a polling agent ever has.
+
+// ErrGatewayAgentNotFound is returned by LinkEndpointToGatewayAgent when the
+// caller names a gateway_agents row that doesn't exist in the endpoint's own
+// org -- kept distinct from pgx.ErrNoRows (endpoint itself not found) so the
+// HTTP handler can return the right 404 message for each case.
+var ErrGatewayAgentNotFound = errors.New("store: gateway agent not found in this org")
+
+// LinkEndpointToGatewayAgentParams holds parameters for LinkEndpointToGatewayAgent.
+type LinkEndpointToGatewayAgentParams struct {
+	EndpointID     uuid.UUID
+	OrgID          uuid.UUID
+	GatewayAgentID *uuid.UUID // nil clears the link
+}
+
+// LinkEndpointToGatewayAgent sets or clears endpoints.gateway_agent_id.
+// Both the endpoint and (when GatewayAgentID is non-nil) the target
+// gateway_agents row are validated as belonging to OrgID before the write,
+// so one org's admin can never link an endpoint to -- or discover the mere
+// existence of -- another org's agent by UUID guessing. Returns
+// pgx.ErrNoRows if the endpoint doesn't exist in this org, or
+// ErrGatewayAgentNotFound if a non-nil GatewayAgentID doesn't.
+func (q *Queries) LinkEndpointToGatewayAgent(ctx context.Context, p LinkEndpointToGatewayAgentParams) error {
+	if p.GatewayAgentID != nil {
+		var exists bool
+		if err := q.db.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM gateway_agents WHERE id = $1 AND org_id = $2)`,
+			toPgtypeUUID(*p.GatewayAgentID), toPgtypeUUID(p.OrgID),
+		).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrGatewayAgentNotFound
+		}
+	}
+
+	tag, err := q.db.Exec(ctx,
+		`UPDATE endpoints SET gateway_agent_id = $1 WHERE id = $2 AND org_id = $3`,
+		toPgtypeUUIDPtr(p.GatewayAgentID), toPgtypeUUID(p.EndpointID), toPgtypeUUID(p.OrgID),
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+// ResolveEndpointGatewayAgent looks up which (if any) gateway_agents row an
+// endpoint is linked to, keyed on the same (org_id, agent_id) pair
+// UpsertAgentEndpoint itself upserts on. Returns pgx.ErrNoRows if no such
+// endpoint has ever reported in at all; a nil *uuid.UUID with a nil error
+// means the endpoint exists but isn't linked to any governed agent yet --
+// callers (the B-165 remote-config route) treat that the same as "not
+// registered," matching eami-agent's own existing 404-is-not-an-error
+// contract.
+func (q *Queries) ResolveEndpointGatewayAgent(ctx context.Context, orgID uuid.UUID, agentID string) (*uuid.UUID, error) {
+	var gatewayAgentID pgtype.UUID
+	if err := q.db.QueryRow(ctx,
+		`SELECT gateway_agent_id FROM endpoints WHERE org_id = $1 AND agent_id = $2`,
+		toPgtypeUUID(orgID), agentID,
+	).Scan(&gatewayAgentID); err != nil {
+		return nil, err
+	}
+	if !gatewayAgentID.Valid {
+		return nil, nil
+	}
+	id := uuid.UUID(gatewayAgentID.Bytes)
+	return &id, nil
 }

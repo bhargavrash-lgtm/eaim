@@ -373,6 +373,19 @@ components:
         gpu_count:      { type: integer }
         risk_score:     { type: number, minimum: 0, maximum: 100 }
         latest_report:  { $ref: '#/components/schemas/EndpointReport' }
+        gateway_agent_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Set only when an admin has explicitly linked this endpoint's
+            discovery identity to a real gateway_agents row (B-164/B-165).
+            No automatic derivation exists between eami-agent's own
+            free-text agent_id and a governed gateway_agents.id.
+        gateway_agent_name:
+          type: string
+          nullable: true
+          description: "Denormalised name of the linked gateway agent, for display only."
 
     # ── Gateway: Agents ──────────────────────────────────
     Agent:
@@ -1026,6 +1039,51 @@ paths:
               schema: { $ref: '#/components/schemas/Endpoint' }
         '404':
           description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /v1/endpoints/{endpointId}/link-agent:
+    patch:
+      tags: [endpoints]
+      summary: Link (or clear) an endpoint's governed gateway agent identity
+      description: >-
+        Sets or clears endpoints.gateway_agent_id (B-164/B-165) -- the only
+        write path for that column. There is no automatic derivation
+        between eami-agent's own free-text discovery identity and a real
+        gateway_agents.id, so this is always an explicit admin action.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: endpointId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                gateway_agent_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: "The gateway_agents.id to link, or null to clear the link."
+      responses:
+        '200':
+          description: Updated endpoint
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Endpoint' }
+        '400':
+          description: Invalid gateway_agent_id, or it doesn't exist in this org
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Endpoint not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
