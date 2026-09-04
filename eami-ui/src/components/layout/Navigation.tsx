@@ -20,7 +20,7 @@ export interface NavItem {
   label: string
   path: string
   icon: LucideIcon
-  group: 'main' | 'gateway' | 'ops' | 'admin'
+  group: 'main' | 'gateway' | 'approvals' | 'ops' | 'admin'
   badgeKey?: 'pendingApprovals'
 }
 
@@ -32,7 +32,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Tools', path: '/gateway/tools', icon: Wrench, group: 'gateway' },
   { label: 'Workflows', path: '/gateway/workflows', icon: Workflow, group: 'gateway' },
   { label: 'Nodes', path: '/gateway/nodes', icon: Network, group: 'gateway' },
-  { label: 'Approvals', path: '/approvals', icon: ClipboardCheck, group: 'ops', badgeKey: 'pendingApprovals' },
+  { label: 'Approvals', path: '/approvals', icon: ClipboardCheck, group: 'approvals', badgeKey: 'pendingApprovals' },
   { label: 'FinOps', path: '/finops', icon: DollarSign, group: 'ops' },
   { label: 'Memory', path: '/memory', icon: Brain, group: 'ops' },
   { label: 'Paste Detection', path: '/paste-events', icon: Copy, group: 'ops' },
@@ -44,6 +44,7 @@ export const NAV_ITEMS: NavItem[] = [
 export const NAV_GROUPS: { key: NavItem['group']; label: string }[] = [
   { key: 'main', label: 'Overview' },
   { key: 'gateway', label: 'Gateway' },
+  { key: 'approvals', label: 'Approvals' },
   { key: 'ops', label: 'Operations' },
   { key: 'admin', label: 'Admin' },
 ]
