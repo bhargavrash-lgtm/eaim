@@ -97,11 +97,11 @@ func TestDispatchApproved_AIProviderConnector_UnchangedConfig_Dispatches(t *test
 	req.Tool = "claude"
 	req.Action = "messages"
 	req.ResolvedToolID = toolID.String()
-	req.ResolvedConfigHash = ComputeConfigHash("ai_provider", "claude", nil, nil)
+	req.ResolvedConfigHash = ComputeConfigHash("ai_provider", "claude", nil, nil, nil)
 
 	approvalID := insertPendingApproval(t, env, req)
 
-	body, err := env.router.dispatchApproved(context.Background(), approvalID, req)
+	body, _, err := env.router.dispatchApproved(context.Background(), approvalID, req)
 	if err != nil {
 		t.Fatalf("dispatchApproved: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestDispatchApproved_AIProviderConnector_CredentialsRotatedMidHold_FailsClo
 	req.ResolvedToolID = toolID.String()
 	// Pinned hash reflects the ORIGINAL credentials -- what a human
 	// approver's review would have been based on.
-	req.ResolvedConfigHash = ComputeConfigHash("ai_provider", "claude", originalCreds, nil)
+	req.ResolvedConfigHash = ComputeConfigHash("ai_provider", "claude", originalCreds, nil, nil)
 	approvalID := insertPendingApproval(t, env, req)
 
 	// The exact attack this fix closes: while the escalation sits
@@ -163,7 +163,7 @@ func TestDispatchApproved_AIProviderConnector_CredentialsRotatedMidHold_FailsClo
 	}
 
 	// Now the approval is (hypothetically) approved and resume is attempted.
-	_, err := env.router.dispatchApproved(context.Background(), approvalID, req)
+	_, _, err := env.router.dispatchApproved(context.Background(), approvalID, req)
 	if err == nil {
 		t.Fatal("expected dispatchApproved to refuse resuming against changed credentials, got nil error")
 	}
@@ -175,6 +175,112 @@ func TestDispatchApproved_AIProviderConnector_CredentialsRotatedMidHold_FailsClo
 	}
 	if outcome := resumeOutcome(t, env, approvalID); outcome != "config_changed" {
 		t.Errorf("resume_outcome = %q, want \"config_changed\"", outcome)
+	}
+}
+
+// TestDispatchApproved_AIProviderConnector_RedactionRulesWeakenedMidHold_FailsClosed
+// (B-156/B-167) is the exact adversarial scenario both this brief's
+// mandatory code-review AND security-review passes independently flagged:
+// a lower-privileged actor (one who cannot approve/deny this specific
+// escalation, and whom the approver has no visibility into having acted)
+// weakens a connector's redaction_rules during the hold window, hoping the
+// resumed dispatch will silently send more of the original sensitive
+// content externally than the approver believed they were authorizing.
+// Mirrors TestDispatchApproved_AIProviderConnector_CredentialsRotatedMidHold_FailsClosed
+// exactly, proving redaction_rules is now folded into ComputeConfigHash's
+// fingerprint the same way credentials/base_url/action_paths already are.
+func TestDispatchApproved_AIProviderConnector_RedactionRulesWeakenedMidHold_FailsClosed(t *testing.T) {
+	env := newApprovalTestEnv(t, 5*time.Second)
+
+	toolID := uuid.New()
+	if _, err := env.pool.Exec(context.Background(), `
+		INSERT INTO gateway_tools (id, org_id, name, type, auth_type, provider, audit_mode, redaction_rules)
+		VALUES ($1, $2, $3, 'ai_provider', 'api_key', $4, 'full', NULL)
+	`, toolID, env.orgID, "claude", "claude"); err != nil {
+		t.Fatalf("insert ai_provider connector (redaction_rules NULL -- fail-safe default, enabled): %v", err)
+	}
+
+	adapter := &fakeProviderAdapter{name: "claude"}
+	env.router.aiProviderRouter = aiprovider.New(env.pool, nil, map[string]aiprovider.Adapter{"claude": adapter})
+
+	req := env.newRequest()
+	req.Tool = "claude"
+	req.Action = "messages"
+	req.ResolvedToolID = toolID.String()
+	// Pinned hash reflects the ORIGINAL redaction_rules (NULL/default-
+	// enabled) -- what a human approver's review would have been based on,
+	// even though the approval UI itself never displays this setting.
+	req.ResolvedConfigHash = ComputeConfigHash("ai_provider", "claude", nil, nil, nil)
+	approvalID := insertPendingApproval(t, env, req)
+
+	// The exact attack this fix closes: while the escalation sits
+	// "pending", an admin/operator-role action disables redaction on the
+	// connector -- a real UPDATE against the real row, not simulated.
+	if _, err := env.pool.Exec(context.Background(),
+		`UPDATE gateway_tools SET redaction_rules = $1 WHERE id = $2`, []byte(`{"enabled": false}`), toolID); err != nil {
+		t.Fatalf("simulate mid-hold redaction_rules weakening: %v", err)
+	}
+
+	_, redactedCount, err := env.router.dispatchApproved(context.Background(), approvalID, req)
+	if err == nil {
+		t.Fatal("expected dispatchApproved to refuse resuming against weakened redaction_rules, got nil error")
+	}
+	if !strings.Contains(err.Error(), "configuration changed") {
+		t.Errorf("expected a clear config-changed error, got: %v", err)
+	}
+	if adapter.gotCalls != 0 {
+		t.Fatalf("the weakened-redaction adapter call must never happen -- fail-closed was bypassed (adapter called %d times)", adapter.gotCalls)
+	}
+	if redactedCount != nil {
+		t.Errorf("redactedCount = %v, want nil -- no real Router.Dispatch call happened", redactedCount)
+	}
+	if outcome := resumeOutcome(t, env, approvalID); outcome != "config_changed" {
+		t.Errorf("resume_outcome = %q, want \"config_changed\"", outcome)
+	}
+}
+
+// TestDispatchApproved_AIProviderConnector_RedactedCount_PropagatesThroughResume
+// (B-156/B-167) proves the OTHER half of the code-review's finding: when a
+// resume genuinely reaches Router.Dispatch, the real redaction count comes
+// back through dispatchApproved's own return value as a non-nil *int
+// (never silently 0-as-nil-in-disguise), which is what
+// cmd/gateway/dispatcher.go's resolution-audit-entry construction depends
+// on to distinguish "redaction ran and matched nothing" (Valid:true, 0)
+// from "never reached Router.Dispatch at all" (Valid:false / nil).
+func TestDispatchApproved_AIProviderConnector_RedactedCount_PropagatesThroughResume(t *testing.T) {
+	env := newApprovalTestEnv(t, 5*time.Second)
+
+	toolID := uuid.New()
+	if _, err := env.pool.Exec(context.Background(), `
+		INSERT INTO gateway_tools (id, org_id, name, type, auth_type, provider, audit_mode)
+		VALUES ($1, $2, $3, 'ai_provider', 'api_key', $4, 'full')
+	`, toolID, env.orgID, "claude", "claude"); err != nil {
+		t.Fatalf("insert ai_provider connector: %v", err)
+	}
+
+	adapter := &fakeProviderAdapter{name: "claude"}
+	env.router.aiProviderRouter = aiprovider.New(env.pool, nil, map[string]aiprovider.Adapter{"claude": adapter})
+
+	req := env.newRequest()
+	req.Tool = "claude"
+	req.Action = "messages"
+	req.ResolvedToolID = toolID.String()
+	req.ResolvedConfigHash = ComputeConfigHash("ai_provider", "claude", nil, nil, nil)
+	req.Parameters = map[string]any{"text": "contact me at real@example.com"}
+	approvalID := insertPendingApproval(t, env, req)
+
+	_, redactedCount, err := env.router.dispatchApproved(context.Background(), approvalID, req)
+	if err != nil {
+		t.Fatalf("dispatchApproved: %v", err)
+	}
+	if redactedCount == nil {
+		t.Fatal("redactedCount = nil, want a real non-nil count -- Router.Dispatch genuinely ran")
+	}
+	if *redactedCount != 1 {
+		t.Errorf("redactedCount = %d, want 1 (one email matched)", *redactedCount)
+	}
+	if adapter.gotCalls != 1 {
+		t.Fatalf("expected exactly 1 real dispatch, got %d", adapter.gotCalls)
 	}
 }
 
@@ -200,7 +306,7 @@ func TestDispatchApproved_RestAPITool_BaseURLChangedMidHold_FailsClosed(t *testi
 	req.Tool = "real-tool"
 	req.Action = "call"
 	req.ResolvedToolID = toolID.String()
-	req.ResolvedConfigHash = ComputeConfigHash("rest_api", originalURL, nil, nil)
+	req.ResolvedConfigHash = ComputeConfigHash("rest_api", originalURL, nil, nil, nil)
 	approvalID := insertPendingApproval(t, env, req)
 
 	// Real mid-hold edit: base_url swapped to a different (here,
@@ -211,7 +317,7 @@ func TestDispatchApproved_RestAPITool_BaseURLChangedMidHold_FailsClosed(t *testi
 		t.Fatalf("simulate mid-hold base_url change: %v", err)
 	}
 
-	_, err := env.router.dispatchApproved(context.Background(), approvalID, req)
+	_, _, err := env.router.dispatchApproved(context.Background(), approvalID, req)
 	if err == nil {
 		t.Fatal("expected dispatchApproved to refuse resuming against a changed base_url, got nil error")
 	}
@@ -244,7 +350,7 @@ func TestDispatchApproved_ConnectorDeletedMidHold_FailsClosed(t *testing.T) {
 	req := env.newRequest()
 	req.Tool = "claude"
 	req.ResolvedToolID = toolID.String()
-	req.ResolvedConfigHash = ComputeConfigHash("ai_provider", "claude", []byte("creds"), nil)
+	req.ResolvedConfigHash = ComputeConfigHash("ai_provider", "claude", []byte("creds"), nil, nil)
 	approvalID := insertPendingApproval(t, env, req)
 
 	// Real mid-hold deletion.
@@ -252,7 +358,7 @@ func TestDispatchApproved_ConnectorDeletedMidHold_FailsClosed(t *testing.T) {
 		t.Fatalf("simulate mid-hold connector deletion: %v", err)
 	}
 
-	_, err := env.router.dispatchApproved(context.Background(), approvalID, req)
+	_, _, err := env.router.dispatchApproved(context.Background(), approvalID, req)
 	if err == nil {
 		t.Fatal("expected dispatchApproved to refuse resuming against a deleted connector, got nil error")
 	}
@@ -295,7 +401,7 @@ func TestDispatchApproved_ActionPathsChangedMidHold_BaseURLUnchanged_FailsClosed
 	req.ResolvedToolID = toolID.String()
 	// Pinned hash includes the ORIGINAL action_paths -- what the approver's
 	// review of "transfer -> POST /payments/transfer" was based on.
-	req.ResolvedConfigHash = ComputeConfigHash("rest_api", baseURL, nil, originalPaths)
+	req.ResolvedConfigHash = ComputeConfigHash("rest_api", baseURL, nil, originalPaths, nil)
 	approvalID := insertPendingApproval(t, env, req)
 
 	// Real mid-hold edit: base_url and credentials both left completely
@@ -307,7 +413,7 @@ func TestDispatchApproved_ActionPathsChangedMidHold_BaseURLUnchanged_FailsClosed
 		t.Fatalf("simulate mid-hold action_paths change: %v", err)
 	}
 
-	_, err := env.router.dispatchApproved(context.Background(), approvalID, req)
+	_, _, err := env.router.dispatchApproved(context.Background(), approvalID, req)
 	if err == nil {
 		t.Fatal("expected dispatchApproved to refuse resuming after action_paths changed mid-hold (base_url/credentials unchanged), got nil error")
 	}
@@ -330,7 +436,7 @@ func TestDispatchApproved_UnregisteredTool_FallsBackToStaticProxy(t *testing.T) 
 	// escalation time, exactly like every escalation before this brief.
 	approvalID := insertPendingApproval(t, env, req)
 
-	body, err := env.router.dispatchApproved(context.Background(), approvalID, req)
+	body, _, err := env.router.dispatchApproved(context.Background(), approvalID, req)
 	if err != nil {
 		t.Fatalf("dispatchApproved: %v", err)
 	}
@@ -351,7 +457,7 @@ func TestDispatchApproved_NilRouters_FallsBackToStaticProxy(t *testing.T) {
 	req := env.newRequest()
 	approvalID := insertPendingApproval(t, env, req)
 
-	body, err := env.router.dispatchApproved(context.Background(), approvalID, req)
+	body, _, err := env.router.dispatchApproved(context.Background(), approvalID, req)
 	if err != nil {
 		t.Fatalf("dispatchApproved: %v", err)
 	}
@@ -367,24 +473,24 @@ func TestDispatchApproved_NilRouters_FallsBackToStaticProxy(t *testing.T) {
 // ─── ComputeConfigHash unit properties ─────────────────────────────────────
 
 func TestComputeConfigHash_DifferentTypesNeverCollide(t *testing.T) {
-	restHash := ComputeConfigHash("rest_api", "same-value", []byte("same-creds"), nil)
-	aiHash := ComputeConfigHash("ai_provider", "same-value", []byte("same-creds"), nil)
+	restHash := ComputeConfigHash("rest_api", "same-value", []byte("same-creds"), nil, nil)
+	aiHash := ComputeConfigHash("ai_provider", "same-value", []byte("same-creds"), nil, nil)
 	if restHash == aiHash {
 		t.Error("a rest_api and ai_provider row with identical base_url/provider and credential bytes must not hash equal")
 	}
 }
 
 func TestComputeConfigHash_CredentialChangeAlwaysChangesHash(t *testing.T) {
-	h1 := ComputeConfigHash("ai_provider", "claude", []byte("creds-v1"), nil)
-	h2 := ComputeConfigHash("ai_provider", "claude", []byte("creds-v2"), nil)
+	h1 := ComputeConfigHash("ai_provider", "claude", []byte("creds-v1"), nil, nil)
+	h2 := ComputeConfigHash("ai_provider", "claude", []byte("creds-v2"), nil, nil)
 	if h1 == h2 {
 		t.Error("different credential bytes must produce different hashes")
 	}
 }
 
 func TestComputeConfigHash_Deterministic(t *testing.T) {
-	h1 := ComputeConfigHash("rest_api", "https://example.com", []byte("creds"), nil)
-	h2 := ComputeConfigHash("rest_api", "https://example.com", []byte("creds"), nil)
+	h1 := ComputeConfigHash("rest_api", "https://example.com", []byte("creds"), nil, nil)
+	h2 := ComputeConfigHash("rest_api", "https://example.com", []byte("creds"), nil, nil)
 	if h1 != h2 {
 		t.Error("identical inputs must produce identical hashes")
 	}

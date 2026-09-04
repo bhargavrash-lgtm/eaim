@@ -280,6 +280,21 @@ export function AuditEntryDetailPanel({ entry, onClose }: { entry: AuditEntry; o
           </Field>
         )}
 
+        {/* redacted_count (B-156/B-167): a real, visible audited fact --
+            the COUNT of items redacted, never the redacted values
+            themselves. undefined means "not applicable" (non-ai_provider,
+            or a row from before this feature); 0 is a real, different
+            fact ("redaction ran and found nothing"), so the check is
+            explicit `!= null`, not a truthiness check that would also
+            hide a genuine 0. */}
+        {entry.redacted_count != null && (
+          <Field label="Sensitive content redacted">
+            {entry.redacted_count === 0
+              ? 'None -- redaction ran, no pattern matched'
+              : `${entry.redacted_count} item${entry.redacted_count === 1 ? '' : 's'} masked before this request left EAMI`}
+          </Field>
+        )}
+
         <Field label="Parameters">
           {entry.parameters && Object.keys(entry.parameters as object).length > 0 ? (
             <pre className="text-xs font-mono bg-gray-50 border border-gray-200 rounded p-3 overflow-x-auto whitespace-pre-wrap break-all">

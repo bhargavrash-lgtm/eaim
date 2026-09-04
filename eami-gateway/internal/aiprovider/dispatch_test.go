@@ -70,7 +70,7 @@ func (f *fakeAdapter) Dispatch(_ context.Context, creds Credentials, req Request
 
 func TestDispatch_NilRow_Rejected(t *testing.T) {
 	r := New(nil, nil, nil)
-	_, err := r.Dispatch(context.Background(), nil, "messages", nil)
+	_, _, err := r.Dispatch(context.Background(), nil, "messages", nil)
 	if err == nil {
 		t.Fatal("expected an error for a nil row, got nil")
 	}
@@ -79,7 +79,7 @@ func TestDispatch_NilRow_Rejected(t *testing.T) {
 func TestDispatch_NoProviderConfigured_Rejected(t *testing.T) {
 	r := New(nil, nil, map[string]Adapter{"claude": &fakeAdapter{provider: "claude"}})
 	row := &ToolRow{ID: "t1", Provider: ""}
-	_, err := r.Dispatch(context.Background(), row, "messages", nil)
+	_, _, err := r.Dispatch(context.Background(), row, "messages", nil)
 	if err == nil {
 		t.Fatal("expected an error for a connector with no provider configured, got nil")
 	}
@@ -88,7 +88,7 @@ func TestDispatch_NoProviderConfigured_Rejected(t *testing.T) {
 func TestDispatch_UnregisteredProvider_Rejected(t *testing.T) {
 	r := New(nil, nil, map[string]Adapter{"claude": &fakeAdapter{provider: "claude"}})
 	row := &ToolRow{ID: "t1", Provider: "gemini"} // no adapter registered for it
-	_, err := r.Dispatch(context.Background(), row, "messages", nil)
+	_, _, err := r.Dispatch(context.Background(), row, "messages", nil)
 	if err == nil {
 		t.Fatal("expected an error for an unregistered provider, got nil")
 	}
@@ -100,7 +100,7 @@ func TestDispatch_UnregisteredProvider_Rejected(t *testing.T) {
 func TestDispatch_CredentialsPresentButNoCipher_CleanRejection(t *testing.T) {
 	r := New(nil, nil, map[string]Adapter{"claude": &fakeAdapter{provider: "claude"}}) // cipher is nil
 	row := &ToolRow{ID: "t1", Provider: "claude", CredentialsEncrypted: []byte("not-empty")}
-	_, err := r.Dispatch(context.Background(), row, "messages", nil)
+	_, _, err := r.Dispatch(context.Background(), row, "messages", nil)
 	if err == nil {
 		t.Fatal("expected a clean rejection when credentials are stored but no cipher is configured, got nil")
 	}
@@ -113,7 +113,7 @@ func TestDispatch_UndecryptableCredentials_CleanRejection(t *testing.T) {
 	}
 	r := New(nil, toolCipher, map[string]Adapter{"claude": &fakeAdapter{provider: "claude"}})
 	row := &ToolRow{ID: "t1", Provider: "claude", CredentialsEncrypted: []byte("garbage-not-a-real-sealed-blob")}
-	_, err = r.Dispatch(context.Background(), row, "messages", nil)
+	_, _, err = r.Dispatch(context.Background(), row, "messages", nil)
 	if err == nil {
 		t.Fatal("expected a clean rejection for undecryptable credentials, got nil")
 	}
@@ -136,7 +136,7 @@ func TestDispatch_ValidCredentials_DecryptedAndPassedToAdapter(t *testing.T) {
 	row := &ToolRow{ID: "t1", Provider: "claude", CredentialsEncrypted: sealed}
 
 	params := map[string]any{"model": "claude-opus-4-6", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
-	resp, err := r.Dispatch(context.Background(), row, "messages", params)
+	resp, _, err := r.Dispatch(context.Background(), row, "messages", params)
 	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestDispatch_NoCredentialsStored_EmptyCredentialsPassed(t *testing.T) {
 	r := New(nil, nil, map[string]Adapter{"claude": adapter})
 	row := &ToolRow{ID: "t1", Provider: "claude"} // CredentialsEncrypted is nil
 
-	if _, err := r.Dispatch(context.Background(), row, "messages", nil); err != nil {
+	if _, _, err := r.Dispatch(context.Background(), row, "messages", nil); err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
 	if adapter.gotCreds.APIKey != "" {
@@ -180,7 +180,7 @@ func TestDispatch_AdapterError_Propagated(t *testing.T) {
 	r := New(nil, nil, map[string]Adapter{"claude": adapter})
 	row := &ToolRow{ID: "t1", Provider: "claude"}
 
-	_, err := r.Dispatch(context.Background(), row, "messages", nil)
+	_, _, err := r.Dispatch(context.Background(), row, "messages", nil)
 	if err == nil || !strings.Contains(err.Error(), "downstream boom") {
 		t.Errorf("expected the adapter's error to propagate, got: %v", err)
 	}

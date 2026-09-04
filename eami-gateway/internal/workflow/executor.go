@@ -148,7 +148,7 @@ func (e *Executor) runStep(ctx context.Context, template mcp.ActionContext, orgI
 		return sr
 	}
 	sr.ResolvedToolID = step.GatewayToolID
-	sr.ResolvedConfigHash = approval.ComputeConfigHash(conn.toolType, conn.baseURLOrProvider, conn.credentialsEncrypted, conn.configHashJSON())
+	sr.ResolvedConfigHash = approval.ComputeConfigHash(conn.toolType, conn.baseURLOrProvider, conn.credentialsEncrypted, conn.configHashJSON(), conn.redactionRules)
 
 	// Resolve this step's real params (static + extracted) before any
 	// policy preview or dispatch -- an extraction that can't resolve

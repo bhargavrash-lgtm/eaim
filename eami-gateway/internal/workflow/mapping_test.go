@@ -80,7 +80,12 @@ func TestExecutor_Run_Extraction_RealEndToEnd(t *testing.T) {
 	env.rules = allowAllRules()
 
 	toolA := env.insertAIProviderTool(t, "lookup-tool", "provider-lookup")
-	toolB := env.insertAIProviderTool(t, "notify-tool", "provider-notify")
+	// Redaction disabled for this connector -- this test proves EXTRACTION
+	// correctness (AC1: the real email extracted from step 1's response
+	// reaches step 2's real dispatched params unchanged), not redaction;
+	// see insertAIProviderToolNoRedaction's own doc comment for why an
+	// email-shaped fixture value would otherwise be masked here by design.
+	toolB := env.insertAIProviderToolNoRedaction(t, "notify-tool", "provider-notify")
 
 	// adapterA returns a real, structured response containing the field
 	// step B will extract -- fakeAdapter's own Dispatch (testenv_test.go)

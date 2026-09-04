@@ -95,7 +95,24 @@ type Request struct {
 // closure -- which already resolves the tool before policy evaluation --
 // can compute this once, at escalation time, without this package needing
 // its own extra resolve call at Submit() time.
-func ComputeConfigHash(toolType, baseURLOrProvider string, credentialsEncrypted []byte, actionPathsJSON []byte) string {
+// redactionRulesJSON (B-156/B-167) is included in the fingerprint for the
+// same reason actionPathsJSON already is: it's security-relevant config
+// for the SAME connector, and excluding it would reopen exactly the class
+// of TOCTOU gap this hash exists to close -- a lower-privileged actor
+// (one who cannot approve/deny, and who the approver has no visibility
+// into having acted) could otherwise weaken a connector's redaction_rules
+// during an escalation's hold window, and the resumed dispatch would
+// silently apply the WEAKENED config instead of the one the approver
+// implicitly reviewed. Found by this brief's own mandatory security review
+// (both the code-review and security-review passes independently flagged
+// the same gap when redaction_rules was first left out of this hash) --
+// any change to redaction_rules between escalation and resume now
+// correctly fails resume with "configuration changed," exactly like a
+// base_url/credentials/provider/action_paths change already does. This
+// applies uniformly to every direction of change (tightening OR
+// loosening) -- deliberately not special-cased, matching every other
+// field's existing all-or-nothing treatment here.
+func ComputeConfigHash(toolType, baseURLOrProvider string, credentialsEncrypted []byte, actionPathsJSON []byte, redactionRulesJSON []byte) string {
 	h := sha256.New()
 	h.Write([]byte(toolType))
 	h.Write([]byte{0})
@@ -104,6 +121,8 @@ func ComputeConfigHash(toolType, baseURLOrProvider string, credentialsEncrypted 
 	h.Write(credentialsEncrypted)
 	h.Write([]byte{0})
 	h.Write(actionPathsJSON)
+	h.Write([]byte{0})
+	h.Write(redactionRulesJSON)
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -144,6 +163,20 @@ type HoldOutcome struct {
 	ApprovedBy string
 	// DecisionReason is approval_requests.decision_reason, if any.
 	DecisionReason string
+	// RedactedCount (B-156/B-167) is the number of sensitive items masked
+	// by aiprovider.Router.Dispatch during the resumed dispatch. A pointer,
+	// not a bare int: nil means "redaction never ran for this resolution"
+	// (a denial, expiry, or any dispatchApproved fail-closed exit --
+	// config-changed, connector-deleted -- that never reached Router.
+	// Dispatch at all), while a non-nil pointer to 0 is a real, DIFFERENT
+	// fact ("Router.Dispatch ran and matched nothing"). Found by this
+	// brief's own mandatory code-review pass: an earlier draft used a bare
+	// int here, which meant every one of those fail-closed exits recorded
+	// the exact same value (0) as "redaction ran, found nothing" -- a
+	// false claim for a call that was blocked before redaction ever
+	// executed, reintroducing the NULL-vs-0 ambiguity this feature's own
+	// audit_log.redacted_count column was designed to avoid.
+	RedactedCount *int
 }
 
 // pendingEntry tracks one blocked Hold() call.
@@ -644,10 +677,11 @@ func (r *Router) outcomeFromStatus(ctx context.Context, approvalID string, req R
 		// the whole point of this fix; the original code checked for
 		// "allowed", which eami-api never writes.
 		slog.Info("approval: approved — resuming original call", "approval_id", approvalID)
-		tr, proxyErr := r.dispatchApproved(ctx, approvalID, req)
+		tr, redactedCount, proxyErr := r.dispatchApproved(ctx, approvalID, req)
 		return HoldOutcome{
 			Result: tr.Body, Err: proxyErr,
 			Resolved: true, Status: status, ApprovedBy: approvedBy, DecisionReason: decisionReason,
+			RedactedCount: redactedCount,
 		}
 
 	case "pending":
@@ -707,6 +741,13 @@ type resolvedConnectorConfig struct {
 	baseURLOrProvider    string // base_url for rest_api, provider for ai_provider
 	credentialsEncrypted []byte
 	actionPaths          map[string]toolrouter.ActionPathEntry
+	// redactionRules (B-156/B-167) is the raw JSONB bytes of gateway_tools.
+	// redaction_rules -- meaningful only for ai_provider, nil otherwise.
+	// Re-fetched fresh here for the same reason every other field on this
+	// struct is: a resumed dispatch must use the connector's CURRENT
+	// config, verified unchanged via ComputeConfigHash below, never a
+	// stale value carried from escalation time.
+	redactionRules []byte
 }
 
 // fetchResolvedConnector reads gateway_tools by (id, org_id) directly --
@@ -721,10 +762,10 @@ func (r *Router) fetchResolvedConnector(ctx context.Context, orgID, toolID strin
 	var baseURL, provider *string
 	var actionPathsRaw []byte
 	err := r.pool.QueryRow(ctx, `
-		SELECT type, auth_type, base_url, provider, credentials_encrypted, action_paths
+		SELECT type, auth_type, base_url, provider, credentials_encrypted, action_paths, redaction_rules
 		FROM gateway_tools
 		WHERE id = $1 AND org_id = $2
-	`, toolID, orgID).Scan(&cfg.toolType, &cfg.authType, &baseURL, &provider, &cfg.credentialsEncrypted, &actionPathsRaw)
+	`, toolID, orgID).Scan(&cfg.toolType, &cfg.authType, &baseURL, &provider, &cfg.credentialsEncrypted, &actionPathsRaw, &cfg.redactionRules)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return cfg, false, nil
@@ -782,24 +823,33 @@ func (r *Router) recordResumeOutcome(ctx context.Context, approvalID, outcome st
 // req.ResolvedToolID empty means Tool never resolved dynamically at
 // escalation time -- unaffected by any of this, same static-proxy
 // fallback as before any of this brief's fixes.
-func (r *Router) dispatchApproved(ctx context.Context, approvalID string, req Request) (proxy.ToolResponse, error) {
+// The *int return is the redaction count (B-156/B-167) from an
+// ai_provider resume's own Router.Dispatch call -- nil for every path
+// that never reaches Router.Dispatch (static fallback, rest_api, and
+// every early-exit failure: connector-deleted, config-changed, no
+// aiProviderRouter configured), matching HoldOutcome.RedactedCount's own
+// nil-means-not-applicable convention. Only the one return statement that
+// actually follows a real r.aiProviderRouter.Dispatch call produces a
+// non-nil pointer.
+func (r *Router) dispatchApproved(ctx context.Context, approvalID string, req Request) (proxy.ToolResponse, *int, error) {
 	if req.ResolvedToolID == "" {
 		r.recordResumeOutcome(ctx, approvalID, "static_fallback")
-		return r.fwd.Forward(ctx, proxy.ToolRequest{
+		tr, err := r.fwd.Forward(ctx, proxy.ToolRequest{
 			ToolName:  req.Tool,
 			Action:    req.Action,
 			Params:    req.Parameters,
 			SessionID: req.SessionID,
 		})
+		return tr, nil, err
 	}
 
 	cfg, found, err := r.fetchResolvedConnector(ctx, req.OrgID, req.ResolvedToolID)
 	if err != nil {
-		return proxy.ToolResponse{}, fmt.Errorf("approval: verify resolved connector %s: %w", req.ResolvedToolID, err)
+		return proxy.ToolResponse{}, nil, fmt.Errorf("approval: verify resolved connector %s: %w", req.ResolvedToolID, err)
 	}
 	if !found {
 		r.recordResumeOutcome(ctx, approvalID, "connector_deleted")
-		return proxy.ToolResponse{}, fmt.Errorf("approval: resolved connector %s no longer exists -- refusing to resume against an unknown destination", req.ResolvedToolID)
+		return proxy.ToolResponse{}, nil, fmt.Errorf("approval: resolved connector %s no longer exists -- refusing to resume against an unknown destination", req.ResolvedToolID)
 	}
 	// Re-marshaled (not the raw stored JSONB bytes) so this matches
 	// main.go's own canonical-form computation regardless of the stored
@@ -810,10 +860,10 @@ func (r *Router) dispatchApproved(ctx context.Context, approvalID string, req Re
 	if len(cfg.actionPaths) > 0 {
 		currentActionPathsJSON, _ = json.Marshal(cfg.actionPaths)
 	}
-	currentHash := ComputeConfigHash(cfg.toolType, cfg.baseURLOrProvider, cfg.credentialsEncrypted, currentActionPathsJSON)
+	currentHash := ComputeConfigHash(cfg.toolType, cfg.baseURLOrProvider, cfg.credentialsEncrypted, currentActionPathsJSON, cfg.redactionRules)
 	if currentHash != req.ResolvedConfigHash {
 		r.recordResumeOutcome(ctx, approvalID, "config_changed")
-		return proxy.ToolResponse{}, fmt.Errorf("approval: resolved connector %s configuration changed since this request was approved -- refusing to resume against a different destination than the approver reviewed", req.ResolvedToolID)
+		return proxy.ToolResponse{}, nil, fmt.Errorf("approval: resolved connector %s configuration changed since this request was approved -- refusing to resume against a different destination than the approver reviewed", req.ResolvedToolID)
 	}
 
 	// Identity+config verified unchanged -- dispatch via the pinned
@@ -825,21 +875,35 @@ func (r *Router) dispatchApproved(ctx context.Context, approvalID string, req Re
 	switch cfg.toolType {
 	case "ai_provider":
 		if r.aiProviderRouter == nil {
-			return proxy.ToolResponse{}, fmt.Errorf("approval: resolved connector %s is an ai_provider connector but no aiProviderRouter is configured", req.ResolvedToolID)
+			return proxy.ToolResponse{}, nil, fmt.Errorf("approval: resolved connector %s is an ai_provider connector but no aiProviderRouter is configured", req.ResolvedToolID)
 		}
 		row := &aiprovider.ToolRow{
 			ID:                   req.ResolvedToolID,
 			Provider:             cfg.baseURLOrProvider,
 			AuthType:             cfg.authType,
 			CredentialsEncrypted: cfg.credentialsEncrypted,
+			// RedactionRules (B-156/B-167): cfg.redactionRules has ALREADY
+			// been verified unchanged since escalation time by the
+			// ComputeConfigHash check above (found by this brief's own
+			// mandatory security review: an earlier draft fetched this
+			// fresh WITHOUT pinning it, letting a lower-privileged actor
+			// who cannot approve/deny -- and whom the approver has no
+			// visibility into having acted -- weaken a connector's
+			// redaction_rules during the hold window and have the
+			// resumed dispatch silently apply the weakened config. Now
+			// ANY change to redaction_rules between escalation and
+			// resume, in either direction, fails resume with
+			// "configuration changed," exactly like a base_url/
+			// credentials/provider/action_paths change already does.
+			RedactionRules: cfg.redactionRules,
 		}
-		resp, dispatchErr := r.aiProviderRouter.Dispatch(ctx, row, req.Action, req.Parameters)
+		resp, redactedCount, dispatchErr := r.aiProviderRouter.Dispatch(ctx, row, req.Action, req.Parameters)
 		r.recordResumeOutcome(ctx, approvalID, "dispatched")
-		return proxy.ToolResponse{Status: resp.StatusCode, Body: resp.Body}, dispatchErr
+		return proxy.ToolResponse{Status: resp.StatusCode, Body: resp.Body}, &redactedCount, dispatchErr
 
 	case "rest_api":
 		if r.toolRouter == nil {
-			return proxy.ToolResponse{}, fmt.Errorf("approval: resolved connector %s is a rest_api tool but no toolRouter is configured", req.ResolvedToolID)
+			return proxy.ToolResponse{}, nil, fmt.Errorf("approval: resolved connector %s is a rest_api tool but no toolRouter is configured", req.ResolvedToolID)
 		}
 		baseURL := cfg.baseURLOrProvider
 		row := &toolrouter.ToolRow{
@@ -857,7 +921,7 @@ func (r *Router) dispatchApproved(ctx context.Context, approvalID string, req Re
 			SessionID: req.SessionID,
 		})
 		r.recordResumeOutcome(ctx, approvalID, "dispatched")
-		return resp, dispatchErr
+		return resp, nil, dispatchErr
 
 	default:
 		// The pinned row's type itself changed since escalation (e.g.
@@ -866,7 +930,7 @@ func (r *Router) dispatchApproved(ctx context.Context, approvalID string, req Re
 		// as an explicit defensive case rather than assuming that
 		// invariant can never be violated.
 		r.recordResumeOutcome(ctx, approvalID, "config_changed")
-		return proxy.ToolResponse{}, fmt.Errorf("approval: resolved connector %s is no longer a dynamically-dispatchable type (%q)", req.ResolvedToolID, cfg.toolType)
+		return proxy.ToolResponse{}, nil, fmt.Errorf("approval: resolved connector %s is no longer a dynamically-dispatchable type (%q)", req.ResolvedToolID, cfg.toolType)
 	}
 }
 

@@ -205,6 +205,12 @@ type AuditEntryResp struct {
 	// Added to the API response by B-094; was previously written to
 	// audit_log but never read back anywhere.
 	DataHandling *string `json:"data_handling_designation,omitempty"`
+	// RedactedCount (B-156/B-167) is the number of sensitive items masked
+	// by eami-gateway's redaction step before this dispatch's real
+	// outbound call -- a count only, never the redacted content. Absent
+	// for every non-ai_provider call and every row written before this
+	// migration.
+	RedactedCount *int32 `json:"redacted_count,omitempty"`
 }
 
 type AuditListResponse struct {

@@ -123,6 +123,28 @@ func (e *workflowTestEnv) insertAIProviderTool(t *testing.T, name, provider stri
 	return id
 }
 
+// insertAIProviderToolNoRedaction is insertAIProviderTool plus an explicit
+// {"enabled": false} redaction_rules (B-156/B-167) -- for tests whose own
+// subject is unrelated to redaction (e.g. extraction-mapping correctness)
+// but whose fixture data happens to contain a real-shaped pattern (an
+// email address used as a realistic extracted field value), which would
+// otherwise be masked by Router.Dispatch's now-real redaction step before
+// reaching this test's fake adapter -- a correct, intended consequence of
+// redaction now running for every real ai_provider dispatch, not a bug to
+// route around silently. Left as its own small helper rather than adding
+// a parameter to insertAIProviderTool's 32 existing call sites.
+func (e *workflowTestEnv) insertAIProviderToolNoRedaction(t *testing.T, name, provider string) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := e.pool.Exec(context.Background(), `
+		INSERT INTO gateway_tools (id, org_id, name, type, auth_type, provider, redaction_rules)
+		VALUES ($1, $2, $3, 'ai_provider', 'api_key', $4, '{"enabled": false}'::jsonb)
+	`, id, e.orgID, name, provider); err != nil {
+		t.Fatalf("insert ai_provider tool %s (redaction disabled): %v", name, err)
+	}
+	return id
+}
+
 // template returns the run-level ActionContext (agent identity only --
 // Tool/Action/Parameters are always overwritten per step by the executor).
 func (e *workflowTestEnv) template() mcp.ActionContext {
@@ -268,7 +290,7 @@ func newDispatchEnv(t *testing.T, e *workflowTestEnv, adapters map[string]aiprov
 			switch {
 			case resolvedProvider != nil:
 				approvalReq.ResolvedToolID = resolvedProvider.ID
-				approvalReq.ResolvedConfigHash = approval.ComputeConfigHash("ai_provider", resolvedProvider.Provider, resolvedProvider.CredentialsEncrypted, nil)
+				approvalReq.ResolvedConfigHash = approval.ComputeConfigHash("ai_provider", resolvedProvider.Provider, resolvedProvider.CredentialsEncrypted, nil, nil)
 			case resolvedTool != nil:
 				baseURL := ""
 				if resolvedTool.BaseURL != nil {
@@ -279,7 +301,7 @@ func newDispatchEnv(t *testing.T, e *workflowTestEnv, adapters map[string]aiprov
 					actionPathsJSON, _ = json.Marshal(resolvedTool.ActionPaths)
 				}
 				approvalReq.ResolvedToolID = resolvedTool.ID
-				approvalReq.ResolvedConfigHash = approval.ComputeConfigHash("rest_api", baseURL, resolvedTool.CredentialsEncrypted, actionPathsJSON)
+				approvalReq.ResolvedConfigHash = approval.ComputeConfigHash("rest_api", baseURL, resolvedTool.CredentialsEncrypted, actionPathsJSON, nil)
 			}
 			approvalID, submitErr := approvalRouter.Submit(ctx, approvalReq)
 			if submitErr != nil {
@@ -309,7 +331,7 @@ func newDispatchEnv(t *testing.T, e *workflowTestEnv, adapters map[string]aiprov
 			switch {
 			case resolvedProvider != nil:
 				var presp aiprovider.Response
-				presp, proxyErr = aiProviderRouter.Dispatch(ctx, resolvedProvider, ac.Action, ac.Parameters)
+				presp, _, proxyErr = aiProviderRouter.Dispatch(ctx, resolvedProvider, ac.Action, ac.Parameters)
 				tr = proxy.ToolResponse{Status: presp.StatusCode, Body: presp.Body}
 			case resolvedTool != nil:
 				tr, proxyErr = toolRouter.Forward(ctx, resolvedTool, toolReq)

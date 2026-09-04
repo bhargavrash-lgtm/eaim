@@ -54,6 +54,20 @@ export type ToolType = 'mcp' | 'rest_api' | 'database' | 'ai_provider'
 // actually confirmed.
 export type ToolDataHandling = 'zero_retention' | 'standard_retention' | 'unknown'
 
+// RedactionRules (B-156/B-167) -- pattern-based redaction config for the
+// outbound ai_provider dispatch path. Carried as a loosely-typed shape
+// (not a strict discriminated union) since eami-gateway's own
+// redaction.Config is the source of truth for what's actually honored at
+// dispatch time; the admin UI only needs to display/edit this shape, not
+// interpret it. undefined/omitted means "no override -- the fail-safe
+// default applies" (redaction ON, every built-in pattern enabled).
+export type RedactionCustomPattern = { name: string; pattern: string }
+export type RedactionRules = {
+  enabled?: boolean
+  disabled_patterns?: string[]
+  custom_patterns?: RedactionCustomPattern[]
+}
+
 export type ToolWithActions = Omit<Tool, 'type'> & {
   type: ToolType
   action_paths?: Record<string, ActionPathMapping>
@@ -61,6 +75,7 @@ export type ToolWithActions = Omit<Tool, 'type'> & {
   audit_mode?: ToolAuditMode
   data_handling_designation?: ToolDataHandling
   data_handling_note?: string
+  redaction_rules?: RedactionRules
 }
 export type ToolCreateWithActions = Omit<ToolCreate, 'type'> & {
   type: ToolType
@@ -69,6 +84,7 @@ export type ToolCreateWithActions = Omit<ToolCreate, 'type'> & {
   audit_mode?: ToolAuditMode
   data_handling_designation?: ToolDataHandling
   data_handling_note?: string
+  redaction_rules?: RedactionRules
 }
 
 // ToolUpdate (B-045) -- PATCH /v1/gateway/tools/{toolId} isn't in
@@ -95,6 +111,16 @@ export type ToolUpdate = {
   audit_mode?: ToolAuditMode
   data_handling_designation?: ToolDataHandling
   data_handling_note?: string
+  // redaction_rules (B-156/B-167): omit the key entirely to leave the
+  // connector's current config unchanged; send an explicit `null` to
+  // clear an override back to the fail-safe default; send an object to
+  // set/replace it. Unlike action_paths (a map, where JSON `null` and an
+  // omitted key are indistinguishable to encoding/json on the Go side),
+  // this field's backend type is json.RawMessage, which preserves the
+  // literal `null` -- so TypeScript's own three-way `T | null |
+  // undefined` maps onto the real backend semantics exactly, no {}
+  // sentinel workaround needed.
+  redaction_rules?: RedactionRules | null
 }
 
 export function useTools() {

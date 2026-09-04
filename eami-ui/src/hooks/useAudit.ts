@@ -21,6 +21,12 @@ export interface AuditParams {
 // schema.ts, which the real codegen would just overwrite anyway.
 export type AuditEntry = components['schemas']['AuditEntry'] & {
   data_handling_designation?: ToolDataHandling
+  // redacted_count (B-156/B-167): the number of sensitive items masked
+  // before this dispatch's real outbound call -- a count only, never the
+  // redacted content. undefined for every non-ai_provider call and every
+  // row written before this migration -- a real 0 (redaction ran, found
+  // nothing) is a different, meaningful value, not the same as absent.
+  redacted_count?: number
 }
 
 export function useAudit(params?: AuditParams) {

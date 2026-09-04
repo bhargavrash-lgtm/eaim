@@ -1,0 +1,33 @@
+-- Pattern-based sensitive-data redaction on the ai_provider dispatch path
+-- (B-156 investigation, built as B-167). Two independent additions:
+--
+-- 1. gateway_tools.redaction_rules -- per-connector redaction config
+--    (B-156 Part C's own recommendation: per-connector, not global).
+--    Nullable JSONB, mirroring action_paths' (B-046) already-established
+--    "nullable JSONB, NULL = default behavior" pattern exactly, rather
+--    than inventing a new config-column shape. NULL means the fail-safe
+--    default applies (redaction ON, every built-in pattern -- email, SSN,
+--    credit card, API-key-shaped -- enabled, see eami-gateway/internal/
+--    redaction's DefaultConfig): a newly created ai_provider connector
+--    redacts by default, matching audit_mode/data_handling_designation's
+--    own precedent of defaulting to the SAFEST posture, never the most
+--    permissive. An admin can set {"enabled": false} to opt a specific
+--    connector out entirely, or {"disabled_patterns": [...]}/
+--    {"custom_patterns": [...]} to adjust what's matched without
+--    disabling redaction altogether.
+ALTER TABLE gateway_tools ADD COLUMN IF NOT EXISTS redaction_rules JSONB;
+
+-- 2. audit_log.redacted_count -- a real, visible, non-hashed count of how
+--    many sensitive items were masked for this dispatch, per B-156 Part
+--    C's own explicit recommendation -- NEVER the redacted values
+--    themselves (this brief's own contract: a redaction event is a real
+--    audited fact, but only its count). Mirrors data_handling_
+--    designation's (B-078) exact precedent: nullable, unconstrained, a
+--    per-call snapshot, NOT part of the audit.Writer.Write hash formula
+--    (confirmed directly against that code before this migration was
+--    written -- the hash covers prevHash, id, org_id, agent_name,
+--    tool_name, action, decision, and timestamp only). NULL (not 0) for
+--    every non-ai_provider dispatch and every row written before this
+--    migration -- 0 is a real, different fact ("redaction ran and found
+--    nothing to mask") that must not be confused with "not applicable".
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS redacted_count INTEGER;

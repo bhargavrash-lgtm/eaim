@@ -11,7 +11,8 @@ func (q *Queries) ListTools(ctx context.Context, orgID uuid.UUID) ([]GatewayTool
 	const sql = `
 SELECT id, org_id, name, type, auth_type, mcp_command, base_url,
        status, last_used, last_tested, created_at, action_paths,
-       provider, audit_mode, data_handling_designation, data_handling_note
+       provider, audit_mode, data_handling_designation, data_handling_note,
+       redaction_rules
 FROM gateway_tools
 WHERE org_id = $1
 ORDER BY name ASC`
@@ -30,6 +31,7 @@ ORDER BY name ASC`
 			&t.MCPCommand, &t.BaseURL, &t.Status,
 			&t.LastUsed, &t.LastTested, &t.CreatedAt, &t.ActionPaths,
 			&t.Provider, &t.AuditMode, &t.DataHandlingDesignation, &t.DataHandlingNote,
+			&t.RedactionRules,
 		); err != nil {
 			return nil, err
 		}
@@ -71,6 +73,11 @@ type CreateToolParams struct {
 	// DataHandlingNote is nil for "not set" -- unlike DataHandlingDesignation,
 	// this column has no NOT NULL/default, so nil is a real, meaningful value.
 	DataHandlingNote *string
+	// RedactionRules is the raw JSONB bytes for gateway_tools.redaction_rules
+	// (B-156/B-167), or nil for a connector with no override (the fail-safe
+	// default applies at dispatch time -- see eami-gateway/internal/
+	// redaction.DefaultConfig).
+	RedactionRules []byte
 }
 
 // CreateTool inserts a new gateway tool and returns it. AuditMode defaults
@@ -86,11 +93,12 @@ func (q *Queries) CreateTool(ctx context.Context, p CreateToolParams) (GatewayTo
 		p.DataHandlingDesignation = "unknown"
 	}
 	const sql = `
-INSERT INTO gateway_tools (org_id, name, type, auth_type, mcp_command, mcp_args, base_url, credentials_encrypted, action_paths, provider, audit_mode, data_handling_designation, data_handling_note)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+INSERT INTO gateway_tools (org_id, name, type, auth_type, mcp_command, mcp_args, base_url, credentials_encrypted, action_paths, provider, audit_mode, data_handling_designation, data_handling_note, redaction_rules)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 RETURNING id, org_id, name, type, auth_type, mcp_command, base_url,
           status, last_used, last_tested, created_at, action_paths,
-          provider, audit_mode, data_handling_designation, data_handling_note`
+          provider, audit_mode, data_handling_designation, data_handling_note,
+          redaction_rules`
 
 	var t GatewayTool
 	err := q.db.QueryRow(ctx, sql,
@@ -99,11 +107,13 @@ RETURNING id, org_id, name, type, auth_type, mcp_command, base_url,
 		p.CredentialsEncrypted, p.ActionPaths,
 		toPgtypeText(p.Provider), p.AuditMode,
 		p.DataHandlingDesignation, toPgtypeText(p.DataHandlingNote),
+		p.RedactionRules,
 	).Scan(
 		&t.ID, &t.OrgID, &t.Name, &t.Type, &t.AuthType,
 		&t.MCPCommand, &t.BaseURL, &t.Status,
 		&t.LastUsed, &t.LastTested, &t.CreatedAt, &t.ActionPaths,
 		&t.Provider, &t.AuditMode, &t.DataHandlingDesignation, &t.DataHandlingNote,
+		&t.RedactionRules,
 	)
 	return t, err
 }
@@ -149,6 +159,14 @@ type UpdateToolParams struct {
 	// it rather than falling back to the existing note: this is how an
 	// admin clears a previously-set note via the UI.
 	DataHandlingNote *string
+	// RedactionRules (B-156/B-167), like ActionPaths, is nil to leave
+	// redaction_rules unchanged (COALESCE) and non-nil -- including
+	// []byte("{}") -- to overwrite it. An admin explicitly clearing an
+	// override (reverting to the fail-safe default) sends redaction_rules
+	// as an explicit JSON null, which tools.go's handler encodes as the
+	// literal bytes "null" here (non-nil, so COALESCE overwrites), not
+	// left nil (which would mean "don't touch it").
+	RedactionRules []byte
 }
 
 // UpdateTool applies a partial update to an existing tool and returns the
@@ -168,11 +186,13 @@ UPDATE gateway_tools SET
     provider                   = COALESCE($9, provider),
     audit_mode                 = COALESCE($10, audit_mode),
     data_handling_designation  = COALESCE($11, data_handling_designation),
-    data_handling_note         = COALESCE($12, data_handling_note)
+    data_handling_note         = COALESCE($12, data_handling_note),
+    redaction_rules            = COALESCE($13, redaction_rules)
 WHERE id = $1 AND org_id = $2
 RETURNING id, org_id, name, type, auth_type, mcp_command, base_url,
           status, last_used, last_tested, created_at, action_paths,
-          provider, audit_mode, data_handling_designation, data_handling_note`
+          provider, audit_mode, data_handling_designation, data_handling_note,
+          redaction_rules`
 
 	var t GatewayTool
 	err := q.db.QueryRow(ctx, sql,
@@ -181,11 +201,13 @@ RETURNING id, org_id, name, type, auth_type, mcp_command, base_url,
 		p.CredentialsEncrypted, p.ActionPaths,
 		toPgtypeText(p.Provider), toPgtypeText(p.AuditMode),
 		toPgtypeText(p.DataHandlingDesignation), toPgtypeText(p.DataHandlingNote),
+		p.RedactionRules,
 	).Scan(
 		&t.ID, &t.OrgID, &t.Name, &t.Type, &t.AuthType,
 		&t.MCPCommand, &t.BaseURL, &t.Status,
 		&t.LastUsed, &t.LastTested, &t.CreatedAt, &t.ActionPaths,
 		&t.Provider, &t.AuditMode, &t.DataHandlingDesignation, &t.DataHandlingNote,
+		&t.RedactionRules,
 	)
 	return t, err
 }

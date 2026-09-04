@@ -24,7 +24,7 @@ const listAuditQuery = `-- name: ListAudit :many
 SELECT
     id, org_id, agent_id, agent_name, tool_name, action, parameters, decision,
     policy_id, approval_id, approved_by, latency_ms, token_in, token_out,
-    timestamp, prev_hash, hash, data_handling_designation
+    timestamp, prev_hash, hash, data_handling_designation, redacted_count
 FROM audit_log
 WHERE org_id = $1
   AND ($2::text IS NULL OR agent_name ILIKE '%' || $2 || '%')
@@ -66,7 +66,7 @@ func (q *Queries) ListAudit(ctx context.Context, p ListAuditParams) ([]AuditEntr
 			&e.ID, &e.OrgID, &e.AgentID, &e.AgentName, &e.ToolName, &e.Action,
 			&e.Parameters, &e.Decision, &e.PolicyID, &e.ApprovalID, &e.ApprovedBy,
 			&e.LatencyMS, &e.TokenIn, &e.TokenOut, &e.Timestamp, &e.PrevHash, &e.Hash,
-			&e.DataHandling,
+			&e.DataHandling, &e.RedactedCount,
 		); err != nil {
 			return nil, err
 		}

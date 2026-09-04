@@ -16,7 +16,7 @@ import {
   useTestTool,
   useDiscoverOpenAPI,
 } from '@/hooks/useTools'
-import type { ActionPathMapping, OpenAPIDiscoverResult, ToolAuditMode, ToolCreateWithActions, ToolDataHandling, ToolProvider, ToolType, ToolUpdate, ToolWithActions } from '@/hooks/useTools'
+import type { ActionPathMapping, OpenAPIDiscoverResult, RedactionCustomPattern, ToolAuditMode, ToolCreateWithActions, ToolDataHandling, ToolProvider, ToolType, ToolUpdate, ToolWithActions } from '@/hooks/useTools'
 
 // AI provider connectors (Thread A Model 1): the full set of providers a
 // second connector could target. Only "claude" has a real gateway adapter
@@ -42,6 +42,62 @@ const DATA_HANDLING_OPTIONS: { value: ToolDataHandling; label: string }[] = [
   { value: 'zero_retention', label: 'Zero Data Retention enabled' },
   { value: 'standard_retention', label: 'Standard retention (no ZDR)' },
 ]
+
+// Pattern-based redaction (B-156/B-167) -- pattern-based detection only,
+// NOT semantic/ML-based (that needs the still-parked local-LLM capability:
+// you cannot send content to an external AI provider to check whether
+// it's safe to send to an external AI provider). Enabled by default
+// (fail-safe): a newly created connector redacts unless an admin
+// explicitly opts out.
+function parseCustomPatternsJSON(text: string): { patterns?: RedactionCustomPattern[]; error?: string } {
+  const trimmed = text.trim()
+  if (!trimmed) return { patterns: [] }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    return { error: 'Custom patterns must be valid JSON.' }
+  }
+  if (!Array.isArray(parsed)) return { error: 'Custom patterns must be a JSON array of {"name","pattern"} objects.' }
+  for (const p of parsed) {
+    if (typeof p !== 'object' || p === null || typeof (p as { name?: unknown }).name !== 'string' || typeof (p as { pattern?: unknown }).pattern !== 'string') {
+      return { error: 'Each custom pattern needs a "name" and a "pattern" (both strings).' }
+    }
+  }
+  return { patterns: parsed as RedactionCustomPattern[] }
+}
+
+function RedactionRulesFields({
+  enabled, setEnabled, customPatternsText, setCustomPatternsText,
+}: {
+  enabled: boolean
+  setEnabled: (v: boolean) => void
+  customPatternsText: string
+  setCustomPatternsText: (v: string) => void
+}) {
+  const { error } = parseCustomPatternsJSON(customPatternsText)
+  return (
+    <div>
+      <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-1">
+        <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)}
+          className="rounded border-gray-300 focus:ring-indigo-500" />
+        Redact sensitive content before sending
+      </label>
+      <p className="text-xs text-gray-400 mb-2">
+        Emails, SSNs, credit card numbers, and API-key-shaped strings are masked before any request leaves EAMI. Pattern-based only -- not a semantic/content-understanding check.
+      </p>
+      {enabled && (
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Custom patterns (JSON array, optional)</label>
+          <textarea value={customPatternsText} onChange={e => setCustomPatternsText(e.target.value)} rows={3}
+            className="w-full border rounded px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder={'[{"name": "employee_id", "pattern": "EMP-\\\\d{6}"}]'} />
+          {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
 
 // Status badge
 
@@ -351,6 +407,8 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
   const [auditMode, setAuditMode] = useState<ToolAuditMode>('structural_metadata_only')
   const [dataHandling, setDataHandling] = useState<ToolDataHandling>('unknown')
   const [dataHandlingNote, setDataHandlingNote] = useState('')
+  const [redactionEnabled, setRedactionEnabled] = useState(true)
+  const [redactionCustomPatternsText, setRedactionCustomPatternsText] = useState('')
 
   // Same merge as EditToolPanel's identical handler below -- discovery is
   // stateless (POST /v1/gateway/openapi/discover needs no existing tool
@@ -366,6 +424,11 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    const { patterns: customPatterns, error: customPatternsError } = parseCustomPatternsJSON(redactionCustomPatternsText)
+    if (type === 'ai_provider' && customPatternsError) {
+      setToast('Fix the custom redaction patterns before saving')
+      return
+    }
     try {
       const actionPaths = type === 'rest_api' ? rowsToActionPaths(actionRows) : {}
       const body: ToolCreateWithActions = {
@@ -382,6 +445,9 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
         audit_mode: type === 'ai_provider' ? auditMode : undefined,
         data_handling_designation: type === 'ai_provider' ? dataHandling : undefined,
         data_handling_note: type === 'ai_provider' && dataHandlingNote ? dataHandlingNote : undefined,
+        redaction_rules: type === 'ai_provider'
+          ? { enabled: redactionEnabled, custom_patterns: customPatterns && customPatterns.length > 0 ? customPatterns : undefined }
+          : undefined,
       }
       await create.mutateAsync(body)
       setToast('Tool added')
@@ -519,6 +585,10 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
                   className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="e.g. Anthropic Enterprise Agreement dated 2026-03-01, ZDR Addendum" />
               </div>
+              <RedactionRulesFields
+                enabled={redactionEnabled} setEnabled={setRedactionEnabled}
+                customPatternsText={redactionCustomPatternsText} setCustomPatternsText={setRedactionCustomPatternsText}
+              />
             </>
           )}
 
@@ -576,6 +646,19 @@ function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () =
   const [auditMode, setAuditMode] = useState<ToolAuditMode>(tool.audit_mode ?? 'structural_metadata_only')
   const [dataHandling, setDataHandling] = useState<ToolDataHandling>(tool.data_handling_designation ?? 'unknown')
   const [dataHandlingNote, setDataHandlingNote] = useState(tool.data_handling_note ?? '')
+  const [redactionEnabled, setRedactionEnabled] = useState(tool.redaction_rules?.enabled ?? true)
+  const [redactionCustomPatternsText, setRedactionCustomPatternsText] = useState(
+    tool.redaction_rules?.custom_patterns && tool.redaction_rules.custom_patterns.length > 0
+      ? JSON.stringify(tool.redaction_rules.custom_patterns, null, 2)
+      : ''
+  )
+  // disabled_patterns (B-156/B-167): this panel has no control to edit
+  // which built-in patterns are individually disabled -- captured here
+  // purely so saving this form (for any unrelated reason -- renaming,
+  // changing audit_mode, ...) preserves it verbatim instead of silently
+  // dropping it back to "all built-ins enabled" (a real data-loss bug
+  // found by this brief's own mandatory code-review pass).
+  const redactionDisabledPatterns = tool.redaction_rules?.disabled_patterns
 
   const credLabel =
     tool.auth_type === 'api_key' ? 'API key' :
@@ -596,6 +679,11 @@ function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () =
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    const { patterns: customPatterns, error: customPatternsError } = parseCustomPatternsJSON(redactionCustomPatternsText)
+    if (tool.type === 'ai_provider' && customPatternsError) {
+      setToast('Fix the custom redaction patterns before saving')
+      return
+    }
     try {
       const body: ToolUpdate = {
         name,
@@ -623,6 +711,15 @@ function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () =
         // `|| undefined` would make clearing an already-set note
         // impossible through this UI.
         data_handling_note: tool.type === 'ai_provider' ? dataHandlingNote : undefined,
+        redaction_rules: tool.type === 'ai_provider'
+          ? {
+              enabled: redactionEnabled,
+              custom_patterns: customPatterns && customPatterns.length > 0 ? customPatterns : undefined,
+              // Preserved verbatim -- see redactionDisabledPatterns' own
+              // comment above; this panel has no control to change it.
+              disabled_patterns: redactionDisabledPatterns,
+            }
+          : undefined,
       }
       // Only include `credentials` at all if the admin actually typed
       // something -- an empty/omitted object here must never reach the
@@ -748,6 +845,10 @@ function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () =
                   className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="e.g. Anthropic Enterprise Agreement dated 2026-03-01, ZDR Addendum" />
               </div>
+              <RedactionRulesFields
+                enabled={redactionEnabled} setEnabled={setRedactionEnabled}
+                customPatternsText={redactionCustomPatternsText} setCustomPatternsText={setRedactionCustomPatternsText}
+              />
             </>
           )}
 

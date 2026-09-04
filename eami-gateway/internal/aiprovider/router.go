@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/eami/gateway/internal/redaction"
 	"github.com/eami/gateway/internal/toolrouter"
 )
 
@@ -42,6 +43,11 @@ type ToolRow struct {
 	// to this connector's designation never retroactively alters an
 	// already-written audit record.
 	DataHandling string
+	// RedactionRules is the raw JSONB bytes of gateway_tools.redaction_rules
+	// (B-156/B-167), or nil for a connector with no override -- passed
+	// as-is to redaction.ParseConfig, which treats nil identically to an
+	// explicit {"enabled": true} (see that function's own doc comment).
+	RedactionRules []byte
 }
 
 // Router resolves ai_provider gateway_tools rows and dispatches their
@@ -71,14 +77,14 @@ func New(pool *pgxpool.Pool, cipher *toolrouter.Cipher, registry map[string]Adap
 // as toolrouter's convention of a single not-found signal).
 func (r *Router) Resolve(ctx context.Context, orgID, name string) (*ToolRow, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id::text, provider, auth_type, credentials_encrypted, audit_mode, data_handling_designation
+		SELECT id::text, provider, auth_type, credentials_encrypted, audit_mode, data_handling_designation, redaction_rules
 		FROM gateway_tools
 		WHERE org_id = $1 AND name = $2 AND type = 'ai_provider'
 	`, orgID, name)
 
 	var t ToolRow
 	var provider *string
-	if err := row.Scan(&t.ID, &provider, &t.AuthType, &t.CredentialsEncrypted, &t.AuditMode, &t.DataHandling); err != nil {
+	if err := row.Scan(&t.ID, &provider, &t.AuthType, &t.CredentialsEncrypted, &t.AuditMode, &t.DataHandling, &t.RedactionRules); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -95,31 +101,54 @@ func (r *Router) Resolve(ctx context.Context, orgID, name string) (*ToolRow, err
 // provider configured, unregistered provider, undecryptable/malformed
 // credentials -- is a clean rejection, never a panic, mirroring
 // toolrouter.Forward's identical discipline for its own failure paths.
-func (r *Router) Dispatch(ctx context.Context, row *ToolRow, action string, params map[string]any) (Response, error) {
+//
+// Pattern-based redaction (B-156/B-167) runs here, immediately before the
+// adapter.Dispatch call below -- this is the one real chokepoint both of
+// this package's callers (cmd/gateway/dispatcher.go's immediate-Allow
+// branch and internal/approval/router.go's escalation-resume path)
+// converge through, confirmed by the B-156 investigation before this was
+// built (see BACKLOG.md). params itself is never mutated -- only the copy
+// handed to the adapter is redacted (see redaction.Redact's own doc
+// comment for why: the caller's own map is also used to build the
+// audit_log/episode snapshot, which must not silently change shape as a
+// side effect of this call). The returned int is the total number of
+// items redacted, always 0 for a connector with redaction disabled or no
+// matching content -- callers thread it into their own audit.Entry.
+func (r *Router) Dispatch(ctx context.Context, row *ToolRow, action string, params map[string]any) (Response, int, error) {
 	if row == nil {
-		return Response{}, errors.New("aiprovider: Dispatch called with a nil row")
+		return Response{}, 0, errors.New("aiprovider: Dispatch called with a nil row")
 	}
 	if row.Provider == "" {
-		return Response{}, fmt.Errorf("aiprovider: connector %s has no provider configured", row.ID)
+		return Response{}, 0, fmt.Errorf("aiprovider: connector %s has no provider configured", row.ID)
 	}
 	adapter, ok := r.registry[row.Provider]
 	if !ok {
-		return Response{}, fmt.Errorf("aiprovider: connector %s has provider %q, which is not a registered adapter", row.ID, row.Provider)
+		return Response{}, 0, fmt.Errorf("aiprovider: connector %s has provider %q, which is not a registered adapter", row.ID, row.Provider)
 	}
 
 	var creds Credentials
 	if len(row.CredentialsEncrypted) > 0 {
 		if r.cipher == nil {
-			return Response{}, fmt.Errorf("aiprovider: connector %s has stored credentials but no decryption key is configured", row.ID)
+			return Response{}, 0, fmt.Errorf("aiprovider: connector %s has stored credentials but no decryption key is configured", row.ID)
 		}
 		plaintext, err := r.cipher.Decrypt(row.CredentialsEncrypted)
 		if err != nil {
-			return Response{}, fmt.Errorf("aiprovider: connector %s credentials could not be decrypted: %w", row.ID, err)
+			return Response{}, 0, fmt.Errorf("aiprovider: connector %s credentials could not be decrypted: %w", row.ID, err)
 		}
 		if err := json.Unmarshal(plaintext, &creds); err != nil {
-			return Response{}, fmt.Errorf("aiprovider: connector %s stored credentials are not in the expected shape", row.ID)
+			return Response{}, 0, fmt.Errorf("aiprovider: connector %s stored credentials are not in the expected shape", row.ID)
 		}
 	}
 
-	return adapter.Dispatch(ctx, creds, Request{Action: action, Params: params})
+	redactionCfg, err := redaction.ParseConfig(row.RedactionRules)
+	if err != nil {
+		return Response{}, 0, fmt.Errorf("aiprovider: connector %s: %w", row.ID, err)
+	}
+	redactedParams, redactedCount, err := redaction.Redact(params, redactionCfg)
+	if err != nil {
+		return Response{}, 0, fmt.Errorf("aiprovider: connector %s: redaction failed: %w", row.ID, err)
+	}
+
+	resp, err := adapter.Dispatch(ctx, creds, Request{Action: action, Params: redactedParams})
+	return resp, redactedCount, err
 }

@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -77,6 +78,19 @@ type Entry struct {
 	// operator's own) need to learn about it.
 	WorkflowRunID uuid.UUID
 	StepIndex     *int32
+	// RedactedCount (B-156/B-167) is the number of sensitive items masked
+	// by aiprovider.Router.Dispatch before this dispatch's real outbound
+	// call -- a count only, NEVER the redacted values themselves (this
+	// brief's own contract). pgtype.Int4 (matching LatencyMS/TokenIn/
+	// TokenOut's identical nullable-numeric convention above), not a bare
+	// int: !Valid means "not applicable" (every non-ai_provider dispatch,
+	// and every row written before this migration) -- a real, meaningful,
+	// DIFFERENT fact from Valid+0 ("redaction ran and found nothing to
+	// mask"), which a bare int defaulting to the same zero value could
+	// not distinguish. Deliberately NOT part of the hash content below,
+	// same B-078 DataHandling/B-093 WorkflowRunID precedent: a
+	// visibility-only field, not a governance decision.
+	RedactedCount pgtype.Int4
 	// Set by Writer.Write before calling InsertEntry:
 	PrevHash string
 	Hash     string
@@ -230,16 +244,16 @@ func (d *pgxpoolDB) InsertEntry(ctx context.Context, e Entry) error {
 			parameters, decision, policy_id, approval_id, approved_by,
 			latency_ms, token_in, token_out,
 			timestamp, prev_hash, hash, data_handling_designation,
-			workflow_run_id, step_index
+			workflow_run_id, step_index, redacted_count
 		) VALUES (
 			$1,$2,$3,$4,$5,$6, $7,$8,$9,$10,$11, $12,$13,$14, $15,$16,$17, $18,
-			$19, $20
+			$19, $20, $21
 		)`,
 		e.ID, e.OrgID, agentID, e.AgentName, e.ToolName, e.Action,
 		params, e.Decision, policyID, approvalID, e.ApprovedBy,
 		e.LatencyMS, e.TokenIn, e.TokenOut,
 		e.Timestamp, e.PrevHash, e.Hash, dataHandling,
-		workflowRunID, e.StepIndex,
+		workflowRunID, e.StepIndex, e.RedactedCount,
 	)
 	return dbErr
 }

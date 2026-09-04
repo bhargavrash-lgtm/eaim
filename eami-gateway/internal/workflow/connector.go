@@ -38,6 +38,13 @@ type connectorRow struct {
 	baseURLOrProvider    string // base_url for rest_api, provider for ai_provider
 	credentialsEncrypted []byte
 	actionPaths          map[string]toolrouter.ActionPathEntry
+	// redactionRules (B-156/B-167) is nil for every non-ai_provider row.
+	// Threaded into ComputeConfigHash purely so this package's own
+	// informational hash (see configHashJSON's doc comment) keeps
+	// agreeing bit-for-bit with approval.Router's real enforcement pin for
+	// the same connector state -- this value itself is never used for
+	// enforcement here.
+	redactionRules []byte
 }
 
 // resolveConnectorByID reads gateway_tools by (id, org_id) -- never by
@@ -49,10 +56,10 @@ func resolveConnectorByID(ctx context.Context, pool *pgxpool.Pool, orgID, toolID
 	var baseURL, provider *string
 	var actionPathsRaw []byte
 	err := pool.QueryRow(ctx, `
-		SELECT name, type, auth_type, base_url, provider, credentials_encrypted, action_paths
+		SELECT name, type, auth_type, base_url, provider, credentials_encrypted, action_paths, redaction_rules
 		FROM gateway_tools
 		WHERE id = $1 AND org_id = $2
-	`, toolID, orgID).Scan(&row.name, &row.toolType, &row.authType, &baseURL, &provider, &row.credentialsEncrypted, &actionPathsRaw)
+	`, toolID, orgID).Scan(&row.name, &row.toolType, &row.authType, &baseURL, &provider, &row.credentialsEncrypted, &actionPathsRaw, &row.redactionRules)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return connectorRow{}, ErrConnectorNotFound

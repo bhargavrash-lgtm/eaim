@@ -1274,10 +1274,61 @@ or prior context suggests otherwise, it is wrong; trust this line.
   `BUILT.md`'s `eami-api` section and `BACKLOG.md`'s B-164/B-165/B-166
   entries.
 
+- **2026-09-04 — B-167 built and live-verified with real Anthropic API
+  spend: pattern-based sensitive-data redaction on the ai_provider
+  dispatch path, closing the single most-repeated "important, unbuilt"
+  gap flagged across this session (B-156's own investigation).** Mask-only
+  v1 (not tokenize, per B-156's own explicit recommendation), interception
+  inside `aiprovider.Router.Dispatch` (the one chokepoint both real
+  callers converge through), per-connector `gateway_tools.redaction_rules`
+  JSONB config (NULL = fail-safe default, redaction on), a new non-hashed
+  `audit_log.redacted_count` column recording only a count, never the
+  redacted values. New `eami-gateway/internal/redaction` package (regex +
+  Luhn/checksum validators, replicating Presidio's design natively in Go
+  stdlib `regexp`, zero new dependency).
+  **Mandatory reviewer + security passes both found real issues, fixed
+  before commit, then re-verified live:** (1) **Critical/High, both
+  reviews independently:** the first draft excluded `redaction_rules` from
+  `approval.ComputeConfigHash` (the existing escalation-resume TOCTOU
+  guard), reasoning only about the safe direction — a lower-privileged
+  actor could weaken a pending escalation's connector during the hold
+  window and have the resumed dispatch silently apply the weakened
+  config. Fixed by folding `redaction_rules` into the hash like every
+  other security-relevant connector field. **Live-verified as the exact
+  adversarial scenario**: escalated a real dispatch, weakened the real
+  connector's redaction mid-hold via the real API, approved it — the real
+  resume was refused with "configuration changed," zero Anthropic spend.
+  (2) **High, code review:** the resolution audit row fabricated
+  `redacted_count = 0` for every resume that never reached a real dispatch
+  (denied/expired/config-changed), reintroducing the exact NULL-vs-0
+  ambiguity the column exists to prevent. Fixed by changing the
+  count-plumbing from a bare `int` to `*int` throughout. Live-verified in
+  the same TOCTOU-rejection request: the real row shows `redacted_count`
+  genuinely NULL. (3) Medium: unbounded custom-pattern count and
+  zero-width-matching patterns (CPU-amplification levers) — capped/
+  rejected at write time in both `eami-api` and `eami-gateway` (defense in
+  depth). (4) A pre-existing (B-044-era), NOT fixed here, gap found by the
+  security review — `resolveAIProviderTool`'s fallback-to-static-proxy on
+  a transient resolution error silently bypasses redaction with no
+  rejection signal — logged fresh as **B-168**.
+  **Live proof of AC1** (real, not simulated): a real dispatch with a
+  genuine SSN and email, through the real escalation-approval flow to the
+  real `claude` connector — Claude's own real response echoed back
+  `"My SSN is [REDACTED:SSN] and my email is [REDACTED:EMAIL]"`, proving
+  at the wire level that the real external HTTPS request to Anthropic
+  never carried the original values (the model can only echo what it
+  actually received). Per-connector disable (AC4) and no-match zero-
+  behavioral-change (AC5) both also live-verified with real dispatches.
+  Full writeup in `BUILT.md`'s `eami-gateway`/`eami-api`/`eami-ui`
+  sections and `BACKLOG.md`'s B-167/B-168 entries.
+
 ## Last updated
-2026-09-04 by Claude Code — B-164/B-165 built and live-verified (see Active
-decision thread above); B-166 (a newly-discovered gpu_count 500 bug) found
-and fixed along the way. Previous entry, preserved below: B-165 logged,
+2026-09-04 by Claude Code — B-167 built, reviewed, fixed, and live-verified
+with real Anthropic API spend (see Active decision thread above); B-168 (a
+newly-found, pre-existing, NOT-fixed fail-open gap in ai_provider connector
+resolution error-handling) logged along the way. Previous entries preserved
+below: B-164/B-165 built and live-verified; B-166 (a newly-discovered
+gpu_count 500 bug) found and fixed along the way. Before that: B-165 logged,
 HIGH priority, not fixed: two
 priority clarifications on B-164's own findings, per explicit user
 direction. (1) eami-agent's remote-config polling has been silently,

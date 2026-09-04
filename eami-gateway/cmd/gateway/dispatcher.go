@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/eami/gateway/internal/aiprovider"
 	"github.com/eami/gateway/internal/approval"
@@ -524,7 +525,7 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 		switch {
 		case resolvedProvider != nil:
 			approvalReq.ResolvedToolID = resolvedProvider.ID
-			approvalReq.ResolvedConfigHash = approval.ComputeConfigHash("ai_provider", resolvedProvider.Provider, resolvedProvider.CredentialsEncrypted, nil)
+			approvalReq.ResolvedConfigHash = approval.ComputeConfigHash("ai_provider", resolvedProvider.Provider, resolvedProvider.CredentialsEncrypted, nil, resolvedProvider.RedactionRules)
 		case resolvedTool != nil:
 			baseURL := ""
 			if resolvedTool.BaseURL != nil {
@@ -541,7 +542,7 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 				actionPathsJSON, _ = json.Marshal(resolvedTool.ActionPaths)
 			}
 			approvalReq.ResolvedToolID = resolvedTool.ID
-			approvalReq.ResolvedConfigHash = approval.ComputeConfigHash("rest_api", baseURL, resolvedTool.CredentialsEncrypted, actionPathsJSON)
+			approvalReq.ResolvedConfigHash = approval.ComputeConfigHash("rest_api", baseURL, resolvedTool.CredentialsEncrypted, actionPathsJSON, nil)
 		}
 		approvalID, submitErr := d.approvalRouter.Submit(reqCtx, approvalReq)
 		if submitErr != nil {
@@ -597,6 +598,23 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 				re.Decision = "allowed"
 			}
 			re.ApprovalID = approvalID
+			// RedactedCount (B-156/B-167): overwrite the clone's inherited
+			// value (always !Valid on the original pre-Hold "escalated"
+			// row -- nothing was dispatched yet at that write) with the
+			// count from this resumed dispatch. holdOutcome.RedactedCount
+			// is nil unless dispatchApproved's ai_provider branch actually
+			// reached a real Router.Dispatch call -- a denial, expiry, or
+			// any fail-closed resume rejection (config-changed, connector-
+			// deleted) leaves it nil, correctly recording "not applicable"
+			// (SQL NULL) rather than fabricating a 0 that would falsely
+			// claim redaction ran and matched nothing. Found by this
+			// brief's own mandatory code-review pass: an earlier draft
+			// used a bare int here and set Valid:true unconditionally
+			// whenever resolvedProvider != nil, which produced exactly
+			// that false claim for every one of those fail-closed exits.
+			if holdOutcome.RedactedCount != nil {
+				re.RedactedCount = pgtype.Int4{Int32: int32(*holdOutcome.RedactedCount), Valid: true}
+			}
 			// ApprovedBy is deliberately NOT copied unconditionally --
 			// found by BOTH of this fix's own mandatory review passes,
 			// independently: an approval whose actual dispatch technically
@@ -666,8 +684,17 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 			// final return) handles an ai_provider call exactly like any
 			// other tool call, unchanged.
 			var presp aiprovider.Response
-			presp, proxyErr = d.aiProviderRouter.Dispatch(reqCtx, resolvedProvider, ac.Action, ac.Parameters)
+			var redactedCount int
+			presp, redactedCount, proxyErr = d.aiProviderRouter.Dispatch(reqCtx, resolvedProvider, ac.Action, ac.Parameters)
 			tr = proxy.ToolResponse{Status: presp.StatusCode, Body: presp.Body}
+			// RedactedCount (B-156/B-167): set regardless of proxyErr --
+			// redaction runs before the real dispatch attempt inside
+			// Router.Dispatch, so it has a real, meaningful value (usually
+			// 0) even on a downstream failure. 0 for every non-ai_provider
+			// dispatch (resolvedTool/fwdProxy branches never touch this
+			// field, matching AuditMode/DataHandling's identical "only
+			// meaningful for ai_provider" convention above).
+			auditEntry.RedactedCount = pgtype.Int4{Int32: int32(redactedCount), Valid: true}
 		case resolvedTool != nil:
 			// B-044: dynamically dispatch to this org's registered
 			// rest_api tool's real base_url/credentials, instead of the

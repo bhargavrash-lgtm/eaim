@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -179,6 +180,70 @@ var validDataHandling = map[string]bool{"zero_retention": true, "standard_retent
 
 const defaultDataHandling = "unknown"
 
+// maxCustomRedactionPatterns caps how many custom_patterns entries a
+// single connector's redaction_rules may declare (B-156/B-167, security-
+// review finding). Each pattern is recompiled and evaluated against every
+// string in every outbound dispatch's params on the connector's hot
+// dispatch path -- an unbounded count lets a misconfigured or malicious
+// admin session multiply per-dispatch CPU cost arbitrarily. 50 is
+// generously above any realistic legitimate use (a handful of org-
+// specific identifiers) while still bounding the worst case.
+const maxCustomRedactionPatterns = 50
+
+// validateRedactionRules validates a submitted redaction_rules object
+// (B-156/B-167) by round-tripping it through the exact parser eami-gateway
+// uses at dispatch time -- see redaction.ParseConfig's own doc comment for
+// the shape ({"enabled": bool, "disabled_patterns": [...], "custom_
+// patterns": [{"name","pattern"}]}). Rejecting an invalid custom regex
+// here, at write time, is deliberate: eami-gateway's own Router.Dispatch
+// fails closed (a clean error) on a malformed value rather than silently
+// skipping redaction, but catching it here means an admin sees a clear 400
+// immediately instead of discovering it only when a real dispatch fails.
+// eami-api cannot import eami-gateway/internal/redaction (separate Go
+// modules per go.work, same established boundary as ActionPathMapping's
+// own doc comment) -- this is a deliberately narrow, independent
+// re-validation of the same wire shape, not a shared implementation.
+func validateRedactionRules(raw json.RawMessage) error {
+	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "null" {
+		return nil
+	}
+	var cfg struct {
+		Enabled          *bool    `json:"enabled"`
+		DisabledPatterns []string `json:"disabled_patterns"`
+		CustomPatterns   []struct {
+			Name    string `json:"name"`
+			Pattern string `json:"pattern"`
+		} `json:"custom_patterns"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return fmt.Errorf("redaction_rules must be a JSON object: %w", err)
+	}
+	if len(cfg.CustomPatterns) > maxCustomRedactionPatterns {
+		return fmt.Errorf("redaction_rules: at most %d custom_patterns are allowed, got %d", maxCustomRedactionPatterns, len(cfg.CustomPatterns))
+	}
+	for _, cp := range cfg.CustomPatterns {
+		if strings.TrimSpace(cp.Name) == "" {
+			return errors.New("redaction_rules: custom_patterns entry has an empty name")
+		}
+		re, err := regexp.Compile(cp.Pattern)
+		if err != nil {
+			return fmt.Errorf("redaction_rules: custom pattern %q does not compile: %w", cp.Name, err)
+		}
+		// A pattern that matches the empty string (e.g. "", "a*", `\b`)
+		// matches at every rune boundary in any real dispatch content --
+		// each match still gets replaced with a real mask token, so this
+		// is a resource-amplification lever (output size grows roughly
+		// linearly with input length) rather than a correctness bug, but
+		// it can never be a legitimate sensitive-value detector either --
+		// rejected outright rather than silently accepted (security-review
+		// finding).
+		if re.MatchString("") {
+			return fmt.Errorf("redaction_rules: custom pattern %q matches the empty string -- refine it to match a real value, not every position", cp.Name)
+		}
+	}
+	return nil
+}
+
 var allowedActionPathMethods = map[string]bool{
 	http.MethodGet: true, http.MethodPost: true, http.MethodPut: true,
 	http.MethodPatch: true, http.MethodDelete: true,
@@ -242,6 +307,12 @@ type ToolResp struct {
 	AuditMode               string                       `json:"audit_mode"`
 	DataHandlingDesignation string                       `json:"data_handling_designation"`
 	DataHandlingNote        *string                      `json:"data_handling_note,omitempty"`
+	// RedactionRules (B-156/B-167) is the connector's raw redaction_rules
+	// JSON, or nil when it has no override (the fail-safe default applies
+	// -- see redaction.DefaultConfig). Passed through as opaque JSON
+	// rather than a typed struct: the admin UI only needs to display/edit
+	// it, not interpret its meaning server-side.
+	RedactionRules json.RawMessage `json:"redaction_rules,omitempty"`
 }
 
 func toolToResp(t store.GatewayTool) ToolResp {
@@ -272,6 +343,9 @@ func toolToResp(t store.GatewayTool) ToolResp {
 		// bypassing this API's validation -- surfacing it as "no mappings"
 		// rather than a 500 keeps ListTools/GetTool resilient to that.
 		_ = json.Unmarshal(t.ActionPaths, &r.ActionPaths)
+	}
+	if len(t.RedactionRules) > 0 {
+		r.RedactionRules = t.RedactionRules
 	}
 	return r
 }
@@ -315,6 +389,7 @@ func (s *Server) CreateTool(w http.ResponseWriter, r *http.Request) {
 		AuditMode               *string                      `json:"audit_mode"`
 		DataHandlingDesignation *string                      `json:"data_handling_designation"`
 		DataHandlingNote        *string                      `json:"data_handling_note"`
+		RedactionRules          json.RawMessage              `json:"redaction_rules"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
@@ -353,6 +428,17 @@ func (s *Server) CreateTool(w http.ResponseWriter, r *http.Request) {
 		// data-retention designation on a rest_api/mcp/database connector
 		// would be misleading persisted state, not a harmless no-op.
 		writeError(w, http.StatusBadRequest, "bad_request", "data_handling_designation/data_handling_note can only be set on an ai_provider-type tool")
+		return
+	}
+	if body.Type != "ai_provider" && len(body.RedactionRules) > 0 && strings.TrimSpace(string(body.RedactionRules)) != "null" {
+		// Same guard, same reason, for redaction_rules (B-156/B-167):
+		// pattern-based redaction only ever runs on the ai_provider
+		// dispatch path.
+		writeError(w, http.StatusBadRequest, "bad_request", "redaction_rules can only be set on an ai_provider-type tool")
+		return
+	}
+	if err := validateRedactionRules(body.RedactionRules); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 	auditMode := defaultAuditMode
@@ -430,6 +516,7 @@ func (s *Server) CreateTool(w http.ResponseWriter, r *http.Request) {
 		AuditMode:               auditMode,
 		DataHandlingDesignation: dataHandling,
 		DataHandlingNote:        body.DataHandlingNote,
+		RedactionRules:          []byte(body.RedactionRules),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -465,6 +552,7 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 		AuditMode               *string                      `json:"audit_mode"`
 		DataHandlingDesignation *string                      `json:"data_handling_designation"`
 		DataHandlingNote        *string                      `json:"data_handling_note"`
+		RedactionRules          json.RawMessage              `json:"redaction_rules"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
@@ -480,6 +568,10 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.DataHandlingDesignation != nil && !validDataHandling[*body.DataHandlingDesignation] {
 		writeError(w, http.StatusBadRequest, "bad_request", "data_handling_designation must be \"zero_retention\", \"standard_retention\", or \"unknown\"")
+		return
+	}
+	if err := validateRedactionRules(body.RedactionRules); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 	// A present-but-empty name would otherwise pass straight through
@@ -507,7 +599,7 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 	// database-type tool -- no dispatch path ever reads it there, but it
 	// produces confusing, misleading state (code review finding, B-047;
 	// data_handling_* extends the identical guard, B-078).
-	if body.Provider != nil || body.AuditMode != nil || body.DataHandlingDesignation != nil || body.DataHandlingNote != nil {
+	if body.Provider != nil || body.AuditMode != nil || body.DataHandlingDesignation != nil || body.DataHandlingNote != nil || body.RedactionRules != nil {
 		row, err := ts.GetToolForTest(r.Context(), uc.OrgID, toolID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -518,7 +610,7 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if row.Type != "ai_provider" {
-			writeError(w, http.StatusBadRequest, "bad_request", "provider/audit_mode/data_handling_designation/data_handling_note can only be set on an ai_provider-type connector")
+			writeError(w, http.StatusBadRequest, "bad_request", "provider/audit_mode/data_handling_designation/data_handling_note/redaction_rules can only be set on an ai_provider-type connector")
 			return
 		}
 	}
@@ -586,6 +678,14 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 		AuditMode:               body.AuditMode,
 		DataHandlingDesignation: body.DataHandlingDesignation,
 		DataHandlingNote:        body.DataHandlingNote,
+		// RedactionRules (B-156/B-167): nil for an omitted field (leave
+		// unchanged, via COALESCE) -- unlike ActionPaths above, json.
+		// RawMessage preserves the literal bytes of an explicit JSON
+		// `null` rather than collapsing it to the same nil Go value as
+		// "omitted", so an admin can distinguish "don't touch this" from
+		// "clear my override back to the default" without the {}-sentinel
+		// workaround ActionPaths needs for its map-typed field.
+		RedactionRules: []byte(body.RedactionRules),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

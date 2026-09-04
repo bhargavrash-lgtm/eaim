@@ -15,6 +15,7 @@ package aiprovider
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -109,6 +110,40 @@ func TestResolve_DataHandlingDesignation_RoundTrips(t *testing.T) {
 	}
 	if row.DataHandling != "zero_retention" {
 		t.Errorf("DataHandling = %q, want zero_retention", row.DataHandling)
+	}
+}
+
+// TestResolve_RedactionRules_RoundTrips proves B-156/B-167's own AC4
+// prerequisite: a connector with an explicit redaction_rules override
+// resolves the real stored bytes, and a connector with none (NULL) comes
+// back as nil -- exactly what redaction.ParseConfig expects to distinguish
+// "use the default" from "an explicit override exists".
+func TestResolve_RedactionRules_RoundTrips(t *testing.T) {
+	env := newAIProviderTestEnv(t)
+	if _, err := env.pool.Exec(context.Background(), `
+		INSERT INTO gateway_tools (id, org_id, name, type, auth_type, provider, audit_mode, redaction_rules)
+		VALUES ($1, $2, $3, 'ai_provider', 'api_key', 'claude', 'full', $4)
+	`, uuid.New(), env.orgID, "claude-custom-redaction", []byte(`{"enabled": false}`)); err != nil {
+		t.Fatalf("insert connector with explicit redaction_rules: %v", err)
+	}
+	env.insertConnector(t, env.orgID, "claude-default-redaction", "claude", "full", nil)
+
+	r := New(env.pool, nil, nil)
+
+	custom, err := r.Resolve(context.Background(), env.orgID.String(), "claude-custom-redaction")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if !strings.Contains(string(custom.RedactionRules), `"enabled": false`) && !strings.Contains(string(custom.RedactionRules), `"enabled":false`) {
+		t.Errorf("RedactionRules = %s, want the stored {\"enabled\": false}", custom.RedactionRules)
+	}
+
+	def, err := r.Resolve(context.Background(), env.orgID.String(), "claude-default-redaction")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if def.RedactionRules != nil {
+		t.Errorf("RedactionRules = %s, want nil (no override set)", def.RedactionRules)
 	}
 }
 

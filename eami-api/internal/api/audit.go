@@ -263,5 +263,9 @@ func auditEntryToResp(e store.AuditEntry) AuditEntryResp {
 	if e.DataHandling.Valid {
 		resp.DataHandling = &e.DataHandling.String
 	}
+	if e.RedactedCount.Valid {
+		v := e.RedactedCount.Int32
+		resp.RedactedCount = &v
+	}
 	return resp
 }

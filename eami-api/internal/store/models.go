@@ -103,6 +103,13 @@ type AuditEntry struct {
 	// DataHandling (B-078 column, B-094 read path) is nullable -- unset for
 	// every non-ai_provider dispatch and every row written before B-078.
 	DataHandling pgtype.Text
+	// RedactedCount (B-156/B-167) is the number of sensitive items masked
+	// by eami-gateway's redaction step before this dispatch's real
+	// outbound call -- a count only, never the redacted values. Nullable:
+	// !Valid means "not applicable" (every non-ai_provider dispatch, and
+	// every row written before this migration), distinct from Valid+0
+	// ("redaction ran and found nothing to mask").
+	RedactedCount pgtype.Int4
 }
 
 // User mirrors the users table (auth fields only).
@@ -239,6 +246,14 @@ type GatewayTool struct {
 	// Addendum") -- nullable, since a structured designation alone may be
 	// all an admin has confirmed.
 	DataHandlingNote pgtype.Text
+	// RedactionRules (B-156/B-167) is the raw JSONB bytes of gateway_tools.
+	// redaction_rules -- per-connector pattern-based redaction config for
+	// the outbound ai_provider dispatch path (eami-gateway/internal/
+	// redaction). nil means no override: the connector uses the fail-safe
+	// default (redaction ON, every built-in pattern enabled). Meaningful
+	// only for type=ai_provider, same convention as Provider/AuditMode/
+	// DataHandlingDesignation above.
+	RedactionRules []byte
 }
 
 // GatewayNode mirrors the gateway_nodes table (joined with latest metrics).
