@@ -405,7 +405,11 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 	// as it did before this brief.
 	var resolvedProvider *aiprovider.ToolRow
 	if resolvedTool == nil {
-		resolvedProvider = resolveAIProviderTool(reqCtx, d.aiProviderRouter, ac.OrgID, ac.Tool)
+		var resolveErr error
+		resolvedProvider, resolveErr = resolveAIProviderTool(reqCtx, d.aiProviderRouter, ac.OrgID, ac.Tool)
+		if resolveErr != nil {
+			return d.rejectOnProviderResolveError(reqCtx, ac, start, resolveErr)
+		}
 	}
 
 	pc := ac.ToPolicyContext()
@@ -739,6 +743,76 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 	// without correctly implying Dispatched (see DispatchOutcome's doc
 	// comment): true for every branch above iff a real downstream call
 	// genuinely executed (Allow-success, Escalate-resumed-successfully).
+	outcome.Dispatched = outcome.Err == nil
+
+	for _, h := range d.hooks {
+		h(reqCtx, ac, outcome)
+	}
+	return outcome.Result, outcome.Err
+}
+
+// rejectOnProviderResolveError (B-168) fails the whole call closed when
+// resolveAIProviderTool returns a genuine error (a real DB/connectivity
+// fault, never "this tool isn't an ai_provider connector" -- that case
+// is nil,nil and never reaches here). Called before policy evaluation
+// ever runs, and therefore before the Deny/Escalate/Allow switch below
+// is ever reached -- deliberately: a resolution failure means this
+// dispatch's governance surface (the connector's real identity,
+// credentials, audit_mode, redaction_rules) cannot be safely determined
+// at all, so it hard-denies unconditionally, even if an active policy
+// would otherwise have escalated or allowed this exact tool/action (e.g.
+// a live "Escalate <connector> calls" rule) -- never a weaker outcome
+// than a clean rejection. This is what closes B-168: before this fix,
+// the caller (Dispatch's resolution block) simply set resolvedProvider
+// to nil and fell through into the same switch as a legitimate
+// "not found," silently rerouting the call to fwdProxy -- a legacy,
+// unauthenticated, Claude-incompatible static forwarder that had zero
+// governance (redaction, audit_mode, cost tracking) applied to it, with
+// only a slog.Warn as any trace anywhere.
+//
+// Still writes a real audit_log row (Decision: "denied") -- an
+// infrastructure failure this deep into Dispatch (past identity/org
+// resolution, for a call that would otherwise have executed) is exactly
+// the kind of thing this codebase's audit discipline (B-121/B-124/B-125)
+// exists to make a real, visible fact, not a silent gap. Parameters is
+// explicitly nil, never ac.Parameters: unlike every other branch below,
+// there is no resolvedProvider to consult for the connector's own
+// configured AuditMode, so this defaults to the SAFEST posture (no raw
+// content) rather than the ambiguous "unknown, so just include
+// everything" the original bug effectively did -- the exact "audit row
+// with MORE raw content than an admin configured" finding from B-167's
+// own security review, closed here for good measure even though this
+// specific row's Decision differs from a normal in-band Deny.
+func (d *Dispatcher) rejectOnProviderResolveError(reqCtx context.Context, ac mcp.ActionContext, start time.Time, resolveErr error) (json.RawMessage, error) {
+	slog.Error("dispatch: ai_provider connector resolution failed -- rejecting closed, not falling back to the static proxy",
+		"tool", ac.Tool, "org_id", ac.OrgID, "agent", ac.AgentName, "err", resolveErr)
+
+	orgID, _ := uuid.Parse(ac.OrgID)
+	agentID, _ := uuid.Parse(ac.AgentUUID)
+	workflowRunID, _ := uuid.Parse(ac.WorkflowRunID)
+	auditEntry := audit.Entry{
+		OrgID:         orgID,
+		AgentID:       agentID,
+		AgentName:     ac.AgentName,
+		ToolName:      ac.Tool,
+		Action:        ac.Action,
+		Parameters:    nil,
+		LatencyMS:     time.Since(start).Milliseconds(),
+		Timestamp:     ac.ReceivedAt,
+		WorkflowRunID: workflowRunID,
+		StepIndex:     ac.StepIndex,
+		Decision:      "denied",
+	}
+	auditWriteErr := d.auditWriter.Write(reqCtx, auditEntry)
+
+	outcome := DispatchOutcome{
+		Decision:       "denied",
+		Err:            fmt.Errorf("dispatch: ai_provider connector resolution failed: %w", resolveErr),
+		EpisodeSteps:   []episode.Step{newEpisodeStep(ac, "blocked", nil)},
+		EpisodeOutcome: "blocked",
+		AuditWriteErr:  auditWriteErr,
+		AuditDecision:  auditEntry.Decision,
+	}
 	outcome.Dispatched = outcome.Err == nil
 
 	for _, h := range d.hooks {

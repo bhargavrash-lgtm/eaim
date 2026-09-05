@@ -429,23 +429,48 @@ func listGatewayTools(ctx context.Context, pool *pgxpool.Pool, orgID string) ([]
 
 // resolveAIProviderTool looks up tool within org's gateway_tools,
 // restricted to type='ai_provider' (AI Provider Connector, Thread A Model
-// 1). Mirrors resolveDynamicTool's exact shape and fail-open contract: nil
-// on empty org/tool, no matching row, or a genuine DB error (logged, not
-// fatal) -- a call that doesn't resolve to a real ai_provider connector
-// falls through to the existing rest_api/static-proxy resolution
-// unaffected, never a new way for an existing call to break.
-func resolveAIProviderTool(ctx context.Context, apr *aiprovider.Router, orgID, tool string) *aiprovider.ToolRow {
+// 1). Deliberately NOT symmetric with resolveDynamicTool any more (B-168):
+// that function's fail-open contract (any non-ErrNotFound error falls
+// through to the static proxy) is legitimate there because a real
+// pre-existing "before B-044" path exists for rest_api tools to fall back
+// to -- there is no equivalent "before" for ai_provider connectors
+// (fwdProxy was never built to speak to any AI provider, has no
+// credential injection, and cannot parse a Claude-shaped response), so
+// falling through there didn't preserve any real working behavior --  it
+// just silently rerouted raw, unauthenticated prompt content to a
+// legacy, protocol-incompatible endpoint with zero governance applied
+// (found live during B-167's own security review; see BACKLOG.md's B-168
+// entry for the full blast-radius analysis).
+//
+// Returns (nil, nil) for empty org/tool or a genuine "not an ai_provider
+// connector" (ErrNotFound) -- both cases correctly still fall through to
+// the existing rest_api/static-proxy resolution, exactly as before this
+// fix; a real error (anything else) is now returned to the caller
+// instead of silently discarded, so dispatcher.go can fail the whole
+// call closed rather than treating "the DB hiccuped" identically to
+// "this tool genuinely isn't an ai_provider connector."
+//
+// Blast-radius note (code-review finding, precision not correctness):
+// dispatcher.go only calls this when resolveDynamicTool already returned
+// nil -- which covers a genuinely unregistered tool name AND any
+// mcp/database-type gateway_tools row, not only an actual ai_provider
+// connector experiencing a transient fault. A real error here now
+// hard-rejects all of those cases alike, not just ai_provider-bound
+// calls -- the correct, intended tradeoff (never a weaker outcome than a
+// clean rejection when the resolver itself can't be trusted), just wider
+// in practice than "ai_provider calls only."
+func resolveAIProviderTool(ctx context.Context, apr *aiprovider.Router, orgID, tool string) (*aiprovider.ToolRow, error) {
 	if orgID == "" || tool == "" {
-		return nil
+		return nil, nil
 	}
 	row, err := apr.Resolve(ctx, orgID, tool)
 	if err != nil {
-		if !errors.Is(err, aiprovider.ErrNotFound) {
-			slog.Warn("aiprovider: resolve failed -- falling back to existing tool resolution", "tool", tool, "err", err)
+		if errors.Is(err, aiprovider.ErrNotFound) {
+			return nil, nil
 		}
-		return nil
+		return nil, err
 	}
-	return row
+	return row, nil
 }
 
 // tokenUsagePayload is the body sent to POST /v1/internal/token-usage on eami-api.

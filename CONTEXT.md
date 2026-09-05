@@ -1322,11 +1322,64 @@ or prior context suggests otherwise, it is wrong; trust this line.
   Full writeup in `BUILT.md`'s `eami-gateway`/`eami-api`/`eami-ui`
   sections and `BACKLOG.md`'s B-167/B-168 entries.
 
+- **2026-09-05 — B-168 built, reviewed, and live-verified with a real
+  forced database failure: a genuine ai_provider connector-resolution
+  error now fails the dispatch closed instead of silently falling back
+  to the unauthenticated static proxy.** An investigation preceded the
+  build (conversation-only, no separate BACKLOG.md record) confirming
+  `resolveDynamicTool`'s own rest_api fallback rests on a genuinely
+  different, still-legitimate justification (a real working pre-B-044
+  path exists for rest_api tools to fall back to, which never existed
+  for `ai_provider` connectors) — that sibling fallback was deliberately
+  left untouched. `resolveAIProviderTool` now returns
+  `(*aiprovider.ToolRow, error)`; `dispatcher.go`'s `Dispatch` fails the
+  whole call closed on a genuine error via a new
+  `rejectOnProviderResolveError`, called BEFORE policy evaluation and
+  BEFORE the Deny/Escalate/Allow switch — a resolution failure means the
+  connector's identity/credentials/audit_mode/redaction_rules can't be
+  safely determined, so it hard-denies unconditionally, even overriding
+  what an active policy would otherwise decide. **A second exposure found
+  during the same investigation and closed by the identical
+  early-return:** the Escalate branch has a matching gap (a resolution
+  error leaves `ResolvedToolID` empty, which would later make
+  `dispatchApproved` fall back to the same unauthenticated proxy on
+  approval) — failing closed before the branch switch makes this
+  structurally unreachable, not just unlikely. Still writes a real
+  `audit_log` row (`Decision: "denied"`, `Parameters` explicitly `nil`
+  since there's no resolved connector to consult for its real
+  `AuditMode`) — an infrastructure failure this deep into `Dispatch`
+  remains a real, visible fact, not a silent gap.
+  **Mandatory reviewer + security passes, both ran, both clean (zero
+  Critical/High findings)** — security review confirmed the
+  Escalate-branch closure is structural, not empirical, and confirmed
+  zero raw-content leakage anywhere in the new path; code review ran the
+  full real-Postgres suite itself and found one Medium
+  documentation-precision nit (fixed via a doc-comment addition). Both
+  independently noted the same pre-existing, non-blocking Low (raw
+  wrapped-error text reaching the calling agent via MCP's generic
+  `-32000` path — an existing codebase convention, not a regression).
+  **Live-verified with a real forced DB failure, not a mock:** a plain
+  `REVOKE` was tried first and found to be a no-op (`eami_app` — the
+  gateway's own connecting role — owns the table and bypasses GRANT/
+  REVOKE against its own access); a brief `ALTER TABLE ... RENAME`
+  produced a genuine Postgres error, and the real SSE response showed
+  the exact new rejection, not the old proxy-fallback signature.
+  Confirmed via direct `psql`: zero new `approval_requests` rows (the
+  Escalate branch was genuinely never reached) and the new `audit_log`
+  row correctly shows `denied`/`parameters=null`. A genuinely
+  unregistered tool name immediately afterward still produced the old,
+  unchanged fallback error (AC2), and a normal real dispatch — with real
+  Anthropic spend — came back exactly as before this fix (AC3). Full
+  writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
+  B-168 entry.
+
 ## Last updated
-2026-09-04 by Claude Code — B-167 built, reviewed, fixed, and live-verified
-with real Anthropic API spend (see Active decision thread above); B-168 (a
-newly-found, pre-existing, NOT-fixed fail-open gap in ai_provider connector
-resolution error-handling) logged along the way. Previous entries preserved
+2026-09-05 by Claude Code — B-168 built, reviewed, and live-verified with a
+real forced database failure (see Active decision thread above). Previous
+entry, preserved below: 2026-09-04 — B-167 built, reviewed, fixed, and
+live-verified with real Anthropic API spend; B-168 (a newly-found,
+pre-existing fail-open gap in ai_provider connector resolution error-
+handling) logged along the way. Earlier entries preserved
 below: B-164/B-165 built and live-verified; B-166 (a newly-discovered
 gpu_count 500 bug) found and fixed along the way. Before that: B-165 logged,
 HIGH priority, not fixed: two

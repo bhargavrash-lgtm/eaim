@@ -39,7 +39,10 @@ func TestResolveAIProviderTool_AIProviderType_ReturnsRow(t *testing.T) {
 	env := newMainTestEnv(t)
 	env.insertAIProviderTool(t, env.orgID, "claude", "claude", "structural_metadata_only")
 
-	row := resolveAIProviderTool(context.Background(), aiprovider.New(env.pool, nil, nil), env.orgID.String(), "claude")
+	row, err := resolveAIProviderTool(context.Background(), aiprovider.New(env.pool, nil, nil), env.orgID.String(), "claude")
+	if err != nil {
+		t.Fatalf("resolveAIProviderTool: %v", err)
+	}
 	if row == nil {
 		t.Fatal("expected a resolved row for a registered ai_provider connector, got nil")
 	}
@@ -65,7 +68,10 @@ func TestResolveAIProviderTool_DefaultAuditMode_IsStructuralMetadataOnly(t *test
 		t.Fatalf("insert: %v", err)
 	}
 
-	row := resolveAIProviderTool(context.Background(), aiprovider.New(env.pool, nil, nil), env.orgID.String(), "claude-default")
+	row, err := resolveAIProviderTool(context.Background(), aiprovider.New(env.pool, nil, nil), env.orgID.String(), "claude-default")
+	if err != nil {
+		t.Fatalf("resolveAIProviderTool: %v", err)
+	}
 	if row == nil {
 		t.Fatal("expected a resolved row, got nil")
 	}
@@ -74,13 +80,18 @@ func TestResolveAIProviderTool_DefaultAuditMode_IsStructuralMetadataOnly(t *test
 	}
 }
 
-// TestResolveAIProviderTool_UnregisteredName_ReturnsNil mirrors
-// resolveDynamicTool's identical fallback design: no matching row falls
-// back to existing resolution (nil), not a rejection.
+// TestResolveAIProviderTool_UnregisteredName_ReturnsNil (B-168: no
+// regression to the legitimate not-found case) proves a genuinely
+// unregistered name still returns (nil, nil), not an error -- it must
+// keep falling through to the existing rest_api/static-proxy resolution
+// exactly as before this fix, never a rejection.
 func TestResolveAIProviderTool_UnregisteredName_ReturnsNil(t *testing.T) {
 	env := newMainTestEnv(t)
 
-	row := resolveAIProviderTool(context.Background(), aiprovider.New(env.pool, nil, nil), env.orgID.String(), "never-registered")
+	row, err := resolveAIProviderTool(context.Background(), aiprovider.New(env.pool, nil, nil), env.orgID.String(), "never-registered")
+	if err != nil {
+		t.Errorf("expected nil error for a legitimate not-found (fallback must still work), got %v", err)
+	}
 	if row != nil {
 		t.Errorf("expected nil (fallback) for an unregistered connector name, got %+v", row)
 	}
@@ -95,7 +106,10 @@ func TestResolveAIProviderTool_RestAPIType_ReturnsNil(t *testing.T) {
 	env := newMainTestEnv(t)
 	env.insertTool(t, env.orgID, "my-rest-tool", "rest_api")
 
-	row := resolveAIProviderTool(context.Background(), aiprovider.New(env.pool, nil, nil), env.orgID.String(), "my-rest-tool")
+	row, err := resolveAIProviderTool(context.Background(), aiprovider.New(env.pool, nil, nil), env.orgID.String(), "my-rest-tool")
+	if err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
 	if row != nil {
 		t.Errorf("expected nil for a rest_api-type tool, got %+v", row)
 	}
@@ -118,7 +132,10 @@ func TestResolveAIProviderTool_CrossOrg_ReturnsNil(t *testing.T) {
 		_, _ = env.pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, otherOrgID)
 	})
 
-	row := resolveAIProviderTool(context.Background(), aiprovider.New(env.pool, nil, nil), otherOrgID.String(), "shared-name")
+	row, err := resolveAIProviderTool(context.Background(), aiprovider.New(env.pool, nil, nil), otherOrgID.String(), "shared-name")
+	if err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
 	if row != nil {
 		t.Errorf("expected nil for a cross-org lookup (org isolation), got %+v", row)
 	}
@@ -130,10 +147,32 @@ func TestResolveAIProviderTool_EmptyOrgOrTool_ReturnsNil(t *testing.T) {
 	env := newMainTestEnv(t)
 	apr := aiprovider.New(env.pool, nil, nil)
 
-	if row := resolveAIProviderTool(context.Background(), apr, "", "claude"); row != nil {
-		t.Errorf("expected nil for empty orgID, got %+v", row)
+	if row, err := resolveAIProviderTool(context.Background(), apr, "", "claude"); row != nil || err != nil {
+		t.Errorf("expected (nil, nil) for empty orgID, got (%+v, %v)", row, err)
 	}
-	if row := resolveAIProviderTool(context.Background(), apr, env.orgID.String(), ""); row != nil {
-		t.Errorf("expected nil for empty tool name, got %+v", row)
+	if row, err := resolveAIProviderTool(context.Background(), apr, env.orgID.String(), ""); row != nil || err != nil {
+		t.Errorf("expected (nil, nil) for empty tool name, got (%+v, %v)", row, err)
+	}
+}
+
+// TestResolveAIProviderTool_GenuineResolveError_ReturnsError (B-168) is
+// the previously-untested branch this whole fix exists for: a REAL,
+// non-ErrNotFound error (forced here via an already-closed pgxpool.Pool,
+// the same technique the live verification's REVOKE achieves against the
+// real DB) must be returned to the caller, never silently swallowed into
+// the same nil the legitimate not-found case returns. Before this fix,
+// this exact scenario was indistinguishable from
+// TestResolveAIProviderTool_UnregisteredName_ReturnsNil above -- the bug
+// this brief closes.
+func TestResolveAIProviderTool_GenuineResolveError_ReturnsError(t *testing.T) {
+	env := newMainTestEnv(t)
+	env.pool.Close() // real, deterministic non-ErrNotFound failure -- not simulated
+
+	row, err := resolveAIProviderTool(context.Background(), aiprovider.New(env.pool, nil, nil), env.orgID.String(), "claude")
+	if err == nil {
+		t.Fatal("expected a real error from a closed pool, got nil -- the resolution failure was silently swallowed")
+	}
+	if row != nil {
+		t.Errorf("expected a nil row alongside the error, got %+v", row)
 	}
 }
