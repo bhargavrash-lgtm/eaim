@@ -30,6 +30,7 @@ import (
 	"github.com/eami/gateway/internal/config"
 	"github.com/eami/gateway/internal/episode"
 	"github.com/eami/gateway/internal/identity"
+	"github.com/eami/gateway/internal/license"
 	"github.com/eami/gateway/internal/mcp"
 	"github.com/eami/gateway/internal/policyloader"
 	"github.com/eami/gateway/internal/proxy"
@@ -160,6 +161,14 @@ func run() error {
 	aiProviderRouter := aiprovider.New(pool, toolCipher, aiProviderRegistry)
 	slog.Info("ai provider router ready", "providers", len(aiProviderRegistry), "credentials_configured", toolCipher != nil)
 
+	// Modular licensing & entitlement system, Brief 1 of 3 (B-157 epic,
+	// built as B-169) -- the same real Postgres pool everything else above
+	// already uses, not a call to eami-api. ModuleLicensed independently
+	// re-verifies the stored raw_license against this package's own
+	// embedded vendor public key on every call; see internal/license's
+	// own doc comment for why that independence matters.
+	licenseChecker := license.New(pool)
+
 	holdTimeout := time.Duration(cfg.Approval.ExpirySeconds) * time.Second
 	approvalRouter := approval.New(
 		pool,
@@ -173,6 +182,10 @@ func run() error {
 		// brief found live (see approval.Router.toolRouter's doc comment).
 		toolRouter,
 		aiProviderRouter,
+		// Re-checked again at resume time, not just at Dispatch()'s own
+		// initial gate -- see approval.Router.licenseChecker's own doc
+		// comment (code review finding, B-169).
+		licenseChecker,
 	)
 	slog.Info("approval router ready",
 		"hold_timeout", holdTimeout,
@@ -209,6 +222,7 @@ func run() error {
 	dispatcher := NewDispatcher(
 		toolRouter,
 		aiProviderRouter,
+		licenseChecker,
 		// pLoader itself, NOT pLoader.Evaluator() -- B-129: calling
 		// .Evaluator() here would snapshot the rule set that exists at
 		// this instant and freeze it for the process's entire lifetime.

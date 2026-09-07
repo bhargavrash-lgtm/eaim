@@ -199,6 +199,11 @@ func (s *Server) Handler() http.Handler {
 			r.Use(s.requireRole("admin"))
 			r.Get("/v1/settings/org", s.GetOrgSettings)
 			r.Put("/v1/settings/org", s.UpdateOrgSettings)
+			// Licensing (B-157 epic, Brief 1, B-169): upload/renew is
+			// admin-only, same tier as every other org-wide settings
+			// write on this line.
+			r.Get("/v1/settings/license", s.GetLicense)
+			r.Post("/v1/settings/license", s.UploadLicense)
 			r.Get("/v1/settings/notifications", s.GetNotificationConfig)
 			r.Put("/v1/settings/notifications", s.UpdateNotificationConfig)
 			r.Post("/v1/settings/notifications/test", s.TestNotificationChannel)
@@ -306,14 +311,28 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/v1/gateway/episodes", s.ListGatewayEpisodes)
 			r.Get("/v1/gateway/episodes/search", s.SearchGatewayEpisodes)
 			r.Get("/v1/gateway/episodes/{episodeId}", s.GetGatewayEpisode)
-			// Discover (read)
-			// /v1/endpoints — agent machine inventory (eami-agent discovery data)
-			r.Get("/v1/endpoints", s.ListAgentEndpoints)
-			r.Get("/v1/endpoints/{endpointId}", s.GetAgentEndpoint)
-			// /v1/discover/endpoints — HTTP traffic observations (discovered_endpoints table)
-			r.Get("/v1/discover/endpoints", s.ListEndpoints)
-			r.Get("/v1/discover/endpoints/{endpointId}", s.GetEndpoint)
+			// Discover (read) -- Module 1 (B-157 epic). Nested group, not
+			// a sibling: inherits this group's own requireRole/
+			// viewerReadOnly stack (RBAC and licensing are orthogonal,
+			// independently composed checks -- see the B-157 investigation's
+			// Part C), adding requireModuleLicensed("discovery") on top.
+			// Scoped deliberately to exactly the two route-pairs the B-157
+			// investigation itself cited as the concrete curl-bypass proof
+			// -- NOT extended to /v1/paste-events* below, whose own module
+			// boundary is a genuinely open, undecided product question
+			// (disclosed, not silently resolved either way by this brief).
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireModuleLicensed("discovery"))
+				// /v1/endpoints — agent machine inventory (eami-agent discovery data)
+				r.Get("/v1/endpoints", s.ListAgentEndpoints)
+				r.Get("/v1/endpoints/{endpointId}", s.GetAgentEndpoint)
+				// /v1/discover/endpoints — HTTP traffic observations (discovered_endpoints table)
+				r.Get("/v1/discover/endpoints", s.ListEndpoints)
+				r.Get("/v1/discover/endpoints/{endpointId}", s.GetEndpoint)
+			})
 			// Paste events (B-038, read-only admin UI over B-032's paste_events)
+			// -- deliberately NOT under the discovery license gate above,
+			// see that comment.
 			r.Get("/v1/paste-events", s.ListPasteEvents)
 			r.Get("/v1/paste-events/timeseries", s.PasteEventsTimeSeries)
 		})

@@ -204,7 +204,7 @@ func newDispatchEnv(t *testing.T, e *workflowTestEnv, adapters map[string]aiprov
 	t.Cleanup(downstream.Close)
 	fwd := proxy.New(proxy.Config{DownstreamURL: downstream.URL}, downstream.Client())
 
-	approvalRouter := approval.New(e.pool, fwd, 5*time.Second, "", "", toolRouter, aiProviderRouter)
+	approvalRouter := approval.New(e.pool, fwd, 5*time.Second, "", "", toolRouter, aiProviderRouter, nil)
 	runCtx, cancel := context.WithCancel(ctx)
 	go approvalRouter.Run(runCtx)
 	t.Cleanup(cancel)

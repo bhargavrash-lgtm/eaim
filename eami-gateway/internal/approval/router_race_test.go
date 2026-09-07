@@ -83,7 +83,7 @@ func newRacyApprovalTestEnv(t *testing.T, holdTimeout, responseDelay time.Durati
 	t.Cleanup(downstream.Close)
 	fwd := proxy.New(proxy.Config{DownstreamURL: downstream.URL}, downstream.Client())
 
-	router := New(pool, fwd, holdTimeout, "", "", nil, nil)
+	router := New(pool, fwd, holdTimeout, "", "", nil, nil, nil)
 
 	return &approvalTestEnv{pool: pool, router: router, orgID: orgID, agentID: agentID}, &hitCount
 }

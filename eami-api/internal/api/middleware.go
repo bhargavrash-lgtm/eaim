@@ -4,10 +4,14 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/eami/api/internal/license"
 )
 
 // contextKey is a typed key for request context values.
@@ -117,6 +121,62 @@ func (s *Server) requireRole(allowed ...string) func(http.Handler) http.Handler 
 			if !set[uc.Role] {
 				writeError(w, http.StatusForbidden, "forbidden",
 					"your role ("+uc.Role+") does not have access to this resource")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// requireModuleLicensed returns a middleware that allows only requests
+// from an org whose CURRENT license (re-verified fresh on every request,
+// never trusted from a cache) includes the named module. Composes
+// independently with requireRole -- RBAC answers "can this user act,"
+// this answers "is the org entitled at all" -- two orthogonal AND-ed
+// conditions, the same way this codebase's own chi middleware chains
+// already stack unrelated checks (B-157 investigation's own Part C
+// finding, confirmed here in the actual implementation).
+//
+// Fails closed on every branch: no license uploaded, a license that
+// fails re-verification (expired, tampered, wrong org), or a genuine DB
+// error resolving it are all treated identically -- a 403, never a
+// silent pass-through. Deliberately not distinguishing "no license" from
+// "licensing check failed" in the response (a v1 simplification,
+// disclosed in BUILT.md, not silently glossed over) -- both must block
+// the request, and this brief has no sophistication requirement beyond
+// "hard block, clear message" (its own explicit scope).
+func (s *Server) requireModuleLicensed(module string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			uc := claimsFromContext(r)
+			row, err := s.queries.GetLatestLicense(r.Context(), uc.OrgID)
+			if err != nil {
+				if err != pgx.ErrNoRows {
+					// A genuine infrastructure error resolving licensing
+					// still fails closed (never fail open) -- logged so
+					// an operator can tell this apart from a genuinely
+					// unlicensed org, even though the client-facing
+					// message is deliberately identical either way.
+					slog.Error("license: failed to resolve org license", "org_id", uc.OrgID, "err", err)
+				}
+				writeError(w, http.StatusForbidden, "module_not_licensed",
+					"your organization is not licensed for the "+module+" module")
+				return
+			}
+			claims, verr := license.Verify(row.RawLicense)
+			// Security review finding (this brief): a licenses row's org_id
+			// column is never itself signed -- Verify only proves the JWT is
+			// genuine and unexpired, not that it was issued FOR this org. A
+			// privileged direct-DB write could otherwise relabel a
+			// genuinely-signed license belonging to a DIFFERENT org (read
+			// from a shared Postgres, a backup, or an MSP's other customer
+			// appliance) with this org's org_id, and this check would
+			// previously have accepted it. Re-deriving the binding from the
+			// claims themselves, exactly like UploadLicense already does at
+			// write time, closes that gap at read time too.
+			if verr != nil || claims.OrgID() != uc.OrgID.String() || !claims.HasModule(module) {
+				writeError(w, http.StatusForbidden, "module_not_licensed",
+					"your organization is not licensed for the "+module+" module")
 				return
 			}
 			next.ServeHTTP(w, r)

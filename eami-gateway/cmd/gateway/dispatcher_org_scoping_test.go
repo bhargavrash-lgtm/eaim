@@ -80,7 +80,7 @@ func TestDispatch_OrgScoping_TwoOrgsConflictingPolicies(t *testing.T) {
 	aiProviderRouter := aiprovider.New(env.pool, nil, map[string]aiprovider.Adapter{})
 
 	holdTimeout := 5 * time.Second
-	approvalRouter := approval.New(env.pool, fwd, holdTimeout, "", "", toolRouter, aiProviderRouter)
+	approvalRouter := approval.New(env.pool, fwd, holdTimeout, "", "", toolRouter, aiProviderRouter, nil)
 	runCtx, cancel := context.WithCancel(context.Background())
 	go approvalRouter.Run(runCtx)
 	t.Cleanup(cancel)
@@ -133,7 +133,7 @@ func TestDispatch_OrgScoping_TwoOrgsConflictingPolicies(t *testing.T) {
 	}
 
 	dispatcher := NewDispatcher(
-		toolRouter, aiProviderRouter, pLoader,
+		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, pLoader,
 		auditWriter, episodeRecorder, approvalRouter, fwd,
 		"", "", holdTimeout,
 	)

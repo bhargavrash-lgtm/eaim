@@ -89,7 +89,7 @@ func newApprovalTestEnv(t *testing.T, holdTimeout time.Duration) *approvalTestEn
 	// not resume-time dynamic dispatch (see router_dispatch_test.go for
 	// that). A nil pair means dispatchApproved falls straight through to
 	// fwd, unchanged from this file's pre-existing behavior.
-	router := New(pool, fwd, holdTimeout, "", "", nil, nil)
+	router := New(pool, fwd, holdTimeout, "", "", nil, nil, nil)
 
 	return &approvalTestEnv{pool: pool, router: router, orgID: orgID, agentID: agentID}
 }

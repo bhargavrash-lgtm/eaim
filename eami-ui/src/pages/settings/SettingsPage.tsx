@@ -14,6 +14,7 @@ import { useUsers, useInviteUser, useChangeUserRole, useRevokeUser, type UserRol
 import { useNotificationSettings, useUpdateNotificationSettings, useTestNotification } from '@/hooks/useNotificationSettings'
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from '@/hooks/useApiKeys'
 import { useAgents, type Agent } from '@/hooks/useAgents'
+import { useLicense, useUploadLicense } from '@/hooks/useLicense'
 import {
   useModelPricing,
   useCreateModelPricing,
@@ -903,15 +904,110 @@ function ModelPricingTab() {
   )
 }
 
+// ── Tab 6: License (B-169, Brief 1 of 3 of the B-157 licensing epic) ─────────
+// Upload-only: the appliance never generates a license (see
+// eami-gateway/eami-api's internal/license packages) -- this form pastes
+// a vendor-issued raw JWT and shows the org's current entitlement. No
+// trial/grace-period/upgrade-prompt UX yet (Brief 3 scope) -- a rejected
+// upload just surfaces the server's real error message.
+
+const licenseSchema = z.object({
+  raw_license: z.string().min(1, 'Paste the license text you received from EAMI'),
+})
+type LicenseFormValues = z.infer<typeof licenseSchema>
+
+const MODULE_LABELS: Record<string, string> = {
+  discovery: 'Discovery',
+  gateway: 'Gateway',
+  ai_infrastructure: 'AI Infrastructure',
+}
+
+function LicenseTab() {
+  const { data: license, isLoading } = useLicense()
+  const upload = useUploadLicense()
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
+
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<LicenseFormValues>({
+    resolver: zodResolver(licenseSchema),
+    defaultValues: { raw_license: '' },
+  })
+
+  async function onSubmit(values: LicenseFormValues) {
+    try {
+      await upload.mutateAsync(values.raw_license)
+      setToast({ msg: 'License uploaded and verified.', type: 'success' })
+      reset()
+    } catch (err) {
+      setToast({ msg: err instanceof Error ? err.message : 'License upload failed.', type: 'error' })
+    }
+    setTimeout(() => setToast(null), 4000)
+  }
+
+  if (isLoading) return <div className="flex justify-center py-16"><LoadingSpinner /></div>
+
+  return (
+    <div className="max-w-lg space-y-6">
+      <section>
+        <h3 className="text-sm font-semibold text-gray-900 mb-1">Current license</h3>
+        {license ? (
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm space-y-2">
+            <div className="flex items-center gap-2">
+              <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                license.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+              }`}>
+                {license.status === 'active' ? 'Active' : 'Expired'}
+              </span>
+              <span className="text-xs text-gray-400">
+                Valid {new Date(license.valid_from).toLocaleDateString()} – {new Date(license.valid_until).toLocaleDateString()}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {license.modules.map((m) => (
+                <span key={m} className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-800">
+                  {MODULE_LABELS[m] ?? m}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <EmptyState title="No license uploaded" description="Discovery and Gateway features are blocked until a valid license is uploaded." />
+        )}
+      </section>
+
+      <section>
+        <h3 className="text-sm font-semibold text-gray-900 mb-1">Upload a license</h3>
+        <p className="text-xs text-gray-500 mb-3">Paste the license text provided by EAMI. It's verified locally — nothing is sent anywhere else.</p>
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
+          <div>
+            <textarea
+              {...register('raw_license')}
+              rows={6}
+              placeholder="eyJhbGciOiJSUzI1NiIs…"
+              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-xs font-mono shadow-sm
+                focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+            <FieldError message={errors.raw_license?.message} />
+          </div>
+          <div className="flex items-center gap-4">
+            <SaveButton isLoading={upload.isPending} label="Upload license" />
+            {toast && <Toast message={toast.msg} type={toast.type} />}
+          </div>
+        </form>
+      </section>
+    </div>
+  )
+}
+
 // ── Tab bar + routing ──────────────────────────────────────────────────────────
 
-type TabId = 'org' | 'users' | 'notifications' | 'api-keys' | 'model-pricing'
+type TabId = 'org' | 'users' | 'notifications' | 'api-keys' | 'model-pricing' | 'license'
 const TABS: { id: TabId; label: string }[] = [
   { id: 'org', label: 'Organisation' },
   { id: 'users', label: 'Users' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'api-keys', label: 'API Keys' },
   { id: 'model-pricing', label: 'Model Pricing' },
+  { id: 'license', label: 'License' },
 ]
 
 // ── Main page ──────────────────────────────────────────────────────────────────
@@ -959,6 +1055,7 @@ export function SettingsPage() {
         {activeTab === 'notifications' && <NotificationsTab />}
         {activeTab === 'api-keys' && <ApiKeysTab />}
         {activeTab === 'model-pricing' && <ModelPricingTab />}
+        {activeTab === 'license' && <LicenseTab />}
       </div>
     </div>
   )

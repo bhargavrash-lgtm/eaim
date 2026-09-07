@@ -82,6 +82,19 @@ type staticEvaluatorSource struct{ ev policy.Evaluator }
 
 func (s staticEvaluatorSource) Evaluator() policy.Evaluator { return s.ev }
 
+// alwaysLicensedChecker implements LicenseChecker (B-157 epic, Brief 1,
+// B-169), unconditionally reporting every module as licensed -- the
+// shared fake for every test in this file that isn't itself about
+// licensing (the overwhelming majority): policy/audit/episode/token-
+// usage/TOCTOU behavior must keep working completely unaffected by this
+// brief's own new gate, with no test needing to seed a real licenses row
+// just to stay green. Licensing's own gate behavior (both the "blocked"
+// and "allowed" cases, against a real Postgres-backed license.Store) is
+// tested separately, in dispatcher_license_test.go.
+type alwaysLicensedChecker struct{}
+
+func (alwaysLicensedChecker) ModuleLicensed(context.Context, string, string) bool { return true }
+
 // dispatcherTestEnv bundles one test's real, wired Dispatcher.
 type dispatcherTestEnv struct {
 	env        *mainTestEnv
@@ -152,7 +165,7 @@ func newDispatcherTestEnvFromEnv(t *testing.T, env *mainTestEnv, action string, 
 	toolRouter := toolrouter.New(env.pool, nil)
 	aiProviderRouter := aiprovider.New(env.pool, nil, map[string]aiprovider.Adapter{})
 
-	approvalRouter := approval.New(env.pool, fwd, holdTimeout, "", "", toolRouter, aiProviderRouter)
+	approvalRouter := approval.New(env.pool, fwd, holdTimeout, "", "", toolRouter, aiProviderRouter, nil)
 	runCtx, cancel := context.WithCancel(context.Background())
 	go approvalRouter.Run(runCtx)
 	t.Cleanup(cancel)
@@ -160,7 +173,7 @@ func newDispatcherTestEnvFromEnv(t *testing.T, env *mainTestEnv, action string, 
 	episodeRecorder := episode.New(env.pool)
 
 	dispatcher := NewDispatcher(
-		toolRouter, aiProviderRouter, staticEvaluatorSource{ev: &fakeEvaluator{action: action}},
+		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, staticEvaluatorSource{ev: &fakeEvaluator{action: action}},
 		auditWriter, episodeRecorder, approvalRouter, fwd,
 		"", "", holdTimeout, extraHooks...,
 	)
@@ -775,7 +788,7 @@ func TestDispatch_AuditWriteFailure_AllowProxyError_LoggedWithCorrectDecision(t 
 	deadServer := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	deadServer.Close()
 	brokenFwd := proxy.New(proxy.Config{DownstreamURL: deadServer.URL}, http.DefaultClient)
-	approvalRouter := approval.New(env.pool, brokenFwd, holdTimeout, "", "", toolRouter, aiProviderRouter)
+	approvalRouter := approval.New(env.pool, brokenFwd, holdTimeout, "", "", toolRouter, aiProviderRouter, nil)
 	runCtx, cancel := context.WithCancel(context.Background())
 	go approvalRouter.Run(runCtx)
 	t.Cleanup(cancel)
@@ -783,7 +796,7 @@ func TestDispatch_AuditWriteFailure_AllowProxyError_LoggedWithCorrectDecision(t 
 	auditWriter := audit.NewWithDB(&failingAuditDB{err: injectedErr})
 
 	dispatcher := NewDispatcher(
-		toolRouter, aiProviderRouter, staticEvaluatorSource{ev: &fakeEvaluator{action: policy.ActionAllow}},
+		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, staticEvaluatorSource{ev: &fakeEvaluator{action: policy.ActionAllow}},
 		auditWriter, episodeRecorder, approvalRouter, brokenFwd,
 		"", "", holdTimeout,
 	)

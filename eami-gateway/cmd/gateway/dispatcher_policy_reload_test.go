@@ -73,7 +73,7 @@ func TestDispatch_PolicyReload_TakesEffectWithoutRestart(t *testing.T) {
 	aiProviderRouter := aiprovider.New(env.pool, nil, map[string]aiprovider.Adapter{})
 
 	holdTimeout := 5 * time.Second
-	approvalRouter := approval.New(env.pool, fwd, holdTimeout, "", "", toolRouter, aiProviderRouter)
+	approvalRouter := approval.New(env.pool, fwd, holdTimeout, "", "", toolRouter, aiProviderRouter, nil)
 	runCtx, cancel := context.WithCancel(context.Background())
 	go approvalRouter.Run(runCtx)
 	t.Cleanup(cancel)
@@ -95,7 +95,7 @@ func TestDispatch_PolicyReload_TakesEffectWithoutRestart(t *testing.T) {
 
 	// pLoader itself, not pLoader.Evaluator() -- the fix under test.
 	dispatcher := NewDispatcher(
-		toolRouter, aiProviderRouter, pLoader,
+		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, pLoader,
 		auditWriter, episodeRecorder, approvalRouter, fwd,
 		"", "", holdTimeout,
 	)
@@ -185,7 +185,7 @@ func TestDispatch_PolicyReload_FrozenSnapshotWiring_ReproducesTheBug(t *testing.
 	aiProviderRouter := aiprovider.New(env.pool, nil, map[string]aiprovider.Adapter{})
 
 	holdTimeout := 5 * time.Second
-	approvalRouter := approval.New(env.pool, fwd, holdTimeout, "", "", toolRouter, aiProviderRouter)
+	approvalRouter := approval.New(env.pool, fwd, holdTimeout, "", "", toolRouter, aiProviderRouter, nil)
 	runCtx, cancel := context.WithCancel(context.Background())
 	go approvalRouter.Run(runCtx)
 	t.Cleanup(cancel)
@@ -204,7 +204,7 @@ func TestDispatch_PolicyReload_FrozenSnapshotWiring_ReproducesTheBug(t *testing.
 	// The pre-fix pattern, reproduced exactly: pLoader.Evaluator() called
 	// ONCE here and frozen inside staticEvaluatorSource, never re-read.
 	dispatcher := NewDispatcher(
-		toolRouter, aiProviderRouter, staticEvaluatorSource{ev: pLoader.Evaluator()},
+		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, staticEvaluatorSource{ev: pLoader.Evaluator()},
 		auditWriter, episodeRecorder, approvalRouter, fwd,
 		"", "", holdTimeout,
 	)

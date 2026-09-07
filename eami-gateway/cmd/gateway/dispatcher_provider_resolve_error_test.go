@@ -77,7 +77,7 @@ func newDispatcherTestEnvBrokenAIProviderResolve(t *testing.T, action string) (*
 	aiProviderRouter := aiprovider.New(brokenPool, nil, map[string]aiprovider.Adapter{})
 
 	holdTimeout := 5 * time.Second
-	approvalRouter := approval.New(env.pool, fwd, holdTimeout, "", "", toolRouter, aiProviderRouter)
+	approvalRouter := approval.New(env.pool, fwd, holdTimeout, "", "", toolRouter, aiProviderRouter, nil)
 	runCtx, cancel := context.WithCancel(context.Background())
 	go approvalRouter.Run(runCtx)
 	t.Cleanup(cancel)
@@ -85,7 +85,7 @@ func newDispatcherTestEnvBrokenAIProviderResolve(t *testing.T, action string) (*
 	episodeRecorder := episode.New(env.pool)
 
 	dispatcher := NewDispatcher(
-		toolRouter, aiProviderRouter, staticEvaluatorSource{ev: &fakeEvaluator{action: action}},
+		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, staticEvaluatorSource{ev: &fakeEvaluator{action: action}},
 		auditWriter, episodeRecorder, approvalRouter, fwd,
 		"", "", holdTimeout,
 	)

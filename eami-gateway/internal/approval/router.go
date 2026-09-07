@@ -245,6 +245,33 @@ type Router struct {
 	// omit them) -- see dispatchApproved's nil-safe fallback chain.
 	toolRouter       *toolrouter.Router
 	aiProviderRouter *aiprovider.Router
+
+	// licenseChecker re-checks the Gateway module's license immediately
+	// before an approved call actually resumes. Code review finding (this
+	// brief, B-169): Dispatcher.Dispatch's own license gate runs once, at
+	// escalation-SUBMIT time -- but the escalation hold window (up to
+	// holdTimeout, minutes to hours) means the org's license can expire or
+	// be revoked while the request sits waiting for a human decision. Since
+	// the real downstream call for an approved escalation happens here, in
+	// dispatchApproved, not by looping back through Dispatch(), this is the
+	// only place that can actually re-close that window -- the same
+	// reasoning that already motivated fetchResolvedConnector's own
+	// config-hash TOCTOU re-check just below. Interface (not the concrete
+	// license.Store type) for the same reason cmd/gateway's own
+	// LicenseChecker is an interface: this package cannot import
+	// eami-gateway/internal/license without eami-api's separate module
+	// also needing it, so a small structurally-typed interface is defined
+	// here instead of shared.
+	licenseChecker LicenseChecker
+}
+
+// LicenseChecker reports whether orgID's current license includes module.
+// Mirrors cmd/gateway's own LicenseChecker interface (same shape,
+// independently defined per this package's own doc comment above -- Go's
+// structural typing means license.Store satisfies both without either
+// package importing the other).
+type LicenseChecker interface {
+	ModuleLicensed(ctx context.Context, orgID, module string) bool
 }
 
 // New creates a Router.
@@ -261,6 +288,7 @@ func New(
 	uiBaseURL string,
 	toolRouter *toolrouter.Router,
 	aiProviderRouter *aiprovider.Router,
+	licenseChecker LicenseChecker,
 ) *Router {
 	return &Router{
 		pool:             pool,
@@ -270,6 +298,7 @@ func New(
 		uiBaseURL:        uiBaseURL,
 		toolRouter:       toolRouter,
 		aiProviderRouter: aiProviderRouter,
+		licenseChecker:   licenseChecker,
 	}
 }
 
@@ -832,6 +861,15 @@ func (r *Router) recordResumeOutcome(ctx context.Context, approvalID, outcome st
 // actually follows a real r.aiProviderRouter.Dispatch call produces a
 // non-nil pointer.
 func (r *Router) dispatchApproved(ctx context.Context, approvalID string, req Request) (proxy.ToolResponse, *int, error) {
+	// Re-check licensing immediately before resuming -- see licenseChecker's
+	// own doc comment on the Router struct for why this can't just rely on
+	// Dispatch()'s own gate at escalation-submit time. Checked before the
+	// static-fallback branch too: an unlicensed org gets no dispatch at all
+	// via any path, not just the dynamically-resolved one.
+	if r.licenseChecker != nil && !r.licenseChecker.ModuleLicensed(ctx, req.OrgID, "gateway") {
+		r.recordResumeOutcome(ctx, approvalID, "license_revoked")
+		return proxy.ToolResponse{}, nil, errors.New("approval: your organization is no longer licensed for the Gateway module -- refusing to resume this approved call")
+	}
 	if req.ResolvedToolID == "" {
 		r.recordResumeOutcome(ctx, approvalID, "static_fallback")
 		tr, err := r.fwd.Forward(ctx, proxy.ToolRequest{

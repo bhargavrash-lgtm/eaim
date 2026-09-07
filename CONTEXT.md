@@ -1373,8 +1373,87 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-07) — B-169: modular licensing foundation
+(Brief 1 of 3 of the B-157 epic), signed offline RS256 JWT licenses, dual
+enforcement gates for Module 1/Discovery and Module 2/Gateway, built per
+B-157's own completed investigation (logged this same session, having
+previously only ever been delivered as a chat report — see BACKLOG.md's
+B-157 entry). New `licenses` table (append-only by application
+discipline), a verification-only `internal/license` package deliberately
+duplicated identically into both `eami-gateway` and `eami-api` (separate
+Go modules; the whole design point is eami-gateway never trusting
+eami-api's own decoded state, so sharing the code would undercut that),
+a fixed TEST vendor public key baked in at build time (never the real
+production key — vendor-side signing tooling is out of scope). Gate 1:
+`Dispatcher.Dispatch`'s B-102 convergence point, org-level, before tool
+resolution. Gate 2: a new `requireModuleLicensed` HTTP middleware
+mirroring `requireRole`, gating exactly `/v1/endpoints*`/
+`/v1/discover/endpoints*` — the precise curl-bypass gap B-157's own
+investigation demonstrated; `/v1/paste-events*` deliberately, visibly
+left outside the gate, disclosed rather than silently resolved.
+
+**Mandatory reviewer + security passes both found real issues, not a
+clean first pass — both fixed before commit:** a CRITICAL gap (neither
+enforcement gate re-checked a `licenses` row's own `org_id` column
+against the org_id actually SIGNED inside its own JWT — only the upload
+handler checked this; a privileged direct-DB write, exactly the
+adversary capability this brief's own threat model grants, could relabel
+a genuinely-signed license belonging to a DIFFERENT org as the
+attacker's own and have both gates accept it) and a HIGH gap
+(`Dispatcher.Dispatch`'s license check runs once, at escalation-submit
+time, but the real downstream call for an APPROVED escalation happens
+later in `approval.Router.dispatchApproved`, which never loops back
+through `Dispatch()` — an org whose license was revoked while a request
+sat in the approval hold window would still have that call genuinely
+dispatched once approved). Both fixed in-brief: the org-binding
+cross-check added to both `Store.currentClaims` and
+`requireModuleLicensed`; a new `LicenseChecker` re-check added to
+`dispatchApproved` itself (new `resume_outcome` value `license_revoked`,
+migration `000016`). Two Low findings (missing tiebreaker on "most
+recent license" queries; a leaked verbose JWT-error message on upload)
+also fixed. Both fixes have dedicated regression tests AND were
+additionally live-verified against the real running stack beyond their
+automated tests. Full technical detail in `BUILT.md`; full resolution
+narrative in `BACKLOG.md`'s B-169 entry.
+
+**First-license-at-setup question, resolved before this brief was called
+complete, per explicit user direction:** does the setup wizard
+(`bootstrap.go`/`SetupWizardPage.tsx`) require a valid license before
+allowing first-boot setup to proceed, or does the appliance stand up
+unlicensed with this brief's own gates enforcing later? **Recommendation,
+adopted: no wizard change.** Confirmed by direct code read: `Bootstrap`
+has zero license check anywhere, and `SetupWizardPage.tsx`'s only
+post-bootstrap path is a manual `<Link to="/login">` — every new admin
+re-authenticates through normal login, which is exactly where this
+brief's own gates first apply. The appliance already correctly stands up
+unlicensed for free; folding a license-paste step into the setup wizard
+would conflate two orthogonal trust boundaries (physical-console
+single-use setup-token access vs. vendor entitlement JWT) inside an
+already-tight, high-consequence flow, and would actively hurt a customer
+whose license hasn't arrived yet. Documented as a deliberate
+architectural decision: the first-license moment is, and should remain,
+identical to renewal — DB-backed, admin-driven, via Settings after
+login, never part of the wizard.
+
+**Two new backlog items logged the same session, both not started:**
+B-170 (extend the setup wizard to guide onboarding through creating a
+first governed agent, sequenced explicitly AFTER this epic's own Briefs
+2/3 close, since it depends on this brief's own Gateway-module license
+gate to check against) and a forward-looking scope note appended to
+B-139's own entry (agentless discovery, whenever eventually built,
+should include a setup-wizard integration point for configuring an
+agentless collector — not buildable now, B-139 itself has zero
+investigation done).
+
 ## Last updated
-2026-09-05 by Claude Code — B-168 built, reviewed, and live-verified with a
+2026-09-07 by Claude Code — B-169 built, both mandatory reviews found real
+issues (one Critical, one High) that were fixed before commit, fully
+live-verified including both fixes against the real running stack (see
+Active decision thread above). Two new backlog items logged (B-170; a
+forward-looking note on B-139); B-157's own investigation (previously
+undocumented in this file/BACKLOG.md, delivered only as a chat report)
+logged retroactively in the same pass. Previous entry, preserved below:
+2026-09-05 — B-168 built, reviewed, and live-verified with a
 real forced database failure (see Active decision thread above). Previous
 entry, preserved below: 2026-09-04 — B-167 built, reviewed, fixed, and
 live-verified with real Anthropic API spend; B-168 (a newly-found,

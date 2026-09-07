@@ -20,6 +20,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -146,9 +147,26 @@ type DispatchHook func(ctx context.Context, ac mcp.ActionContext, o DispatchOutc
 // multi-branch fan-out shape this solves (this one) -- do not generalize
 // this into a repo-wide event-bus abstraction without a second,
 // independently-confirmed site needing it.
+// LicenseChecker abstracts license.Store (an interface, not a concrete
+// type, for the identical reason policy.EvaluatorSource below is one:
+// testability -- the large majority of this file's existing tests are
+// about policy/audit/episode/token-usage behavior, not licensing, and
+// must not need to seed a real licenses row just to keep working
+// unaffected by this brief's own new gate). *license.Store satisfies
+// this via Go's structural typing with no adapter needed.
+type LicenseChecker interface {
+	ModuleLicensed(ctx context.Context, orgID, module string) bool
+}
+
 type Dispatcher struct {
 	toolRouter       *toolrouter.Router
 	aiProviderRouter *aiprovider.Router
+	// licenseChecker (B-157 epic, Brief 1, B-169) gates Module 2/Gateway
+	// wholesale -- see Dispatch's own top-of-function check. Every real
+	// dispatch through this Dispatcher IS a Gateway-module action, so
+	// this is a single org-level boolean, not a per-tool distinction the
+	// way toolRouter/aiProviderRouter's resolution is.
+	licenseChecker LicenseChecker
 	// policyEvalSource is read fresh (policyEvalSource.Evaluator()) on
 	// every Dispatch call, not cached -- see policy.EvaluatorSource's doc
 	// comment (B-129: a Dispatcher that instead stored a plain
@@ -176,6 +194,7 @@ type Dispatcher struct {
 func NewDispatcher(
 	toolRouter *toolrouter.Router,
 	aiProviderRouter *aiprovider.Router,
+	licenseChecker LicenseChecker,
 	policyEvalSource policy.EvaluatorSource,
 	auditWriter *audit.Writer,
 	episodeRecorder *episode.Recorder,
@@ -188,6 +207,7 @@ func NewDispatcher(
 	d := &Dispatcher{
 		toolRouter:       toolRouter,
 		aiProviderRouter: aiProviderRouter,
+		licenseChecker:   licenseChecker,
 		policyEvalSource: policyEvalSource,
 		auditWriter:      auditWriter,
 		episodeRecorder:  episodeRecorder,
@@ -387,6 +407,20 @@ func newEpisodeStep(ac mcp.ActionContext, decision string, result json.RawMessag
 // branch, only after the branch's own outcome was fully known.
 func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (json.RawMessage, error) {
 	start := time.Now()
+
+	// Licensing gate (B-157 epic, Brief 1, B-169) -- org-level, checked
+	// before anything else in this function, including tool resolution
+	// and policy evaluation: every real call that reaches here IS a
+	// Module 2/Gateway action, so this is a cheap fast-fail that doesn't
+	// need to know which specific tool/connector is being dispatched to.
+	// Per the B-157 investigation's own Part B finding, this is the one
+	// real convergence point both production callers (an immediate MCP
+	// tool_call and a workflow step, both via mcp.Handler/workflow.
+	// Executor calling this exact method) go through -- there is no
+	// second dispatch path this check could be bypassed via.
+	if !d.licenseChecker.ModuleLicensed(reqCtx, ac.OrgID, "gateway") {
+		return d.rejectOnMissingLicense(reqCtx, ac, start)
+	}
 
 	// Resolve ac.Tool against gateway_tools, org-scoped, before policy
 	// evaluation (B-044) -- so a rule can target the resolved
@@ -808,6 +842,52 @@ func (d *Dispatcher) rejectOnProviderResolveError(reqCtx context.Context, ac mcp
 	outcome := DispatchOutcome{
 		Decision:       "denied",
 		Err:            fmt.Errorf("dispatch: ai_provider connector resolution failed: %w", resolveErr),
+		EpisodeSteps:   []episode.Step{newEpisodeStep(ac, "blocked", nil)},
+		EpisodeOutcome: "blocked",
+		AuditWriteErr:  auditWriteErr,
+		AuditDecision:  auditEntry.Decision,
+	}
+	outcome.Dispatched = outcome.Err == nil
+
+	for _, h := range d.hooks {
+		h(reqCtx, ac, outcome)
+	}
+	return outcome.Result, outcome.Err
+}
+
+// rejectOnMissingLicense (B-157 epic, Brief 1, B-169) is Dispatch's very
+// first exit point -- an org without a currently-valid license including
+// the "gateway" module never reaches tool resolution, policy evaluation,
+// or any of the Deny/Escalate/Allow branches at all. Mirrors
+// rejectOnProviderResolveError's exact shape (real audit_log row,
+// Parameters explicitly nil, the same DispatchOutcome/hook-loop
+// convergence) -- a clean, clearly-logged rejection, never a silent
+// no-op and never a partial dispatch.
+func (d *Dispatcher) rejectOnMissingLicense(reqCtx context.Context, ac mcp.ActionContext, start time.Time) (json.RawMessage, error) {
+	slog.Warn("dispatch: org is not licensed for the gateway module -- rejecting",
+		"tool", ac.Tool, "org_id", ac.OrgID, "agent", ac.AgentName)
+
+	orgID, _ := uuid.Parse(ac.OrgID)
+	agentID, _ := uuid.Parse(ac.AgentUUID)
+	workflowRunID, _ := uuid.Parse(ac.WorkflowRunID)
+	auditEntry := audit.Entry{
+		OrgID:         orgID,
+		AgentID:       agentID,
+		AgentName:     ac.AgentName,
+		ToolName:      ac.Tool,
+		Action:        ac.Action,
+		Parameters:    nil,
+		LatencyMS:     time.Since(start).Milliseconds(),
+		Timestamp:     ac.ReceivedAt,
+		WorkflowRunID: workflowRunID,
+		StepIndex:     ac.StepIndex,
+		Decision:      "denied",
+	}
+	auditWriteErr := d.auditWriter.Write(reqCtx, auditEntry)
+
+	outcome := DispatchOutcome{
+		Decision:       "denied",
+		Err:            errors.New("dispatch: your organization is not licensed for the Gateway module"),
 		EpisodeSteps:   []episode.Step{newEpisodeStep(ac, "blocked", nil)},
 		EpisodeOutcome: "blocked",
 		AuditWriteErr:  auditWriteErr,
