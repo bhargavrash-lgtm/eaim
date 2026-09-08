@@ -19,7 +19,7 @@ type License struct {
 	Modules     []string
 	ValidFrom   time.Time
 	ValidUntil  time.Time
-	UsageLimits []byte // raw JSONB, nil if not set -- not decoded/used by this brief (Brief 2's scope)
+	UsageLimits []byte // raw JSONB, nil if not set -- decoded on demand by license.Verify's own Claims, never trusted from this cached column for enforcement (B-157 epic, Brief 2)
 	CreatedAt   time.Time
 }
 
@@ -33,17 +33,24 @@ type CreateLicenseParams struct {
 	Modules    []string
 	ValidFrom  time.Time
 	ValidUntil time.Time
+	// UsageLimits (B-157 epic, Brief 2) is the license's own signed
+	// usage_limits claim, re-marshaled to JSON by the caller (license.go's
+	// UploadLicense) -- nil when the license sets no volume cap, matching
+	// this column's own nullable JSONB type. Never independently editable
+	// after insert, same "decoded, denormalized cache of the JWT's own
+	// claims" contract as Modules/ValidFrom/ValidUntil.
+	UsageLimits []byte
 }
 
 const createLicenseSQL = `
-INSERT INTO licenses (org_id, raw_license, modules, valid_from, valid_until)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO licenses (org_id, raw_license, modules, valid_from, valid_until, usage_limits)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, org_id, raw_license, modules, valid_from, valid_until, usage_limits, created_at`
 
 func (q *Queries) CreateLicense(ctx context.Context, p CreateLicenseParams) (License, error) {
 	var l License
 	err := q.db.QueryRow(ctx, createLicenseSQL,
-		toPgtypeUUID(p.OrgID), p.RawLicense, p.Modules, p.ValidFrom, p.ValidUntil,
+		toPgtypeUUID(p.OrgID), p.RawLicense, p.Modules, p.ValidFrom, p.ValidUntil, p.UsageLimits,
 	).Scan(&l.ID, &l.OrgID, &l.RawLicense, &l.Modules, &l.ValidFrom, &l.ValidUntil, &l.UsageLimits, &l.CreatedAt)
 	return l, err
 }

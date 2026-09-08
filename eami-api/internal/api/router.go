@@ -211,11 +211,23 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/v1/users/invite", s.InviteUser)
 			r.Put("/v1/users/{userId}/role", s.UpdateUserRole)
 			r.Delete("/v1/users/{userId}", s.DeleteUser)
-			// model_pricing (B-112) is a global, cross-org table (no
-			// org_id column) -- gated admin-only rather than the looser
-			// admin+operator gating agents/policies/tools use below,
-			// since a write here affects every org's cost reporting, not
-			// just the calling org's own resources.
+		})
+
+		// ── Platform-admin only: model_pricing writes (B-113 fix, B-157
+		// epic Brief 2) ──────────────────────────────────────────────────
+		// model_pricing (B-112) is a global, cross-org table (no org_id
+		// column) -- a write here affects every other org's cost
+		// reporting, not just the calling org's own resources. B-112
+		// mitigated this as far as it could in-scope (admin-only, still
+		// stricter than agents/policies/tools' admin+operator gating) but
+		// explicitly deferred the real fix (B-113): even "admin" is an
+		// ORG-scoped role, so any org's admin could still reach a
+		// genuinely global table. platform_admin is a distinct 5th tier,
+		// not a superset of admin and not assignable through any API
+		// (users.go's own comment) -- closing B-113 for real, not just
+		// narrowing its blast radius further.
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireRole("platform_admin"))
 			r.Post("/v1/admin/model-pricing", s.CreateModelPricing)
 			r.Patch("/v1/admin/model-pricing/{model}", s.UpdateModelPricing)
 			r.Delete("/v1/admin/model-pricing/{model}", s.DeleteModelPricing)

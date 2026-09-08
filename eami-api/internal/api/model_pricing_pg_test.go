@@ -41,6 +41,25 @@ func (e *finOpsPgTestEnv) operatorToken(t *testing.T) string {
 	return tok
 }
 
+// platformAdminToken issues a "platform_admin"-role JWT (B-157 epic,
+// Brief 2, B-113's own fix) -- the tier model-pricing's write routes now
+// require instead of ordinary "admin". Minting it directly here, the same
+// way adminToken/operatorToken above bypass a real login flow, mirrors
+// this test suite's own established convention -- it does NOT imply
+// platform_admin is obtainable this way in production: no
+// InviteUser/UpdateUserRole code path will ever issue this role (see
+// users.go's own comment), it is provisioned only by a direct SQL
+// statement against users.role, which a real login then reads back into
+// a JWT exactly like any other role.
+func (e *finOpsPgTestEnv) platformAdminToken(t *testing.T) string {
+	t.Helper()
+	tok, _, err := e.authSvc.IssueAccessToken(uuid.New(), e.orgID, "platform-admin@finops-test.example", "platform_admin")
+	if err != nil {
+		t.Fatalf("issue platform_admin token: %v", err)
+	}
+	return tok
+}
+
 func (e *finOpsPgTestEnv) doModelPricing(t *testing.T, method, path, token string, body any) *http.Response {
 	t.Helper()
 	var reader *bytes.Reader
@@ -84,12 +103,16 @@ func (e *finOpsPgTestEnv) deleteModelPricingCleanup(t *testing.T, model string) 
 // the list, update, delete, and gone from the list afterward.
 func TestModelPricingCRUD_RealDB_FullRoundTrip(t *testing.T) {
 	env := newFinOpsPgTestEnv(t)
+	// Writes now require platform_admin (B-113 fix, B-157 epic Brief 2) --
+	// admin is kept only for the read (list) calls below, which remain
+	// unaffected (admin+operator+viewer group, untouched by this brief).
 	admin := env.adminToken(t)
+	platformAdmin := env.platformAdminToken(t)
 	model := "b112-crud-roundtrip-" + env.orgID.String()[:8]
 	env.deleteModelPricingCleanup(t, model)
 
 	cacheWrite5m := 0.01
-	resp := env.doModelPricing(t, http.MethodPost, "/v1/admin/model-pricing", admin, map[string]any{
+	resp := env.doModelPricing(t, http.MethodPost, "/v1/admin/model-pricing", platformAdmin, map[string]any{
 		"model":                      model,
 		"cost_per_1k_in":             0.005,
 		"cost_per_1k_out":            0.015,
@@ -135,7 +158,7 @@ func TestModelPricingCRUD_RealDB_FullRoundTrip(t *testing.T) {
 
 	// Update (AC2's mechanism, proven through the API rather than raw SQL).
 	newRate := 0.05
-	resp = env.doModelPricing(t, http.MethodPatch, "/v1/admin/model-pricing/"+model, admin, map[string]any{
+	resp = env.doModelPricing(t, http.MethodPatch, "/v1/admin/model-pricing/"+model, platformAdmin, map[string]any{
 		"cost_per_1k_in": newRate,
 	})
 	if resp.StatusCode != http.StatusOK {
@@ -158,7 +181,7 @@ func TestModelPricingCRUD_RealDB_FullRoundTrip(t *testing.T) {
 	}
 
 	// Delete.
-	resp = env.doModelPricing(t, http.MethodDelete, "/v1/admin/model-pricing/"+model, admin, nil)
+	resp = env.doModelPricing(t, http.MethodDelete, "/v1/admin/model-pricing/"+model, platformAdmin, nil)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("delete: want 204, got %d", resp.StatusCode)
 	}
@@ -178,7 +201,7 @@ func TestModelPricingCRUD_RealDB_FullRoundTrip(t *testing.T) {
 
 	// A second delete of the same (now-gone) model is a clean 404, not a
 	// silent success or a 500.
-	resp = env.doModelPricing(t, http.MethodDelete, "/v1/admin/model-pricing/"+model, admin, nil)
+	resp = env.doModelPricing(t, http.MethodDelete, "/v1/admin/model-pricing/"+model, platformAdmin, nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("delete of an already-deleted model: want 404, got %d", resp.StatusCode)
 	}
@@ -188,18 +211,18 @@ func TestModelPricingCRUD_RealDB_FullRoundTrip(t *testing.T) {
 // model that already has pricing is a clear conflict, not an opaque 500.
 func TestModelPricingCRUD_RealDB_DuplicateModel_Returns409(t *testing.T) {
 	env := newFinOpsPgTestEnv(t)
-	admin := env.adminToken(t)
+	platformAdmin := env.platformAdminToken(t)
 	model := "b112-crud-dup-" + env.orgID.String()[:8]
 	env.deleteModelPricingCleanup(t, model)
 
 	body := map[string]any{"model": model, "cost_per_1k_in": 0.01, "cost_per_1k_out": 0.02}
-	resp := env.doModelPricing(t, http.MethodPost, "/v1/admin/model-pricing", admin, body)
+	resp := env.doModelPricing(t, http.MethodPost, "/v1/admin/model-pricing", platformAdmin, body)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("first create: want 201, got %d", resp.StatusCode)
 	}
 	resp.Body.Close()
 
-	resp = env.doModelPricing(t, http.MethodPost, "/v1/admin/model-pricing", admin, body)
+	resp = env.doModelPricing(t, http.MethodPost, "/v1/admin/model-pricing", platformAdmin, body)
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("duplicate create: want 409, got %d", resp.StatusCode)
 	}
@@ -210,11 +233,11 @@ func TestModelPricingCRUD_RealDB_DuplicateModel_Returns409(t *testing.T) {
 // validation rejects a negative rate before it ever reaches the database.
 func TestModelPricingCRUD_RealDB_NegativeRate_Returns400(t *testing.T) {
 	env := newFinOpsPgTestEnv(t)
-	admin := env.adminToken(t)
+	platformAdmin := env.platformAdminToken(t)
 	model := "b112-crud-negative-" + env.orgID.String()[:8]
 	env.deleteModelPricingCleanup(t, model)
 
-	resp := env.doModelPricing(t, http.MethodPost, "/v1/admin/model-pricing", admin, map[string]any{
+	resp := env.doModelPricing(t, http.MethodPost, "/v1/admin/model-pricing", platformAdmin, map[string]any{
 		"model": model, "cost_per_1k_in": -0.01, "cost_per_1k_out": 0.02,
 	})
 	if resp.StatusCode != http.StatusBadRequest {
@@ -259,17 +282,81 @@ func TestModelPricingCRUD_RealDB_OperatorRole_ForbiddenForWrites_AllowedForReads
 	resp.Body.Close()
 }
 
+// TestModelPricingCRUD_RealDB_B113_OrdinaryAdminForbidden_PlatformAdminAllowed
+// is the B-157 epic Brief 2's own required direct proof that B-113 is
+// closed: an ORDINARY org "admin" -- not merely "operator", already
+// proven forbidden above -- must now be rejected from every model_pricing
+// write route, while a genuine "platform_admin" succeeds on the exact
+// same routes. This is deliberately NOT inferred from platform_admin's
+// mere existence (the task brief's own explicit requirement) -- it
+// exercises the real router, the real requireRole gate, and the real
+// handler for both roles side by side.
+func TestModelPricingCRUD_RealDB_B113_OrdinaryAdminForbidden_PlatformAdminAllowed(t *testing.T) {
+	env := newFinOpsPgTestEnv(t)
+	admin := env.adminToken(t)
+	platformAdmin := env.platformAdminToken(t)
+	model := "b113-close-" + env.orgID.String()[:8]
+	env.deleteModelPricingCleanup(t, model)
+
+	// AC2: an ordinary admin -- previously sufficient for this exact route
+	// before this brief -- is now rejected on create/update/delete alike.
+	resp := env.doModelPricing(t, http.MethodPost, "/v1/admin/model-pricing", admin, map[string]any{
+		"model": model, "cost_per_1k_in": 0.01, "cost_per_1k_out": 0.02,
+	})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("B-113: ordinary admin create: want 403, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	resp = env.doModelPricing(t, http.MethodPatch, "/v1/admin/model-pricing/claude-haiku-4-5-20251001", admin, map[string]any{
+		"cost_per_1k_in": 0.01,
+	})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("B-113: ordinary admin update: want 403, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	resp = env.doModelPricing(t, http.MethodDelete, "/v1/admin/model-pricing/claude-haiku-4-5-20251001", admin, nil)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("B-113: ordinary admin delete: want 403, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// AC3: the SAME route, the SAME request, succeeds for platform_admin.
+	resp = env.doModelPricing(t, http.MethodPost, "/v1/admin/model-pricing", platformAdmin, map[string]any{
+		"model": model, "cost_per_1k_in": 0.01, "cost_per_1k_out": 0.02,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("B-113: platform_admin create: want 201, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	resp = env.doModelPricing(t, http.MethodPatch, "/v1/admin/model-pricing/"+model, platformAdmin, map[string]any{
+		"cost_per_1k_in": 0.03,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("B-113: platform_admin update: want 200, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	resp = env.doModelPricing(t, http.MethodDelete, "/v1/admin/model-pricing/"+model, platformAdmin, nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("B-113: platform_admin delete: want 204, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
 // TestModelPricingCRUD_RealDB_NewModelDispatchPricesCorrectly is AC1's
 // centerpiece: a model added through the CRUD API prices a subsequent
 // dispatch correctly, exercising the exact same finops.go query path a
 // real dispatch would.
 func TestModelPricingCRUD_RealDB_NewModelDispatchPricesCorrectly(t *testing.T) {
 	env := newFinOpsPgTestEnv(t)
-	admin := env.adminToken(t)
+	platformAdmin := env.platformAdminToken(t)
 	model := "b112-new-model-dispatch-" + env.orgID.String()[:8]
 	env.deleteModelPricingCleanup(t, model)
 
-	resp := env.doModelPricing(t, http.MethodPost, "/v1/admin/model-pricing", admin, map[string]any{
+	resp := env.doModelPricing(t, http.MethodPost, "/v1/admin/model-pricing", platformAdmin, map[string]any{
 		"model": model, "cost_per_1k_in": 0.02, "cost_per_1k_out": 0.04,
 	})
 	if resp.StatusCode != http.StatusCreated {

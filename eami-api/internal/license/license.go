@@ -89,6 +89,22 @@ func init() {
 type Claims struct {
 	jwt.RegisteredClaims
 	Modules []string `json:"modules"`
+	// UsageLimits (B-157 epic, Brief 2) is the license's optional, SEPARATE
+	// volume-metering axis -- migration 000015's own doc comment:
+	// feature-gating (Modules) and usage-metering (how much of a module)
+	// are different concerns. Nil/absent means unlimited, the same
+	// "absence of a claim means no restriction" convention HasModule's
+	// own nil-Claims check already establishes.
+	UsageLimits *UsageLimits `json:"usage_limits,omitempty"`
+}
+
+// UsageLimits defines a license's volume caps. Brief 2 defines its first
+// and only dimension: a rolling-calendar-month token budget (input +
+// output combined), enforced against the SAME token_usage aggregation
+// infrastructure B-097/108/111/112 already built (see eami-gateway's
+// license.Store.WithinUsageLimit) -- never a separate counter.
+type UsageLimits struct {
+	MaxTokensPerMonth *int64 `json:"max_tokens_per_month,omitempty"`
 }
 
 // OrgID returns the license's Subject claim.

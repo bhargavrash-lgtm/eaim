@@ -158,6 +158,28 @@ type LicenseChecker interface {
 	ModuleLicensed(ctx context.Context, orgID, module string) bool
 }
 
+// UsageLimitChecker (B-157 epic, Brief 2) is a SEPARATE, additive
+// interface, not a new method on LicenseChecker -- deliberately, so
+// Brief 1's own existing LicenseChecker mocks across this file's test
+// suite (dispatcher_test.go, dispatcher_org_scoping_test.go,
+// dispatcher_policy_reload_test.go, dispatcher_provider_resolve_error_
+// test.go, dispatcher_license_test.go) keep compiling and behaving
+// exactly as before, unaware this interface exists at all -- the same
+// "must not need to seed a real licenses row just to keep working
+// unaffected by this brief's own new gate" contract LicenseChecker's own
+// doc comment already establishes, extended to usage limits. Dispatch
+// checks for this via an optional type assertion on the SAME
+// licenseChecker value (see below) rather than adding a NewDispatcher
+// parameter, so zero existing call sites (including production's own
+// cmd/gateway/main.go) need to change: *license.Store already implements
+// both interfaces, so real dispatches get real enforcement automatically,
+// while a test's bare ModuleLicensed-only stub silently skips this check,
+// exactly as if usage limits were never licensed at all (equivalent to
+// WithinUsageLimit's own "unlimited" answer).
+type UsageLimitChecker interface {
+	WithinUsageLimit(ctx context.Context, orgID string) (bool, error)
+}
+
 type Dispatcher struct {
 	toolRouter       *toolrouter.Router
 	aiProviderRouter *aiprovider.Router
@@ -420,6 +442,23 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 	// second dispatch path this check could be bypassed via.
 	if !d.licenseChecker.ModuleLicensed(reqCtx, ac.OrgID, "gateway") {
 		return d.rejectOnMissingLicense(reqCtx, ac, start)
+	}
+	// Usage-limit gate (B-157 epic, Brief 2) -- immediately after the
+	// module-license check, same convergence point, same "org-level,
+	// before tool resolution" reasoning: an org over its licensed volume
+	// is blocked the same way an unlicensed org is, before any real work
+	// happens. See UsageLimitChecker's own doc comment for why this is an
+	// optional type assertion rather than a new interface method/
+	// constructor parameter. A query error fails closed (blocked), same
+	// as WithinUsageLimit's own documented contract.
+	if ulc, ok := d.licenseChecker.(UsageLimitChecker); ok {
+		within, err := ulc.WithinUsageLimit(reqCtx, ac.OrgID)
+		if err != nil {
+			slog.Error("dispatch: usage limit check failed -- rejecting closed", "org_id", ac.OrgID, "err", err)
+		}
+		if err != nil || !within {
+			return d.rejectOnUsageLimitExceeded(reqCtx, ac, start)
+		}
 	}
 
 	// Resolve ac.Tool against gateway_tools, org-scoped, before policy
@@ -888,6 +927,55 @@ func (d *Dispatcher) rejectOnMissingLicense(reqCtx context.Context, ac mcp.Actio
 	outcome := DispatchOutcome{
 		Decision:       "denied",
 		Err:            errors.New("dispatch: your organization is not licensed for the Gateway module"),
+		EpisodeSteps:   []episode.Step{newEpisodeStep(ac, "blocked", nil)},
+		EpisodeOutcome: "blocked",
+		AuditWriteErr:  auditWriteErr,
+		AuditDecision:  auditEntry.Decision,
+	}
+	outcome.Dispatched = outcome.Err == nil
+
+	for _, h := range d.hooks {
+		h(reqCtx, ac, outcome)
+	}
+	return outcome.Result, outcome.Err
+}
+
+// rejectOnUsageLimitExceeded (B-157 epic, Brief 2) mirrors
+// rejectOnMissingLicense exactly -- same shape, same "denied" decision,
+// same audit/episode/hook treatment -- for the org's OTHER licensing
+// axis: it has a currently-valid license including the gateway module,
+// but has exceeded that license's own signed usage_limits for the
+// current calendar month. Kept as its own function rather than a shared
+// helper parameterized by message: the two rejection reasons are
+// semantically distinct (no license at all vs. a real license that's
+// been used up) and this mirrors rejectOnProviderResolveError/
+// rejectOnMissingLicense already being separate, not consolidated,
+// functions for the identical reason.
+func (d *Dispatcher) rejectOnUsageLimitExceeded(reqCtx context.Context, ac mcp.ActionContext, start time.Time) (json.RawMessage, error) {
+	slog.Warn("dispatch: org has exceeded its license's usage limit -- rejecting",
+		"tool", ac.Tool, "org_id", ac.OrgID, "agent", ac.AgentName)
+
+	orgID, _ := uuid.Parse(ac.OrgID)
+	agentID, _ := uuid.Parse(ac.AgentUUID)
+	workflowRunID, _ := uuid.Parse(ac.WorkflowRunID)
+	auditEntry := audit.Entry{
+		OrgID:         orgID,
+		AgentID:       agentID,
+		AgentName:     ac.AgentName,
+		ToolName:      ac.Tool,
+		Action:        ac.Action,
+		Parameters:    nil,
+		LatencyMS:     time.Since(start).Milliseconds(),
+		Timestamp:     ac.ReceivedAt,
+		WorkflowRunID: workflowRunID,
+		StepIndex:     ac.StepIndex,
+		Decision:      "denied",
+	}
+	auditWriteErr := d.auditWriter.Write(reqCtx, auditEntry)
+
+	outcome := DispatchOutcome{
+		Decision:       "denied",
+		Err:            errors.New("dispatch: your organization has exceeded its licensed usage limit for this period"),
 		EpisodeSteps:   []episode.Step{newEpisodeStep(ac, "blocked", nil)},
 		EpisodeOutcome: "blocked",
 		AuditWriteErr:  auditWriteErr,

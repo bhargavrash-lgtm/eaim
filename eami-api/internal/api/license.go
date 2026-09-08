@@ -12,6 +12,7 @@
 package api
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
@@ -107,15 +108,89 @@ func (s *Server) UploadLicense(w http.ResponseWriter, r *http.Request) {
 		validFrom = claims.NotBefore.Time
 	}
 
-	row, err := s.queries.CreateLicense(r.Context(), store.CreateLicenseParams{
-		OrgID:      uc.OrgID,
-		RawLicense: body.RawLicense,
-		Modules:    claims.Modules,
-		ValidFrom:  validFrom,
-		ValidUntil: claims.ExpiresAt.Time,
+	// usage_limits (B-157 epic, Brief 2) -- the license's own signed claim,
+	// re-marshaled for the licenses.usage_limits JSONB column. Nil when
+	// the license sets no volume cap, matching the column's own
+	// nullability -- never a fabricated {} standing in for "unlimited".
+	var usageLimitsJSON []byte
+	if claims.UsageLimits != nil {
+		usageLimitsJSON, err = json.Marshal(claims.UsageLimits)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to encode usage limits")
+			return
+		}
+	}
+
+	// license_events (B-157 epic, Brief 2): "created" if this org has never
+	// uploaded a license before, "renewed" otherwise -- determined by
+	// checking for a prior row before this brief's own new INSERT.
+	//
+	// Code-review finding (this brief): GetLatestLicense-then-CreateLicense
+	// is a check-then-act race if run as two independent statements --two
+	// near-simultaneous uploads for the SAME org (a double-submit, a
+	// retried request, two admins acting at once) could both observe
+	// pgx.ErrNoRows and both record "created", instead of one "created" +
+	// one "renewed". Fixed by wrapping the check, the insert, and the
+	// event record in one real transaction, serialized by a real
+	// org-scoped Postgres advisory lock -- mirrors bootstrap.go's own
+	// identical "check-then-act needs a real DB-level lock, not just
+	// sequential Go statements" fix for the setup-token consume race.
+	// hashtext(orgID-as-text), not a fixed global key: uploads for
+	// DIFFERENT orgs must not serialize against each other.
+	tx, err := s.queries.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not start license upload transaction")
+		return
+	}
+	defer tx.Rollback(r.Context()) // no-op once Commit has succeeded
+
+	if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtext($1))`, uc.OrgID.String()); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not acquire license upload lock")
+		return
+	}
+	qtx := s.queries.WithTx(tx)
+
+	eventType := "renewed"
+	if _, err := qtx.GetLatestLicense(r.Context(), uc.OrgID); err != nil {
+		if err == pgx.ErrNoRows {
+			eventType = "created"
+		} else {
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+	}
+
+	row, err := qtx.CreateLicense(r.Context(), store.CreateLicenseParams{
+		OrgID:       uc.OrgID,
+		RawLicense:  body.RawLicense,
+		Modules:     claims.Modules,
+		ValidFrom:   validFrom,
+		ValidUntil:  claims.ExpiresAt.Time,
+		UsageLimits: usageLimitsJSON,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	// The license_events write happens INSIDE the same transaction (unlike
+	// agents.go's InsertAgentLifecycleEvent, which is a genuinely separate
+	// best-effort statement after its own primary action commits) --
+	// deliberately: this row's own eventType was computed under the lock
+	// this transaction holds, so it must commit atomically with the
+	// license row it describes, or not at all. A failure here still rolls
+	// back the whole upload rather than leaving a license row with no
+	// corresponding event -- a stricter contract than agents.go's, chosen
+	// because this event IS the audit trail this brief exists to guarantee,
+	// not a secondary side record.
+	performedBy := uc.UserID
+	if err := qtx.InsertLicenseEvent(r.Context(), store.InsertLicenseEventParams{
+		OrgID: uc.OrgID, LicenseID: row.ID, EventType: eventType, PerformedBy: &performedBy,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "license uploaded but failed to record its audit event: "+err.Error())
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not commit license upload")
 		return
 	}
 	writeJSON(w, http.StatusCreated, licenseRowToResp(row))
@@ -137,7 +212,24 @@ func (s *Server) GetLicense(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, licenseRowToResp(row))
+	resp := licenseRowToResp(row)
+	// license_events (B-157 epic, Brief 2): "expired" has no human action
+	// to hang off of -- detected here, the first time a status check
+	// observes it, rather than by any background job (none exists on this
+	// on-prem/air-gapped appliance, per ADR-020). InsertLicenseEvent's own
+	// ON CONFLICT DO NOTHING (license_id, event_type) makes this
+	// idempotent: repeated GETs against the same already-expired license
+	// row record exactly one event, not one per request. Best-effort,
+	// same non-fatal convention as UploadLicense's own record above --
+	// a status check must not fail because this record did.
+	if resp.Status == "expired" {
+		if err := s.queries.InsertLicenseEvent(r.Context(), store.InsertLicenseEventParams{
+			OrgID: uc.OrgID, LicenseID: row.ID, EventType: "expired",
+		}); err != nil {
+			slog.Error("license: failed to record license_events expired row", "org_id", uc.OrgID, "err", err)
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func licenseRowToResp(row store.License) LicenseResp {

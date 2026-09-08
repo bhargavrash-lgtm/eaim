@@ -1373,6 +1373,92 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-08) — B-171: usage limits, platform-admin tier, B-113 closure, license-change audit
+(Brief 2 of 3 of the B-157 epic, following B-169/Brief 1 above). Three
+independent pieces, per the task brief's own explicit sequencing:
+
+**Usage-limit enforcement:** `usage_limits.max_tokens_per_month` added as
+a real, signed claim on the license JWT (the `Claims.UsageLimits` field —
+the `licenses.usage_limits` JSONB column already existed since Brief 1,
+unused until now). Enforced in `eami-gateway`'s `Dispatcher.Dispatch`,
+same convergence point as the module-license gate, via a new
+`Store.WithinUsageLimit` querying `SUM(tokens_in+tokens_out)` from
+`token_usage` for the current calendar month — reusing B-097/108/111/112's
+existing aggregation infrastructure, not new counting machinery. Wired in
+via a purely additive `UsageLimitChecker` interface + an optional Go
+type-assertion on the existing `licenseChecker` value, so zero existing
+call sites (including every pre-existing test's own `LicenseChecker`-only
+mock) needed to change.
+
+**Genuine platform_admin tier, closing B-113 for real:** a 5th
+`users.role` value, migration `000017`. `model_pricing`'s 3 write routes
+now require it instead of ordinary `admin` — B-113's exact gap (any org's
+admin could change a genuinely global, cross-tenant table) is closed, not
+just narrowed further. **Deliberately unassignable through any HTTP API**
+— `InviteUser`/`UpdateUserRole`'s `allowedRoles` maps still list only the
+original 4 roles; platform_admin is provisioned ONLY by a direct SQL
+statement against `users.role`, the same trust class as the appliance's
+own signing keys. This was a deliberate design choice, confirmed with the
+user before building: the tier's entire value depends on being genuinely
+harder to obtain than admin, not on it merely having a different name.
+
+**license_events, not a new `audit_log` row — a real design finding, not
+a style choice:** investigating how to record license creation/renewal/
+expiration surfaced a genuine, previously-undocumented concurrency gap —
+`audit_log`'s hash chain (`eami-gateway/internal/audit/writer.go`) is
+serialized ONLY by an in-process `sync.Mutex` inside `eami-gateway`'s own
+`Writer`, with no DB-level lock on `GetLastHash`'s read. License
+creation/renewal happens in `eami-api`, a SEPARATE PROCESS with no
+coordination with that mutex — writing there would make `eami-api` a
+second, uncoordinated writer capable of forking the tamper-evident chain.
+Built a new, small, non-hash-chained `license_events` table instead,
+mirroring the established `agent_lifecycle_events`/`ai_token_events`
+precedent. This finding is disclosed, not fixed — `audit_log`'s own
+single-writer assumption remains true today (only `eami-gateway` ever
+writes to it) and nothing in this brief changes that; it's flagged here
+because the next person who considers adding a SECOND writer to
+`audit_log` for any reason needs to know this constraint exists first.
+
+**Mandatory reviewer + security subagent passes (independent agents, not
+self-review) both ran.** Security review found no exploitable issues —
+the platform_admin unreachability and usage-limit fail-closed design held
+up under independent scrutiny. Code review found 3 real, non-security
+issues: a genuine check-then-act race in `UploadLicense`'s `created`-vs-
+`renewed` decision (two concurrent uploads for the same org could both
+record `created`) — **fixed in-brief**, via the same transaction +
+Postgres advisory-lock idiom `bootstrap.go` already established for an
+identical class of race, with a new concurrency regression test proving
+it under 5 real simultaneous uploads; and two further findings disclosed
+rather than fixed (see B-172/B-173 below and BUILT.md's full writeup) —
+a real judgment call, not an oversight: both would require scope well
+beyond this brief's own file boundaries to fix properly.
+
+**Two disclosed gaps, logged fresh, not silently left unfixed:**
+B-172 — the usage-limit check is not re-verified at escalation-resume
+time (`approval.Router.dispatchApproved`), unlike the module-license
+check Brief 1's own High-severity fix already re-checks there. Out of
+this brief's own file scope; a real, narrow gap for an org using
+escalation policies whose usage crosses its cap mid-hold-window.
+B-173 — found by the mandatory code-review pass: usage-limit enforcement
+itself is check-then-act against `token_usage`, which is populated
+asynchronously (a pre-existing B-099 fire-and-forget goroutine posting to
+`eami-api` after each dispatch, not a synchronous write) — a burst of
+concurrent/rapid dispatches can each read the same under-limit sum before
+prior calls' usage has landed, letting an org overshoot its cap by more
+than the inherent per-call slack every token-quota system has. A real
+fix means either a hot-path architecture change to B-099's own async
+design or new counting machinery this brief's own task brief explicitly
+ruled out — deliberately left for a dedicated future pass, not patched
+hastily here.
+
+**Live-verified against the real rebuilt/redeployed stack, all 5 ACs** —
+including a full real dispatch through the actually-running gateway
+container (real agent JWT, real SSE session, real JSON-RPC `tool_call`,
+blocked with the real usage-limit rejection message) for AC1, and a real
+admin-403/platform_admin-201 pair on `model_pricing` for AC2/AC3, not
+inferred from the tier's mere existence. Full technical detail in
+`BUILT.md`; full resolution narrative in `BACKLOG.md`'s B-171 entry.
+
 ## Active decision thread (2026-09-07) — B-169: modular licensing foundation
 (Brief 1 of 3 of the B-157 epic), signed offline RS256 JWT licenses, dual
 enforcement gates for Module 1/Discovery and Module 2/Gateway, built per
@@ -1446,6 +1532,19 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-08 by Claude Code — B-171 built (Brief 2 of 3, B-157 epic): usage-
+limit enforcement, a genuine platform_admin RBAC tier closing B-113, and
+license-change audit events via a new non-hash-chained `license_events`
+table (see Active decision thread above for why not `audit_log`).
+Mandatory reviewer + security subagent passes both ran: security found no
+exploitable issues; code review found and fixed a real concurrency race
+(license `created`/`renewed` event misattribution under concurrent
+uploads) plus 2 further findings disclosed rather than fixed. Fully
+live-verified across all 5 ACs, including a real dispatch through the
+actually-running gateway container blocked by the usage-limit gate. Two
+new backlog items logged (B-172, B-173 — both disclosed gaps, not
+silently left unfixed). Previous entry, preserved below:
+
 2026-09-07 by Claude Code — B-169 built, both mandatory reviews found real
 issues (one Critical, one High) that were fixed before commit, fully
 live-verified including both fixes against the real running stack (see

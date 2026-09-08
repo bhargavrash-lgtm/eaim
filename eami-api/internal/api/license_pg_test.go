@@ -24,6 +24,7 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -500,5 +501,198 @@ func TestLicense_RealDB_RBACAndLicensing_ComposeIndependently(t *testing.T) {
 	_ = json.NewDecoder(resp3.Body).Decode(&body3)
 	if body3["code"] != "forbidden" {
 		t.Errorf("case 3: error code = %v, want forbidden (blocked by RBAC, not licensing)", body3["code"])
+	}
+}
+
+// ─── B-157 epic, Brief 2: license_events (creation/renewal/expiration) ─────
+
+// licenseEventRow reads back the (event_type, performed_by-is-set) shape
+// this brief's tests need -- performed_by is compared for nullness only
+// (NULL for 'expired', set for 'created'/'renewed'), not the exact user
+// UUID, which callers already know independently.
+func queryLicenseEvents(t *testing.T, pool *pgxpool.Pool, orgID string) []struct {
+	LicenseID     string
+	EventType     string
+	PerformedByOK bool
+} {
+	t.Helper()
+	rows, err := pool.Query(context.Background(),
+		`SELECT license_id, event_type, performed_by IS NOT NULL FROM license_events WHERE org_id = $1 ORDER BY created_at ASC`, orgID)
+	if err != nil {
+		t.Fatalf("query license_events: %v", err)
+	}
+	defer rows.Close()
+	var out []struct {
+		LicenseID     string
+		EventType     string
+		PerformedByOK bool
+	}
+	for rows.Next() {
+		var r struct {
+			LicenseID     string
+			EventType     string
+			PerformedByOK bool
+		}
+		if err := rows.Scan(&r.LicenseID, &r.EventType, &r.PerformedByOK); err != nil {
+			t.Fatalf("scan license_events row: %v", err)
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// TestLicense_RealDB_UploadThenRenew_RecordsCreatedThenRenewedEvents (AC4)
+// proves a real license creation AND a real renewal each produce their
+// own real, auditable license_events row -- 'created' for the org's
+// first-ever license, 'renewed' for the next one, each tied to its own
+// distinct license_id and to the uploading admin (performed_by set).
+func TestLicense_RealDB_UploadThenRenew_RecordsCreatedThenRenewedEvents(t *testing.T) {
+	ts, pool, orgID, token := newLicenseTestServer(t, "lic-events-create-renew")
+
+	raw1 := signGenuineTestLicense(t, orgID, []string{"discovery"})
+	resp1 := doJSONLicense(t, ts, token, http.MethodPost, "/v1/settings/license", map[string]any{"raw_license": raw1})
+	resp1.Body.Close()
+	if resp1.StatusCode != http.StatusCreated {
+		t.Fatalf("first upload: status = %d, want 201", resp1.StatusCode)
+	}
+
+	events := queryLicenseEvents(t, pool, orgID)
+	if len(events) != 1 || events[0].EventType != "created" {
+		t.Fatalf("after first upload: license_events = %+v, want exactly one 'created' row", events)
+	}
+	if !events[0].PerformedByOK {
+		t.Errorf("'created' event has no performed_by -- want the uploading admin's user id")
+	}
+
+	raw2 := signGenuineTestLicense(t, orgID, []string{"discovery", "gateway"})
+	resp2 := doJSONLicense(t, ts, token, http.MethodPost, "/v1/settings/license", map[string]any{"raw_license": raw2})
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusCreated {
+		t.Fatalf("renewal upload: status = %d, want 201", resp2.StatusCode)
+	}
+
+	events = queryLicenseEvents(t, pool, orgID)
+	if len(events) != 2 {
+		t.Fatalf("after renewal: license_events = %+v, want exactly 2 rows", events)
+	}
+	if events[1].EventType != "renewed" {
+		t.Errorf("second event_type = %q, want renewed", events[1].EventType)
+	}
+	if events[1].LicenseID == events[0].LicenseID {
+		t.Errorf("renewed event's license_id (%s) must differ from the created event's (%s) -- each upload is its own row", events[1].LicenseID, events[0].LicenseID)
+	}
+	if !events[1].PerformedByOK {
+		t.Errorf("'renewed' event has no performed_by -- want the uploading admin's user id")
+	}
+}
+
+// TestLicense_RealDB_ConcurrentUploads_ExactlyOneCreatedOneRenewed is a
+// code-review regression test (this brief): GetLatestLicense-then-
+// CreateLicense-then-InsertLicenseEvent is a check-then-act sequence: two
+// near-simultaneous uploads for the SAME org could otherwise both observe
+// "no license yet" and both record 'created' instead of one 'created' +
+// one 'renewed'. UploadLicense now wraps that sequence in a real
+// transaction serialized by a Postgres advisory lock keyed on org_id.
+// Fires 5 concurrent real uploads for one org and asserts the real
+// license_events table ends up with exactly one 'created' and four
+// 'renewed' rows -- never two or more 'created' rows.
+func TestLicense_RealDB_ConcurrentUploads_ExactlyOneCreatedOneRenewed(t *testing.T) {
+	ts, pool, orgID, token := newLicenseTestServer(t, "lic-events-concurrent")
+
+	const n = 5
+	var wg sync.WaitGroup
+	results := make([]int, n)
+	for i := 0; i < n; i++ {
+		raw := signGenuineTestLicense(t, orgID, []string{"discovery"})
+		wg.Add(1)
+		go func(i int, raw string) {
+			defer wg.Done()
+			resp := doJSONLicense(t, ts, token, http.MethodPost, "/v1/settings/license", map[string]any{"raw_license": raw})
+			results[i] = resp.StatusCode
+			resp.Body.Close()
+		}(i, raw)
+	}
+	wg.Wait()
+
+	for i, code := range results {
+		if code != http.StatusCreated {
+			t.Errorf("concurrent upload %d: status = %d, want 201", i, code)
+		}
+	}
+
+	events := queryLicenseEvents(t, pool, orgID)
+	if len(events) != n {
+		t.Fatalf("license_events after %d concurrent uploads = %d rows, want %d", n, len(events), n)
+	}
+	created, renewed := 0, 0
+	for _, e := range events {
+		switch e.EventType {
+		case "created":
+			created++
+		case "renewed":
+			renewed++
+		default:
+			t.Errorf("unexpected event_type %q", e.EventType)
+		}
+	}
+	if created != 1 {
+		t.Errorf("created event count = %d, want exactly 1 (this is the race this fix closes)", created)
+	}
+	if renewed != n-1 {
+		t.Errorf("renewed event count = %d, want %d", renewed, n-1)
+	}
+}
+
+// TestLicense_RealDB_ExpiredLicense_DetectedOnceIdempotently (AC4) proves
+// a real expiration produces a real, auditable event -- detected lazily,
+// the first time GET /v1/settings/license observes it, and recorded
+// exactly once even across repeated status checks (the license_events
+// UNIQUE(license_id, event_type) constraint's own idempotency contract).
+// The license is inserted directly (bypassing the upload handler, which
+// would itself reject an already-expired JWT via jwt.WithExpirationRequired)
+// -- signed genuinely, only its own validity window is in the past.
+func TestLicense_RealDB_ExpiredLicense_DetectedOnceIdempotently(t *testing.T) {
+	ts, pool, orgID, token := newLicenseTestServer(t, "lic-events-expired")
+
+	validUntil := time.Now().Add(-1 * time.Hour)
+	raw := signTestLicenseWithKey(t, genuineTestVendorKey(t), orgID, []string{"discovery"}, validUntil)
+	var licenseID string
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO licenses (org_id, raw_license, modules, valid_from, valid_until) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+		orgID, raw, []string{"discovery"}, validUntil.Add(-365*24*time.Hour), validUntil,
+	).Scan(&licenseID); err != nil {
+		t.Fatalf("insert expired license: %v", err)
+	}
+
+	resp := doJSONLicense(t, ts, token, http.MethodGet, "/v1/settings/license", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get: status = %d, want 200", resp.StatusCode)
+	}
+	var got api.LicenseResp
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Status != "expired" {
+		t.Fatalf("Status = %q, want expired", got.Status)
+	}
+
+	events := queryLicenseEvents(t, pool, orgID)
+	if len(events) != 1 || events[0].EventType != "expired" || events[0].LicenseID != licenseID {
+		t.Fatalf("after first GET: license_events = %+v, want exactly one 'expired' row for license %s", events, licenseID)
+	}
+	if events[0].PerformedByOK {
+		t.Errorf("'expired' event has a performed_by -- want NULL, no human action detected this")
+	}
+
+	// A second, third GET against the same still-expired license must NOT
+	// accumulate more rows -- idempotent per (license_id, event_type).
+	for i := 0; i < 2; i++ {
+		resp := doJSONLicense(t, ts, token, http.MethodGet, "/v1/settings/license", nil)
+		resp.Body.Close()
+	}
+	events = queryLicenseEvents(t, pool, orgID)
+	if len(events) != 1 {
+		t.Errorf("after 3 total GETs of the same expired license: license_events = %+v, want still exactly 1 row", events)
 	}
 }

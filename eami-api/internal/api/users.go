@@ -85,6 +85,13 @@ func (s *Server) InviteUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "email is required")
 		return
 	}
+	// platform_admin (B-157 epic, Brief 2) is DELIBERATELY absent here --
+	// this endpoint is itself gated admin-only (router.go), so including
+	// it would let any ordinary org admin invite a teammate straight into
+	// the platform-admin tier, defeating the entire point of B-113's fix
+	// (a tier that must be genuinely harder to obtain than admin, not
+	// self-service from it). platform_admin is provisioned only via
+	// direct SQL against users.role -- see migration 000017's own comment.
 	allowedRoles := map[string]bool{"admin": true, "operator": true, "approver": true, "viewer": true}
 	if req.Role == "" {
 		req.Role = "viewer"
@@ -135,6 +142,10 @@ func (s *Server) UpdateUserRole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
 		return
 	}
+	// platform_admin deliberately excluded -- see InviteUser's identical
+	// comment above; this endpoint shares the same admin-only gate an
+	// ordinary admin must never be able to use to self-promote or promote
+	// a teammate into the platform-admin tier.
 	allowedRoles := map[string]bool{"admin": true, "operator": true, "approver": true, "viewer": true}
 	if !allowedRoles[req.Role] {
 		writeError(w, http.StatusBadRequest, "bad_request", "role must be admin|operator|approver|viewer")
