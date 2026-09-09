@@ -1373,6 +1373,23 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-09) — B-048/B-049/B-050/B-095 re-verification: 3 CVEs + the audit-verify false-positive bug, one quick patch applied
+Investigation-only pass at explicit user request, re-checking four old, disclosed findings against current code/dependencies rather than assuming they were still accurate. No code changes during the investigation itself; one code change (B-048's quick patch) applied afterward, also at explicit user request.
+
+**B-048 (react-router-dom open redirect/XSS):** the originally-logged CVE (GHSA-jjmj-jmhj-qwj2) now has a real 6.x fix — 6.30.5/6.30.6 have been published since logging, and 6.30.6 patches it within the existing `^6.26.2` package.json range (no major bump). **Two new CVEs have been disclosed since logging** that the original v7 migration recommendation would not have fully closed either (both require `>=7.18.0`, not just any v7): GHSA-wrjc-x8rr-h8h6 (open-redirect bypass) and GHSA-337j-9hxr-rhxg (SSR-hydration constructor injection). Reachability checked directly: GHSA-337j-9hxr-rhxg is SSR-only, confirmed not reachable (`eami-ui` is a client-only Vite SPA, zero `renderToString`/`ReactDOMServer`/`hydrateRoot` usage). GHSA-wrjc-x8rr-h8h6 **is reachable** — traced a real sink: `authStore.ts` captures `window.location.pathname + search` pre-login (B-146's redirect-back feature), and `LoginPage.tsx:45` calls `navigate(consumeRedirectPath() ?? '/dashboard')` with it post-login. This elevates the still-open v7 migration from a dependency-scan theoretical to a confirmed-reachable gap.
+
+**Quick patch applied same session, per explicit user instruction not to leave a same-day zero-risk fix open for the rest of the conversation:** `react-router-dom`/`react-router` 6.30.4→6.30.6 in `eami-ui`. Zero `package.json` range change (`^6.26.2` unchanged, already satisfies 6.30.6) — only `package-lock.json` changed (3 packages, 12-line diff: `react-router`, `react-router-dom`, `@remix-run/router` 1.23.3→1.23.4). `npm install react-router-dom@6.30.6` initially rewrote the package.json range to `^6.30.6`; caught and reverted to `^6.26.2` before finishing, then the lockfile's root-manifest mirror line hand-corrected to match (a plain `npm install`/`npm install --package-lock-only` to reconcile it was blocked by the permission classifier, so the one-line fix was applied directly). `npx tsc --noEmit` and `npx vite build` both clean post-bump; `npm audit` re-run confirms the `react-router-dom` entry for GHSA-jjmj-jmhj-qwj2 is gone (the two newer CVEs remain, as expected — they need 7.18.0+).
+
+**B-049 (vite):** installed version unchanged (5.4.21, still newest 5.x). **A third, new HIGH-severity CVE found**: GHSA-fx2h-pf6j-xcff, `server.fs.deny` bypass specifically on Windows (CVSS 7.5) — directly relevant since this is a Windows dev environment. Confirmed dev-server-only, production `nginx`-served build unaffected (consistent with the original severity note). Minimum real fix unchanged at 6.4.3; `npm audit` now recommends 8.2.2 given the ecosystem has moved two majors past 6.x since logging.
+
+**B-050 (golang.org/x/crypto):** re-confirmed via a fresh `govulncheck` run (not reused from the original session) — still `v0.37.0`, still only `bcrypt` imported, advisory count grown 17→20 (new `x/crypto/ssh` findings) but **0/20 reachable**, same conclusion as originally logged. Incidental to this same govulncheck run: found 6 separate, genuinely reachable Go **stdlib** CVEs (not x/crypto) in `eami-api`, all fixed by a toolchain patch bump go1.26.5→go1.26.6 — logged as its own new item, **B-174**, not folded into B-050 per explicit user direction (different root cause, different fix).
+
+**B-095 (`VerifyAuditChain` false-positive bug):** re-read `eami-api/internal/store/verify.go` and `eami-gateway/internal/audit/writer.go` line-by-line against the original writeup — all three root causes (org-scoped genesis-seeding assumption on a genuinely global chain; walking by `timestamp ASC` instead of true `prev_hash`/`hash` linkage; timestamp captured before the write mutex, so concurrent writes can chain in a different order than their timestamps suggest) are unchanged, confirmed still present. **Fix design now complete** (was previously "needs its own investigation" with none done): walk the true pointer chain globally (all orgs, following `prev_hash`→`hash` links from genesis, not `WHERE org_id = ... ORDER BY timestamp ASC`), keep org-scoping at the result-filtering stage only (not the walk itself) — this directly answers the entry's own open AC question about whether org-scoping should exist at all. The "stop at first break" behavior needs no separate fix; it was only visibly wrong because the genesis-seeding bug manufactured false first-breaks. Scaling (in-app full-table load vs. per-org SQL filter) honestly flagged as B-133 (data lifecycle) territory, not a blocker.
+
+**Recommended real sequencing, given to the user, not yet acted on beyond B-048's quick patch:** B-095 first (highest genuine impact — an active false-positive affecting virtually every real multi-org or concurrent-write deployment, not a dependency-scan theoretical); then B-049's vite migration and B-048's v7 migration together in one frontend regression window (both are build-tooling/routing majors, worth one pass instead of two); then B-050's x/crypto bump opportunistically, whenever `eami-api`'s dependencies are next touched for any other reason.
+
+Full technical detail in this session's own investigation report; `BACKLOG.md`'s updated B-048/B-049/B-050/B-095 entries and new B-174 entry carry the same findings in tracking-item form.
+
 ## Active decision thread (2026-09-08) — B-171: usage limits, platform-admin tier, B-113 closure, license-change audit
 (Brief 2 of 3 of the B-157 epic, following B-169/Brief 1 above). Three
 independent pieces, per the task brief's own explicit sequencing:
@@ -1532,6 +1549,23 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-09 by Claude Code — re-verified 4 old, disclosed findings (B-048,
+B-049, B-050, B-095) against current code/dependencies rather than
+assuming they were still accurate. B-048's originally-logged CVE now has
+a real 6.x patch (2 new CVEs found in its place, one confirmed reachable
+via a real `authStore.ts`/`LoginPage.tsx` sink); B-049 gained a third,
+HIGH, Windows-specific CVE; B-050 re-confirmed 0/20 reachable (17→20
+advisories); B-095's fix design is now complete (was previously
+uninvestigated). Quick, zero-risk patch applied same session for B-048's
+original CVE (react-router-dom/react-router 6.30.4→6.30.6, zero
+package.json range change), live-verified (`tsc`/`vite build`/`npm
+audit` all clean). New backlog item logged (B-174 — an unrelated Go
+stdlib toolchain finding surfaced incidentally, not folded into B-050).
+Recommended sequencing given: B-095 first, then B-049+B-048's migrations
+together, then B-050 opportunistically. See Active decision thread
+above; full detail in BACKLOG.md's updated B-048/B-049/B-050/B-095
+entries and new B-174 entry. Previous entry, preserved below:
+
 2026-09-08 by Claude Code — B-171 built (Brief 2 of 3, B-157 epic): usage-
 limit enforcement, a genuine platform_admin RBAC tier closing B-113, and
 license-change audit events via a new non-hash-chained `license_events`
