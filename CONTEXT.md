@@ -1373,6 +1373,23 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-10) — B-178: shared SlideOverPanel, closing the real Audit-panel click-outside bug
+Built B-176's own single highest-value finding: one `components/common/SlideOverPanel.tsx` replacing 9 independently hand-rolled slide-out-panel implementations across 5 files, retroactively fixing `AuditEntryDetailPanel.tsx`'s real, live bug — it was the only one of the 9 with no backdrop at all, so click-outside-to-close silently didn't work there despite every other panel in the app training users to expect it.
+
+**Design decisions, both made explicitly per the task brief's own instruction not to default silently:** width is now a fixed, non-overridable 480px inside the component (not a per-caller prop) — closes `AgentsPage.tsx`'s `w-96` question Slice 1 deliberately deferred to this exact brief; a shared component only structurally prevents future drift if it owns the one value outright. Animation: explicitly kept instant. Reasoning written directly into the component's own doc comment, not just here: all 9 were already instant, so that's the real baseline; a correct *exit* transition for a panel that's conditionally unmounted (every caller removes it from the DOM immediately on close) needs real mount/unmount-timing coordination — new complexity on 9 currently-working real interactive surfaces for a cosmetic gain nobody asked for.
+
+**Scope boundary drawn and confirmed before building:** the shared component owns exactly the 5 properties the brief named (width/border/z-index/backdrop/animation) — each panel's own header (title text + close button) stays as that panel's own content, not folded in, since title text differs per panel and reads as content, not shell.
+
+**The nested case, handled deliberately, not glossed over:** `WorkflowsPage.tsx`'s `StepConfigPanel` is genuinely rendered inside `StepsEditor`, itself inside `AddWorkflowPanel`/`EditWorkflowPanel` — a real panel-over-panel stack, not a hypothetical one. `SlideOverPanel` takes a `nested` boolean bumping its backdrop/shell to `z-[55]`/`z-[60]` for exactly this case. `StepConfigPanel` is also reused unmodified by `WorkflowCanvasPage.tsx` (B-148's canvas) for click-to-configure — this second usage renders it directly over the canvas, no parent panel involved there, so `nested` only matters for the `WorkflowsPage.tsx` card-editor path; both usages share the one migrated component, so the shell fix applies to both automatically.
+
+**Live verification, per-panel not blanket, with the canvas usage given the most care per the task brief's explicit instruction (B-148's own lesson about object-identity churn causing a real infinite loop in this exact library):** Playwright opened and closed all 9 panels individually (content check + backdrop-click-closes check, screenshotted both states) plus the 10th real usage (canvas). The nested case specifically: parent + child both open simultaneously confirmed, child's own backdrop click closes only the child, parent survives behind it — exactly the AC3 contract. The canvas case: real console-log volume measured at 0 over a 2-second idle window after opening (the actual signal a B-148-class render loop would produce, not just "no visible flicker" by eye), zero console errors, real step data rendered, closed correctly.
+
+**One pre-existing, unrelated finding surfaced during testing, investigated and correctly not touched:** opening `AgentsPage.tsx`'s `ConfigPanel` logs a `401` from `useAgentConfig`'s own raw `fetch()` (`hooks/useAgents.ts:84`) — confirmed via `git diff` that zero lines in that file were touched this session; this fires identically regardless of which shell wraps the panel, not a regression from this migration.
+
+**Mandatory reviewer + security passes, both independent, zero findings** — security confirmed no user-controllable input flows into `onClose`/`nested`, confirmed every one of the 9 `onClose` wirings is correctly scoped to its own panel (no cross-wired backdrop), confirmed zero content/business-logic lines touched. Code review confirmed no leftover inline `z-[55]`/`z-[60]` literals remained outside the new shared component.
+
+Full technical detail in `BACKLOG.md`'s new B-178 entry (DONE) and `BUILT.md`'s `eami-ui` section.
+
 ## Active decision thread (2026-09-10) — B-176/B-177: UI design-consistency audit + design-system foundation Slice 1
 Two-part session: a full UI consistency audit (visual/token consistency, then a separate interaction-pattern follow-up), delivered as chat reports and logged retroactively as **B-176** once the first build brief spawned from it — same precedent as B-157/B-169's retroactive logging, not left living only in transcripts. Then **B-177** built the audit's own recommended first slice: real design tokens, `Card`, a chart-palette module, and status-badge unification.
 
@@ -1595,6 +1612,25 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-10 by Claude Code — B-178 built: shared SlideOverPanel component,
+closing AuditEntryDetailPanel's real click-outside-to-close bug (the only
+one of 9 hand-rolled panels with no backdrop) and migrating all 9 call
+sites onto it. Two explicit design decisions per the task brief's own
+instruction not to default silently: width now a fixed 480px owned by the
+component (closes AgentsPage's w-96 question Slice 1 deferred here);
+animation explicitly kept instant (reasoning in the component's own doc
+comment). The one genuine nested panel-over-panel case (WorkflowsPage's
+StepConfigPanel, also reused unmodified by the WorkflowCanvasPage canvas)
+handled via a `nested` prop. Mandatory reviewer + security passes both
+ran, zero findings. Live-verified per-panel (not blanket) via Playwright,
+all 9 panels individually plus the canvas usage -- the canvas case given
+the most care per B-148's own real infinite-loop lesson in that exact
+library: 0 console log volume over a 2s idle window after opening,
+confirming no render loop. One pre-existing, unrelated 401 (ConfigPanel's
+own raw fetch, untouched this session) investigated and correctly left
+alone. See Active decision thread above; full detail in BACKLOG.md's new
+B-178 entry. Previous entry, preserved below:
+
 2026-09-10 by Claude Code — B-176 (UI design-consistency audit, logged
 retroactively) + B-177 (design-system foundation Slice 1) built: real
 tailwind.config.ts tokens (colors.status, fontSize['2xs'], spacing.drawer),

@@ -5,7 +5,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ConfirmDialog, DataTable } from '@/components/common'
+import { ConfirmDialog, DataTable, SlideOverPanel } from '@/components/common'
 import type { Column } from '@/components/common'
 import {
   useAgents,
@@ -77,7 +77,7 @@ function ConfigPanel({ agent, onClose }: { agent: Agent; onClose: () => void }) 
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 w-96 bg-white shadow-xl flex flex-col z-50">
+    <SlideOverPanel onClose={onClose}>
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b">
         <div>
@@ -188,7 +188,7 @@ function ConfigPanel({ agent, onClose }: { agent: Agent; onClose: () => void }) 
           Cancel
         </button>
       </div>
-    </div>
+    </SlideOverPanel>
   )
 }
 
@@ -237,7 +237,7 @@ function AddAgentPanel({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 w-96 bg-white shadow-xl flex flex-col z-50">
+    <SlideOverPanel onClose={onClose}>
       <div className="flex items-center justify-between px-6 py-4 border-b">
         <h2 className="font-semibold text-gray-900">Add Agent</h2>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
@@ -300,7 +300,7 @@ function AddAgentPanel({ onClose }: { onClose: () => void }) {
         </button>
         <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
       </div>
-    </div>
+    </SlideOverPanel>
   )
 }
 
@@ -423,24 +423,14 @@ export function AgentsPage() {
         />
       )}
 
-      {/* Config slide-out panel */}
+      {/* Config slide-out panel -- backdrop now owned by SlideOverPanel itself */}
       {configAgent && (
-        <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 bg-black/20 z-40"
-            onClick={() => setConfigAgent(null)}
-          />
-          <ConfigPanel agent={configAgent} onClose={() => setConfigAgent(null)} />
-        </>
+        <ConfigPanel agent={configAgent} onClose={() => setConfigAgent(null)} />
       )}
 
-      {/* Add Agent slide-out panel */}
+      {/* Add Agent slide-out panel -- backdrop now owned by SlideOverPanel itself */}
       {showAdd && (
-        <>
-          <div className="fixed inset-0 bg-black/20 z-40" onClick={() => setShowAdd(false)} />
-          <AddAgentPanel onClose={() => setShowAdd(false)} />
-        </>
+        <AddAgentPanel onClose={() => setShowAdd(false)} />
       )}
 
       {/* Delete confirm dialog */}

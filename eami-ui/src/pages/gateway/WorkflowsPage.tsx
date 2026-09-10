@@ -21,6 +21,7 @@ import {
   LoadingSpinner,
   DataTable,
   Card,
+  SlideOverPanel,
 } from '@/components/common'
 import type { Column } from '@/components/common'
 import { apiFetch } from '@/api/client'
@@ -256,9 +257,7 @@ export function StepConfigPanel({
   const actionOptions = row.action && !actionKeys.includes(row.action) ? [...actionKeys, row.action] : actionKeys
 
   return (
-    <>
-      <div className="fixed inset-0 bg-black/20 z-[55]" onClick={onClose} />
-      <div className="fixed inset-y-0 right-0 w-drawer bg-white shadow-xl flex flex-col z-[60] border-l border-gray-200">
+    <SlideOverPanel onClose={onClose} nested>
         <div className="flex items-center justify-between px-6 py-4 border-b">
           <h3 className="font-semibold text-gray-900">Configure step {index + 1}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">x</button>
@@ -374,8 +373,7 @@ export function StepConfigPanel({
             Done
           </button>
         </div>
-      </div>
-    </>
+    </SlideOverPanel>
   )
 }
 
@@ -549,7 +547,7 @@ function AddWorkflowPanel({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 w-drawer bg-white shadow-xl flex flex-col z-50 border-l border-gray-200">
+    <SlideOverPanel onClose={onClose}>
       <div className="flex items-center justify-between px-6 py-4 border-b">
         <h2 className="font-semibold text-gray-900">Add Workflow</h2>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">x</button>
@@ -593,7 +591,7 @@ function AddWorkflowPanel({ onClose }: { onClose: () => void }) {
         </button>
         <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
       </div>
-    </div>
+    </SlideOverPanel>
   )
 }
 
@@ -693,7 +691,7 @@ function EditWorkflowPanel({ workflowId, onClose }: { workflowId: string; onClos
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 w-drawer bg-white shadow-xl flex flex-col z-50 border-l border-gray-200">
+    <SlideOverPanel onClose={onClose}>
       <div className="flex items-center justify-between px-6 py-4 border-b">
         <h2 className="font-semibold text-gray-900">Edit Workflow</h2>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">x</button>
@@ -758,7 +756,7 @@ function EditWorkflowPanel({ workflowId, onClose }: { workflowId: string; onClos
         </button>
         <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
       </div>
-    </div>
+    </SlideOverPanel>
   )
 }
 
@@ -846,17 +844,11 @@ export function WorkflowsPage() {
       </div>
 
       {showAdd && (
-        <>
-          <div className="fixed inset-0 bg-black/20 z-40" onClick={() => setShowAdd(false)} />
-          <AddWorkflowPanel onClose={() => setShowAdd(false)} />
-        </>
+        <AddWorkflowPanel onClose={() => setShowAdd(false)} />
       )}
 
       {editTargetId && (
-        <>
-          <div className="fixed inset-0 bg-black/20 z-40" onClick={() => setEditTargetId(null)} />
-          <EditWorkflowPanel workflowId={editTargetId} onClose={() => setEditTargetId(null)} />
-        </>
+        <EditWorkflowPanel workflowId={editTargetId} onClose={() => setEditTargetId(null)} />
       )}
 
       {deleteTarget && (

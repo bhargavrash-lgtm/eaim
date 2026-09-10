@@ -7,6 +7,7 @@ import {
   ConfirmDialog,
   EmptyState,
   LoadingSpinner,
+  SlideOverPanel,
 } from '@/components/common'
 import {
   useTools,
@@ -458,7 +459,7 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 w-drawer bg-white shadow-xl flex flex-col z-50 border-l border-gray-200">
+    <SlideOverPanel onClose={onClose}>
       <div className="flex items-center justify-between px-6 py-4 border-b">
         <h2 className="font-semibold text-gray-900">Add Tool Connection</h2>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">x</button>
@@ -619,7 +620,7 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
         </button>
         <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
       </div>
-    </div>
+    </SlideOverPanel>
   )
 }
 
@@ -740,7 +741,7 @@ function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () =
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 w-drawer bg-white shadow-xl flex flex-col z-50 border-l border-gray-200">
+    <SlideOverPanel onClose={onClose}>
       <div className="flex items-center justify-between px-6 py-4 border-b">
         <h2 className="font-semibold text-gray-900">Edit Tool Connection</h2>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">x</button>
@@ -870,7 +871,7 @@ function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () =
         </button>
         <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
       </div>
-    </div>
+    </SlideOverPanel>
   )
 }
 
@@ -1025,17 +1026,11 @@ export function ToolsPage() {
       </div>
 
       {showAdd && (
-        <>
-          <div className="fixed inset-0 bg-black/20 z-40" onClick={() => setShowAdd(false)} />
-          <AddToolPanel onClose={() => setShowAdd(false)} />
-        </>
+        <AddToolPanel onClose={() => setShowAdd(false)} />
       )}
 
       {editTarget && (
-        <>
-          <div className="fixed inset-0 bg-black/20 z-40" onClick={() => setEditTarget(null)} />
-          <EditToolPanel tool={editTarget} onClose={() => setEditTarget(null)} />
-        </>
+        <EditToolPanel tool={editTarget} onClose={() => setEditTarget(null)} />
       )}
 
       {deleteTarget && (

@@ -9,6 +9,7 @@ import {
   EmptyState,
   LoadingSpinner,
   DataTable,
+  SlideOverPanel,
 } from '@/components/common'
 import type { Column } from '@/components/common'
 import {
@@ -150,7 +151,7 @@ function PolicyPanel({ mode, policy, onClose }: PanelProps) {
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 w-drawer bg-white shadow-xl flex flex-col z-50 border-l border-gray-200">
+    <SlideOverPanel onClose={onClose}>
       <div className="flex items-center justify-between px-6 py-4 border-b">
         <div>
           <h2 className="font-semibold text-gray-900">
@@ -293,7 +294,7 @@ function PolicyPanel({ mode, policy, onClose }: PanelProps) {
         </button>
         <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
       </div>
-    </div>
+    </SlideOverPanel>
   )
 }
 
@@ -451,10 +452,7 @@ export function PoliciesPage() {
       </div>
 
       {panel && (
-        <>
-          <div className="fixed inset-0 bg-black/20 z-40" onClick={() => setPanel(null)} />
-          <PolicyPanel mode={panel.mode} policy={panel.policy} onClose={() => setPanel(null)} />
-        </>
+        <PolicyPanel mode={panel.mode} policy={panel.policy} onClose={() => setPanel(null)} />
       )}
 
       {deleteTarget && (
