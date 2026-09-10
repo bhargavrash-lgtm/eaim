@@ -1373,6 +1373,22 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-10) — B-048/B-049 built: Vite 5→7 and React Router 6→7 migrations, batched
+Full-brief build (task brief pasted, plan approved before building), same day as the B-095 build above. Both CVE sets closed exactly per the plan.
+
+**Version-target decisions, investigated fresh rather than assumed from the 2026-09-09 log:** Vite → **7.3.6**, not the dist-tag-latest 8.2.2 — Vite 8 requires `@vitejs/plugin-react@6.x`, whose peer deps (`oxc-transform-react`, `@rolldown/plugin-babel`, `babel-plugin-react-compiler`, all new) point at an experimental Rolldown/oxc-based toolchain shift, a materially larger and riskier change than a CVE-closing dependency bump warrants; the *installed* `@vitejs/plugin-react@4.7.0` already declares peer support for `vite: "^7.0.0"`, so 7.3.6 needs zero plugin bump at all, while 6.x would immediately land one major behind again — the exact "kept re-deferring, gap kept growing" pattern this item already lived through once. React Router → **`react-router-dom`/`react-router` 7.18.3**, not the bare `react-router` v8 package (also latest-available) — the contract was "upgrade react-router-dom/react-router to >=7.18.0," and migrating off the `-dom` package entirely is a separate, unrequested import-path change.
+
+**Real scope check before touching anything:** grepped for every `from 'react-router-dom'` import — **16 files**, not the ~7 a rough `useNavigate`/`Link` count from the earlier investigation suggested. All 16 use stable v6.4+ data-router APIs (`createBrowserRouter`/`RouterProvider`/`Outlet`/`Navigate`/`Link`/`NavLink`/`useNavigate`/`useParams`/`useSearchParams`) — no framework-mode/Vite-plugin/loaders anywhere in this app — so the actual migration risk was lower than the file count implied, confirmed empirically rather than assumed: **zero source files needed any change.** `git diff --stat` for the whole migration is exactly `package.json` (4 lines) + `package-lock.json` — no application code touched at all.
+
+**Verification, both audit-level and real click-through, explicitly not conflated:**
+- `npm audit`: zero entries for `vite` or `react-router`/`react-router-dom` (was 13 total vulnerabilities before this session's work started; 11 after Vite, 9 after React Router).
+- Real `tsc --noEmit` (0 errors) and `vite build` (0 errors, 2333 modules) clean.
+- **Real click-through, not just build/audit proof** — Playwright's Chromium wasn't previously available in this environment (every prior frontend session disclosed "no browser-automation tool available, declined Chrome extension install"); installed it fresh via `npx playwright install chromium` specifically because this task's own standing rule called for real interaction, not another disclosed gap. Rebuilt and restarted the real `eami-ui` Docker container (picks up `package.json`/`package-lock.json` via image build — not bind-mounted, unlike `./src`) so the driven session ran the actual Vite 7.3.6 dev server, not a stale one. A fresh, additive throwaway admin user (Dev Org's real `org_id`, same non-destructive pattern as B-095's live verification) drove: (1) B-146's redirect-after-login flow, live — visited `/gateway/agents` logged out, redirected to `/login`, logged in, landed back on `/gateway/agents` exactly, screenshotted at each step; (2) all 8 listed pages (Dashboard/Agents/Policies/Tools/Workflows/Audit/Approvals/Settings) navigated and screenshotted, each confirmed rendering its expected content with real Dev Org data; (3) the Approvals sidebar group (B-163) confirmed still its own distinct group, not folded back into Operations; (4) the rebuilt workflow canvas (B-145/B-148) navigated to a real Dev Org workflow's canvas-preview URL and confirmed rendering its real steps, zero console errors.
+- **One console warning found, investigated, confirmed pre-existing and unrelated, not fixed:** `SettingsPage.tsx`'s `Input`/`Select` helper components trigger a React "function components cannot be given refs" warning (they're plain functions, not wrapped in `React.forwardRef`, so `react-hook-form`'s `register()`-spread ref can't attach) — confirmed via `git log`/`git diff` that this file was last touched in B-169 (2026-09-07) and has zero changes in this session's working tree; unrelated to react-router or vite, not a regression, correctly left alone (dependency-migration-only scope).
+- Throwaway user deleted afterward, confirmed removed.
+
+Full technical detail in `BACKLOG.md`'s updated B-048/B-049 entries (both DONE) and `BUILT.md`'s `eami-ui` section.
+
 ## Active decision thread (2026-09-10) — B-095 built: VerifyAuditChain's false-positive fix, per the 2026-09-09 investigation's complete design
 Full-brief build (task brief pasted, plan approved before building), not investigation-only. Built exactly the approved design: deleted `verify.go`'s threaded-`lastHash`/timestamp-order walk, replaced with an unbounded, all-org `SELECT hash FROM audit_log` existence set plus a per-row independent check (self-consistency unchanged; linkage now `prevHash == genesisHash || existingHashes[prevHash]`, no dependency on iteration order). Org-scoping stays at the result-filtering stage exactly as approved; `FirstBrokenAt` can only ever name the requesting org's own row, never another org's, even when the real resolution failure originates in another org's data.
 
@@ -1562,6 +1578,27 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-10 by Claude Code — B-048/B-049 built: Vite 5.4.21->7.3.6 and
+react-router-dom/react-router 6.30.6->7.18.3, closing all remaining CVEs
+for both (npm audit: 13 vulnerabilities at session start -> 0 for either
+package). Both version targets investigated fresh (7.3.6 over dist-tag-
+latest 8.2.2 to avoid an unscoped Rolldown/oxc toolchain migration;
+7.18.3 over the bare react-router v8 package to avoid an unrequested
+import-path change). Real scope check found 16 files import react-router-
+dom (not ~7 as earlier estimated) but all use stable v6.4+ data-router
+APIs -- zero source changes needed, diff is package.json/lock only.
+Playwright's Chromium installed fresh (not previously available in this
+environment) specifically to do a real click-through rather than add
+another disclosed browser-automation gap: B-146's redirect-after-login
+verified live and screenshotted, all 8 core pages + the workflow canvas
++ the Approvals sidebar grouping confirmed rendering correctly against
+the real rebuilt eami-ui container. One pre-existing, unrelated console
+warning found and confirmed not a regression (SettingsPage.tsx's Input/
+Select missing forwardRef, last touched in B-169), correctly left alone.
+See Active decision thread above; full detail in BACKLOG.md's B-048/
+B-049 entries (both DONE) and BUILT.md's eami-ui section. Previous entry,
+preserved below:
+
 2026-09-10 by Claude Code — B-095 built: VerifyAuditChain's false-positive
 fix, exactly per the 2026-09-09 investigation's approved design (existence-
 set linkage check replacing the threaded-timestamp walk). Mandatory
