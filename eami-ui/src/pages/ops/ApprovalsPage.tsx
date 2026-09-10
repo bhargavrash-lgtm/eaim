@@ -94,8 +94,8 @@ function ApprovalCard({ approval, isDeciding, onDecide }: CardProps) {
           <span
             className={`px-2 py-0.5 rounded font-medium ${
               approval.blast_radius.reversible
-                ? 'bg-green-100 text-green-800'
-                : 'bg-red-100 text-red-800'
+                ? 'bg-status-success text-status-success-text'
+                : 'bg-status-danger text-status-danger-text'
             }`}
           >
             {approval.blast_radius.reversible ? 'Reversible' : 'Irreversible'}
@@ -104,10 +104,10 @@ function ApprovalCard({ approval, isDeciding, onDecide }: CardProps) {
             <span
               className={`px-2 py-0.5 rounded font-medium ${
                 approval.blast_radius.environment === 'production'
-                  ? 'bg-red-100 text-red-700'
+                  ? 'bg-status-danger text-status-danger-text'
                   : approval.blast_radius.environment === 'staging'
-                  ? 'bg-amber-100 text-amber-700'
-                  : 'bg-green-100 text-green-700'
+                  ? 'bg-status-warning text-status-warning-text'
+                  : 'bg-status-success text-status-success-text'
               }`}
             >
               {approval.blast_radius.environment}
@@ -143,11 +143,18 @@ function ApprovalCard({ approval, isDeciding, onDecide }: CardProps) {
 }
 
 // ── All-approvals table (read-only) ───────────────────────────────────────────
+// Doesn't genuinely fit StatusPill once shape is considered (StatusPill
+// is `rounded-full` + `capitalize`; this is plain `rounded`, no
+// capitalize) -- reusing it would be an unauthorized visual (shape)
+// change, not a pure token substitution. Stays a local map, colors now
+// sourced from the shared status.* tokens. expired/cancelled's neutral
+// gray was not part of the found 700-vs-800 drift and is preserved
+// exactly as it was.
 
 const STATUS_STYLES: Record<string, string> = {
-  approved: 'bg-green-100 text-green-800',
-  denied: 'bg-red-100 text-red-800',
-  pending: 'bg-amber-100 text-amber-700',
+  approved: 'bg-status-success text-status-success-text',
+  denied: 'bg-status-danger text-status-danger-text',
+  pending: 'bg-status-warning text-status-warning-text',
   expired: 'bg-gray-100 text-gray-500',
   cancelled: 'bg-gray-100 text-gray-500',
 }

@@ -4,6 +4,7 @@ import { MetricCard } from '@/components/common/MetricCard'
 import { RiskPill } from '@/components/common/RiskPill'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
+import { Card } from '@/components/common/Card'
 import { useActiveSessions, usePendingApprovals, useMonthlySpend } from '@/hooks/useDashboard'
 import { useAlerts } from '@/hooks/useAlerts'
 import { useAudit } from '@/hooks/useAudit'
@@ -151,7 +152,7 @@ export function DashboardPage() {
             ) : alerts.length === 0 ? (
               <EmptyState title="No alerts" description="All clear" />
             ) : (
-              <div className="overflow-hidden rounded-lg border border-gray-200 bg-white divide-y divide-gray-100">
+              <Card className="overflow-hidden rounded-lg border-gray-200 divide-y divide-gray-100">
                 {alerts.map((alert) => (
                   <div key={alert.id} className="flex items-start gap-3 px-4 py-3">
                     <span className={`mt-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase flex-shrink-0 ${SEVERITY_STYLES[alert.severity] ?? 'bg-gray-100 text-gray-700'}`}>
@@ -161,7 +162,7 @@ export function DashboardPage() {
                     <time className="text-xs text-gray-400 flex-shrink-0">{formatTs(alert.fired_at)}</time>
                   </div>
                 ))}
-              </div>
+              </Card>
             )}
           </section>
 
@@ -173,7 +174,7 @@ export function DashboardPage() {
             ) : auditEntries.length === 0 ? (
               <EmptyState title="No audit events" />
             ) : (
-              <div className="overflow-hidden rounded-lg border border-gray-200 bg-white divide-y divide-gray-100">
+              <Card className="overflow-hidden rounded-lg border-gray-200 divide-y divide-gray-100">
                 {auditEntries.map((entry) => (
                   <div key={entry.id} className="flex items-center gap-3 px-4 py-2 text-sm">
                     <span className="w-24 truncate font-medium text-gray-800">{entry.agent_name}</span>
@@ -184,7 +185,7 @@ export function DashboardPage() {
                     <time className="text-xs text-gray-400 flex-shrink-0">{formatTs(entry.timestamp)}</time>
                   </div>
                 ))}
-              </div>
+              </Card>
             )}
           </section>
         </div>

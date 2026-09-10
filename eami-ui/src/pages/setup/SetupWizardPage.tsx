@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { Navigate, Link } from 'react-router-dom'
 import { KeyRound, Building2, CheckCircle2 } from 'lucide-react'
 import { apiFetch, ApiFetchError } from '@/api/client'
+import { Card } from '@/components/common/Card'
 
 // Mirrors eami-api/internal/api/bootstrap.go's SetupStatusResp/
 // BootstrapResponse shapes -- these three routes are undocumented in
@@ -126,7 +127,7 @@ export function SetupWizardPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
-      <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
+      <Card className="w-full max-w-sm rounded-xl border-gray-200 p-8 shadow-sm">
         {stage === 'token' && (
           <>
             <div className="mb-6 flex flex-col items-center">
@@ -292,7 +293,7 @@ export function SetupWizardPage() {
             </Link>
           </div>
         )}
-      </div>
+      </Card>
     </div>
   )
 }

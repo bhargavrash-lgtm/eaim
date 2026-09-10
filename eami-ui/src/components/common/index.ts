@@ -1,6 +1,7 @@
 export { StatusPill } from './StatusPill'
 export { RiskPill } from './RiskPill'
 export { MetricCard } from './MetricCard'
+export { Card } from './Card'
 export { DataTable } from './DataTable'
 export type { Column } from './DataTable'
 export { PageHeader } from './PageHeader'

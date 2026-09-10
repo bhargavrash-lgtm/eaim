@@ -8,7 +8,9 @@ import { Topbar } from '@/components/layout/Topbar'
 import { MetricCard } from '@/components/common/MetricCard'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
+import { Card } from '@/components/common/Card'
 import { useFinOpsSummary, useFinOpsTimeSeries } from '@/hooks/useFinOps'
+import { CHART_PALETTE } from '@/lib/chartPalette'
 import type { components } from '@/api/schema'
 
 type AgentSpend = components['schemas']['AgentSpend']
@@ -59,11 +61,6 @@ function formatTokens(n: number | null | undefined): string {
 function shortDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
-
-const MODEL_COLORS = [
-  '#6366f1', '#10b981', '#f59e0b', '#ef4444',
-  '#8b5cf6', '#06b6d4', '#f97316', '#84cc16',
-]
 
 // ── Date range picker ─────────────────────────────────────────────────────────
 
@@ -145,7 +142,7 @@ export function FinOpsPage() {
     return {
       model: pricingConfigured ? (m.model ?? `model-${i}`) : `${m.model ?? `model-${i}`} (unpriced)`,
       cost: m.cost_usd ?? 0,
-      color: pricingConfigured ? MODEL_COLORS[i % MODEL_COLORS.length] : '#9CA3AF',
+      color: pricingConfigured ? CHART_PALETTE[i % CHART_PALETTE.length] : '#9CA3AF',
     }
   })
   const totalModelCost = models.reduce((s, m) => s + m.cost, 0)
@@ -268,7 +265,7 @@ export function FinOpsPage() {
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
 
           {/* Daily spend bar chart */}
-          <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <Card className="rounded-lg border-gray-200 p-4">
             <h2 className="mb-4 text-sm font-semibold text-gray-700">Daily Spend by Model</h2>
             {tsLoading ? (
               <div className="flex justify-center py-10"><LoadingSpinner /></div>
@@ -286,15 +283,15 @@ export function FinOpsPage() {
                     ? models.map((m) => (
                         <Bar key={m.model} dataKey={m.model} stackId="a" fill={m.color} />
                       ))
-                    : <Bar dataKey="Total" fill={MODEL_COLORS[0]} />
+                    : <Bar dataKey="Total" fill={CHART_PALETTE[0]} />
                   }
                 </BarChart>
               </ResponsiveContainer>
             )}
-          </div>
+          </Card>
 
           {/* Cumulative line chart */}
-          <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <Card className="rounded-lg border-gray-200 p-4">
             <h2 className="mb-4 text-sm font-semibold text-gray-700">Cumulative Spend: This Period vs Previous</h2>
             {tsLoading ? (
               <div className="flex justify-center py-10"><LoadingSpinner /></div>
@@ -313,7 +310,7 @@ export function FinOpsPage() {
                 </LineChart>
               </ResponsiveContainer>
             )}
-          </div>
+          </Card>
         </div>
 
         {/* Agent spend table */}

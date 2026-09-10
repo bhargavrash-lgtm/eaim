@@ -21,17 +21,25 @@ import {
 import type { Policy, PolicyCreate, PolicyUpdate } from '@/hooks/usePolicies'
 
 // Badges
+//
+// Neither of these genuinely fits StatusPill's existing shape once shape
+// (not just enum values) is considered: StatusPill renders `rounded-full`
+// with `capitalize`, these render plain `rounded` with no `capitalize` --
+// reusing StatusPill here would be a real, unauthorized visual change
+// (pill shape), not a pure token substitution. Both stay local; colors
+// now source from the shared status.* design tokens instead of
+// hardcoded green/red/amber values.
 
 const ACTION_STYLES: Record<string, string> = {
-  allow:    'bg-green-100 text-green-800',
-  deny:     'bg-red-100 text-red-800',
-  escalate: 'bg-amber-100 text-amber-800',
+  allow:    'bg-status-success text-status-success-text',
+  deny:     'bg-status-danger text-status-danger-text',
+  escalate: 'bg-status-warning text-status-warning-text',
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  active:   'bg-green-100 text-green-800',
+  active:   'bg-status-success text-status-success-text',
   draft:    'bg-gray-100 text-gray-600',
-  disabled: 'bg-red-100 text-red-700',
+  disabled: 'bg-status-danger text-status-danger-text',
 }
 
 function ActionBadge({ action }: { action: string }) {
@@ -142,7 +150,7 @@ function PolicyPanel({ mode, policy, onClose }: PanelProps) {
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 w-[480px] bg-white shadow-xl flex flex-col z-50 border-l border-gray-200">
+    <div className="fixed inset-y-0 right-0 w-drawer bg-white shadow-xl flex flex-col z-50 border-l border-gray-200">
       <div className="flex items-center justify-between px-6 py-4 border-b">
         <div>
           <h2 className="font-semibold text-gray-900">

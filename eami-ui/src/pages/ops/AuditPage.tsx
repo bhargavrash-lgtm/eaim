@@ -7,12 +7,14 @@ import { useAudit } from '@/hooks/useAudit'
 import type { AuditParams, AuditEntry } from '@/hooks/useAudit'
 import { AuditEntryDetailPanel } from './AuditEntryDetailPanel'
 
-// Decision badge
+// Decision badge -- renders an icon alongside the label, which StatusPill
+// has no slot for, so this doesn't genuinely fit that shared component;
+// stays local, colors now sourced from the shared status.* design tokens.
 
 const DECISION_CONFIG = {
-  allowed:   { cls: 'bg-green-100 text-green-800',  Icon: Shield,      label: 'Allowed' },
-  denied:    { cls: 'bg-red-100 text-red-800',       Icon: ShieldOff,   label: 'Denied' },
-  escalated: { cls: 'bg-amber-100 text-amber-800',   Icon: ShieldAlert, label: 'Escalated' },
+  allowed:   { cls: 'bg-status-success text-status-success-text', Icon: Shield,      label: 'Allowed' },
+  denied:    { cls: 'bg-status-danger text-status-danger-text',   Icon: ShieldOff,   label: 'Denied' },
+  escalated: { cls: 'bg-status-warning text-status-warning-text', Icon: ShieldAlert, label: 'Escalated' },
 }
 
 function DecisionBadge({ decision }: { decision: string }) {

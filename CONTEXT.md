@@ -1373,6 +1373,23 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-10) — B-176/B-177: UI design-consistency audit + design-system foundation Slice 1
+Two-part session: a full UI consistency audit (visual/token consistency, then a separate interaction-pattern follow-up), delivered as chat reports and logged retroactively as **B-176** once the first build brief spawned from it — same precedent as B-157/B-169's retroactive logging, not left living only in transcripts. Then **B-177** built the audit's own recommended first slice: real design tokens, `Card`, a chart-palette module, and status-badge unification.
+
+**Audit headline findings (full detail in BACKLOG.md's B-176 entry):** `tailwind.config.ts` had zero real design tokens beyond the brand-color ramp before this — 23 genuine hardcoded hex literals, 25 arbitrary bracket values, a chart palette hand-duplicated twice, 4 distinct slide-out-drawer widths, and `DataTable` adopted in only 10 of 18 pages. A second, interaction-focused pass found `ConfirmDialog`'s B-091 bug was isolated (its 8 importers are the *only* confirm-dialog usage anywhere, zero `window.confirm()` escapes), but ordinary submit buttons split across two uncoordinated loading-state conventions, and — the single strongest finding — 5 independently hand-rolled slide-out-drawer shells share near-identical markup with real drift in width/border/z-index/backdrop presence. Also directly re-confirmed, live in current code: the already-logged, still-open **B-079** hover-without-click bug is real today (`ToolsPage.tsx:967`), not just historical.
+
+**B-177's build, and a real design correction made mid-build, not just planned:** the approved plan called for extending `StatusPill`'s enum and reusing the shared component for `ApprovalsPage`'s and `PoliciesPage`'s entity-status badges. Building it surfaced a real problem the plan hadn't caught: `StatusPill` renders `rounded-full` + `capitalize`, while all 3 original badge implementations render plain `rounded`, no `capitalize` — reusing the component as planned would have been a genuine, unauthorized visual (shape) regression, not a pure token substitution. Course-corrected immediately: all 3 files kept their own local badge functions/maps, token-sourced only; `StatusPill`/`RiskPill` themselves still got their own internal colors switched to the new tokens (zero shape change, so every *other* real caller of these two components elsewhere in the app stayed visually identical) — making them genuine reference implementations rather than just theoretically-compatible-later.
+
+**Two precision corrections caught by re-verification before building (both flagged to and confirmed by the user before starting):** the "duplicated" chart palette turned out to be 7-of-8 shared plus one genuinely unique color in `PasteEventsPage.tsx` (`#0ea5e9`) — kept local rather than folded into the shared module as a false duplicate. `AgentsPage.tsx`'s `w-96` (384px) is a 4th, real drawer width the task brief's own phrasing didn't name — left untouched rather than silently swept into the 420/440→480 migration, since a ~25% width change deserves its own deliberate decision (likely the future `SlideOverPanel` brief, where all drawer widths get unified together).
+
+**A second in-flight catch:** removing `FinOpsPage.tsx`'s local `MODEL_COLORS` array initially missed a second usage site (`MODEL_COLORS[0]` as a fallback chart fill) — caught by a full-file grep before considering the chart-palette migration complete, not left as a would-be compile error.
+
+**Live-verified with real browser rendering (Playwright, installed fresh for B-048/B-049, reused here):** before/after screenshot pairs for all 8 touched pages against the real rebuilt `eami-ui` container — pixel-identical except the intentional drawer-width increase, separately confirmed by opening `ToolsPage`'s real Edit drawer and screenshotting it at the new 480px width. Zero console errors either pass.
+
+**Sequencing for what's next, per the audit's own recommendation, not yet started:** `SlideOverPanel` (the highest-value single item the audit found) next, then `DataTable`'s remaining 7-page migration, `Toast`, button-loading-state centralization, and inline-validation-for-complex-forms as their own separately-scoped briefs — deliberately not bundled into B-177.
+
+Full technical detail in `BACKLOG.md`'s new B-176/B-177 entries and `BUILT.md`'s `eami-ui` section.
+
 ## Active decision thread (2026-09-10) — B-048/B-049 built: Vite 5→7 and React Router 6→7 migrations, batched
 Full-brief build (task brief pasted, plan approved before building), same day as the B-095 build above. Both CVE sets closed exactly per the plan.
 
@@ -1578,6 +1595,26 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-10 by Claude Code — B-176 (UI design-consistency audit, logged
+retroactively) + B-177 (design-system foundation Slice 1) built: real
+tailwind.config.ts tokens (colors.status, fontSize['2xs'], spacing.drawer),
+new Card/chartPalette.ts, and 3-file status-badge unification (700-vs-800
+drift resolved). Real mid-build course-correction: reusing StatusPill's
+enum for ApprovalsPage/PoliciesPage's badges (the approved plan) turned
+out to be an unauthorized shape change (rounded-full+capitalize vs. the
+originals' plain rounded) -- caught before shipping, kept those 3 files'
+badges local and token-sourced instead. Two precision corrections caught
+by re-verification before building (chart palette is 7-of-8 shared plus
+one genuinely unique color, not a clean duplicate; AgentsPage's w-96 is a
+4th real drawer width the task brief's phrasing didn't name) both
+confirmed with the user before starting, not silently decided. Live-
+verified with real Playwright screenshots, before/after, all 8 touched
+pages -- pixel-identical except the intentional drawer-width change.
+CLAUDE.md gained a new Conventions bullet establishing the token/shared-
+component discipline as a standing rule. See Active decision thread
+above; full detail in BACKLOG.md's new B-176/B-177 entries. Previous
+entry, preserved below:
+
 2026-09-10 by Claude Code — B-048/B-049 built: Vite 5.4.21->7.3.6 and
 react-router-dom/react-router 6.30.6->7.18.3, closing all remaining CVEs
 for both (npm audit: 13 vulnerabilities at session start -> 0 for either

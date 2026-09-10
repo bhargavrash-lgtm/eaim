@@ -11,9 +11,11 @@ import { Topbar } from '@/components/layout/Topbar'
 import { PageHeader } from '@/components/common/PageHeader'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
+import { Card } from '@/components/common/Card'
 import { Copy } from 'lucide-react'
 import { usePasteEvents, usePasteEventsTimeSeries } from '@/hooks/usePasteEvents'
 import type { PasteEvent } from '@/hooks/usePasteEvents'
+import { CHART_PALETTE } from '@/lib/chartPalette'
 
 // Same 6-domain list as eami-api's KnownPasteDestinations / the browser
 // extension's domains.js -- bundled, not fetched, matching this codebase's
@@ -28,15 +30,19 @@ const KNOWN_DOMAINS = [
   'poe.com',
 ]
 
+// 5 of these 6 come from the shared CHART_PALETTE (src/lib/chartPalette.ts);
+// copilot.microsoft.com's sky blue (#0ea5e9) is not part of that shared
+// array -- it's a genuinely unique assignment, not a duplicate, so it
+// stays a local literal here rather than being folded into the shared module.
 const DOMAIN_COLORS: Record<string, string> = {
-  'chat.openai.com': '#10b981',
-  'claude.ai': '#6366f1',
+  'chat.openai.com': CHART_PALETTE[1],
+  'claude.ai': CHART_PALETTE[0],
   'copilot.microsoft.com': '#0ea5e9',
-  'gemini.google.com': '#f59e0b',
-  'perplexity.ai': '#8b5cf6',
-  'poe.com': '#ef4444',
+  'gemini.google.com': CHART_PALETTE[2],
+  'perplexity.ai': CHART_PALETTE[4],
+  'poe.com': CHART_PALETTE[3],
 }
-const FALLBACK_COLORS = ['#06b6d4', '#f97316', '#84cc16']
+const FALLBACK_COLORS = CHART_PALETTE.slice(5)
 
 const PAGE_SIZE = 50
 
@@ -180,7 +186,7 @@ export function PasteEventsPage() {
         </div>
 
         {/* Aggregation view -- AC2: counts by domain over time */}
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
+        <Card className="rounded-lg border-gray-200 p-4">
           <h2 className="mb-4 text-sm font-semibold text-gray-700">Events by Domain, Over Time</h2>
           {tsLoading ? (
             <div className="flex justify-center py-10"><LoadingSpinner /></div>
@@ -201,7 +207,7 @@ export function PasteEventsPage() {
               </BarChart>
             </ResponsiveContainer>
           )}
-        </div>
+        </Card>
 
         {/* Event table -- AC1: filterable list */}
         <div>

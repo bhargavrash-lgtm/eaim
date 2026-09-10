@@ -248,7 +248,7 @@ function FullChainVerification({ entry }: { entry: AuditEntry }) {
 
 export function AuditEntryDetailPanel({ entry, onClose }: { entry: AuditEntry; onClose: () => void }) {
   return (
-    <div className="fixed inset-y-0 right-0 w-[480px] bg-white shadow-xl flex flex-col z-50 border-l border-gray-200">
+    <div className="fixed inset-y-0 right-0 w-drawer bg-white shadow-xl flex flex-col z-50 border-l border-gray-200">
       <div className="flex items-center justify-between px-6 py-4 border-b">
         <h2 className="font-semibold text-gray-900">Audit Entry Detail</h2>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">x</button>

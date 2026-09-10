@@ -3,12 +3,12 @@ interface StatusPillProps {
 }
 
 const STATUS_STYLES: Record<StatusPillProps['status'], string> = {
-  active: 'bg-green-100 text-green-800',
-  connected: 'bg-green-100 text-green-800',
-  suspended: 'bg-amber-100 text-amber-800',
-  degraded: 'bg-amber-100 text-amber-800',
-  revoked: 'bg-red-100 text-red-800',
-  disconnected: 'bg-red-100 text-red-800',
+  active: 'bg-status-success text-status-success-text',
+  connected: 'bg-status-success text-status-success-text',
+  suspended: 'bg-status-warning text-status-warning-text',
+  degraded: 'bg-status-warning text-status-warning-text',
+  revoked: 'bg-status-danger text-status-danger-text',
+  disconnected: 'bg-status-danger text-status-danger-text',
 }
 
 export function StatusPill({ status }: StatusPillProps) {

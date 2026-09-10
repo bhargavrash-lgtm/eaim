@@ -20,6 +20,7 @@ import {
   EmptyState,
   LoadingSpinner,
   DataTable,
+  Card,
 } from '@/components/common'
 import type { Column } from '@/components/common'
 import { apiFetch } from '@/api/client'
@@ -257,7 +258,7 @@ export function StepConfigPanel({
   return (
     <>
       <div className="fixed inset-0 bg-black/20 z-[55]" onClick={onClose} />
-      <div className="fixed inset-y-0 right-0 w-[420px] bg-white shadow-xl flex flex-col z-[60] border-l border-gray-200">
+      <div className="fixed inset-y-0 right-0 w-drawer bg-white shadow-xl flex flex-col z-[60] border-l border-gray-200">
         <div className="flex items-center justify-between px-6 py-4 border-b">
           <h3 className="font-semibold text-gray-900">Configure step {index + 1}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">x</button>
@@ -447,7 +448,7 @@ function StepsEditor({ rows, onChange }: { rows: StepRow[]; onChange: (rows: Ste
                     and a one-line parameter summary (AC2), computed from
                     already-loaded state. Full configuration lives in
                     StepConfigPanel, opened via "Configure" below. */}
-                <div className={`rounded-lg border bg-white shadow-sm p-3 ${flagged ? 'border-red-200' : 'border-gray-200'}`}>
+                <Card className={`rounded-lg shadow-sm p-3 ${flagged ? 'border-red-200' : 'border-gray-200'}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-2 min-w-0">
                       <span className="flex items-center justify-center h-6 w-6 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold shrink-0">
@@ -491,7 +492,7 @@ function StepsEditor({ rows, onChange }: { rows: StepRow[]; onChange: (rows: Ste
                       One or more extraction sources are no longer valid -- open Configure to fix or remove.
                     </p>
                   )}
-                </div>
+                </Card>
                 {i < rows.length - 1 && (
                   <div className="flex justify-center py-0.5">
                     <ChevronDown className="h-3.5 w-3.5 text-gray-300" />
@@ -548,7 +549,7 @@ function AddWorkflowPanel({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 w-[480px] bg-white shadow-xl flex flex-col z-50 border-l border-gray-200">
+    <div className="fixed inset-y-0 right-0 w-drawer bg-white shadow-xl flex flex-col z-50 border-l border-gray-200">
       <div className="flex items-center justify-between px-6 py-4 border-b">
         <h2 className="font-semibold text-gray-900">Add Workflow</h2>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">x</button>
@@ -692,7 +693,7 @@ function EditWorkflowPanel({ workflowId, onClose }: { workflowId: string; onClos
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 w-[480px] bg-white shadow-xl flex flex-col z-50 border-l border-gray-200">
+    <div className="fixed inset-y-0 right-0 w-drawer bg-white shadow-xl flex flex-col z-50 border-l border-gray-200">
       <div className="flex items-center justify-between px-6 py-4 border-b">
         <h2 className="font-semibold text-gray-900">Edit Workflow</h2>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">x</button>
