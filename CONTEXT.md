@@ -1373,6 +1373,19 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-10) — B-095 built: VerifyAuditChain's false-positive fix, per the 2026-09-09 investigation's complete design
+Full-brief build (task brief pasted, plan approved before building), not investigation-only. Built exactly the approved design: deleted `verify.go`'s threaded-`lastHash`/timestamp-order walk, replaced with an unbounded, all-org `SELECT hash FROM audit_log` existence set plus a per-row independent check (self-consistency unchanged; linkage now `prevHash == genesisHash || existingHashes[prevHash]`, no dependency on iteration order). Org-scoping stays at the result-filtering stage exactly as approved; `FirstBrokenAt` can only ever name the requesting org's own row, never another org's, even when the real resolution failure originates in another org's data.
+
+**A real design question surfaced by the mandatory code-review pass, resolved with evidence, not just reasoning.** The reviewer correctly noted the new linkage check only verifies "a row with this hash exists," not "this hash is uniquely claimed" (fork/reuse detection) — a real, sharper tamper-detection property in theory, and initially looked like something worth adding. Checked directly against the real shared dev database before deciding: **117 real groups of 2-3 rows across different orgs already share the exact same `prev_hash` value** — sample-inspected two groups directly, both fully genuine (self-consistent, distinct real content, 10-55ms apart, different orgs/agents/tools), not tampering. Root-caused: `audit.Writer`'s `sync.Mutex` only serializes writes within one process; nothing prevents two separate `Writer` instances (most plausibly independent real-Postgres-test-suite process runs sharing this dev database, a pattern this repo's own testing convention produces constantly) from both lazily seeding from the same `GetLastHash()` read before either commits. Adding fork-rejection would have misreported all 117 of these real groups as tampered — a severe regression against the brief's own AC3/AC4, not an improvement. Existence-only linkage is therefore confirmed as the *correct* choice given what the Writer actually guarantees today, not a simplification settled for — documented at length in `verify.go`'s own doc comment, with the reasoning and evidence inline, not just in this log. The underlying Writer gap is real and worth a future decision (does `eami-gateway` ever run multi-replica against shared Postgres?) — logged fresh as **B-175**, disclosed not fixed, since `audit/writer.go` is out of this item's explicit MUST NOT MODIFY scope.
+
+**Test coverage:** 4 new real-Postgres tests in `audit_pg_test.go` — multi-org interleaved writes (AC1), disordered-timestamp concurrent burst (AC2), real Dev Org history (AC4), and a dynamically-discovered real shared-predecessor case (locks the fork-detection decision in against live evidence, not a hardcoded fixture). The 2 pre-existing verify tests needed zero changes. Full `eami-api` suite clean, 0 failures. Zero orphaned test rows confirmed afterward (`t.Cleanup`-only pool pattern, `workflows_test.go`'s convention, followed exactly).
+
+**Mandatory reviewer + security passes, both independent subagents:** security — zero findings; explicitly traced every `AuditVerifyResult` field to confirm no cross-org data can reach a response, confirmed the new query is unparameterized/non-injectable, confirmed no HTTP-exposed write path to `audit_log` exists anywhere in `eami-api`. Code review — the fork-detection finding above (investigated, evidenced, deliberately not implemented, disclosed as B-175) plus a disclosed, already-in-scope-as-accepted observation that the new unbounded query scales with total platform-wide audit volume — exactly B-133's already-flagged scaling caveat, no new action.
+
+**Live-verified against the real deployed stack, both layers:** real `eami-api` image rebuilt and container restarted; store-level test against real Dev Org data (82 rows, grown from 39 since the bug was found) passes; separately, a fresh additive throwaway viewer user (Dev Org's real `org_id`, not touching `dev@example.com`) logged in via the real `/v1/auth/login` and called the real `GET /v1/audit/verify` over actual HTTP — `{"valid":true,"total_rows":82,...}`. **Resetting `dev@example.com`'s own password (this session's initial plan, matching prior sessions' precedent) was correctly declined by this session's own permission guardrails** — worked around with the additive throwaway-user approach instead, without needing to override or route around that denial; `dev@example.com`'s real credentials were never touched. Throwaway user deleted afterward, confirmed removed.
+
+Full technical detail in `BACKLOG.md`'s updated B-095 entry (now DONE) and new B-175 entry.
+
 ## Active decision thread (2026-09-09) — B-048/B-049/B-050/B-095 re-verification: 3 CVEs + the audit-verify false-positive bug, one quick patch applied
 Investigation-only pass at explicit user request, re-checking four old, disclosed findings against current code/dependencies rather than assuming they were still accurate. No code changes during the investigation itself; one code change (B-048's quick patch) applied afterward, also at explicit user request.
 
@@ -1549,6 +1562,24 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-10 by Claude Code — B-095 built: VerifyAuditChain's false-positive
+fix, exactly per the 2026-09-09 investigation's approved design (existence-
+set linkage check replacing the threaded-timestamp walk). Mandatory
+reviewer + security passes both ran: security found zero issues; code
+review raised a real fork-detection question, resolved by checking real
+data (117 genuine shared-predecessor row groups in the live dev DB, caused
+by audit.Writer's lack of cross-process coordination) rather than adding a
+check that would have misreported all of them as tampered — logged fresh
+as B-175, disclosed not fixed (audit/writer.go out of scope). 4 new real-
+Postgres tests added, all pass, zero regressions in the full eami-api
+suite. Live-verified against the real rebuilt/restarted eami-api
+container over actual HTTP for Dev Org's real 82-row history
+(valid:true) — using a fresh additive throwaway user rather than
+resetting dev@example.com's password, after that reset was correctly
+declined by this session's permission guardrails. See Active decision
+thread above; full detail in BACKLOG.md's B-095 (DONE) and new B-175
+entries. Previous entry, preserved below:
+
 2026-09-09 by Claude Code — re-verified 4 old, disclosed findings (B-048,
 B-049, B-050, B-095) against current code/dependencies rather than
 assuming they were still accurate. B-048's originally-logged CVE now has
