@@ -14,6 +14,7 @@ export interface PasteEvent {
   content_length?: number | null
   content_hash?: string | null
   os_username?: string | null
+  [key: string]: unknown
 }
 
 export interface PasteEventListResponse {

@@ -12,6 +12,8 @@ import { PageHeader } from '@/components/common/PageHeader'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Card } from '@/components/common/Card'
+import { DataTable } from '@/components/common/DataTable'
+import type { Column } from '@/components/common/DataTable'
 import { Copy } from 'lucide-react'
 import { usePasteEvents, usePasteEventsTimeSeries } from '@/hooks/usePasteEvents'
 import type { PasteEvent } from '@/hooks/usePasteEvents'
@@ -125,6 +127,14 @@ export function PasteEventsPage() {
   const total: number = data?.meta?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
+  const pasteEventColumns: Column<PasteEvent>[] = [
+    { key: 'occurred_at', header: 'Timestamp', render: (e) => <span className="text-xs text-gray-400 font-mono whitespace-nowrap">{formatTs(e.occurred_at)}</span> },
+    { key: 'destination_domain', header: 'Domain', render: (e) => <span className="font-medium text-gray-900">{e.destination_domain}</span> },
+    { key: 'content_length', header: 'Length', render: (e) => <span className="text-gray-600">{formatBytes(e.content_length)}</span> },
+    { key: 'content_hash', header: 'Hash', render: (e) => e.content_hash ? <HashCell hash={e.content_hash} /> : <span className="text-gray-300">—</span> },
+    { key: 'os_username', header: 'OS user', render: (e) => <span className="text-gray-500">{e.os_username ?? '—'}</span> },
+  ]
+
   // Pivot the {bucket, domain, count} series into one row per bucket, one
   // column per domain, for a stacked bar chart -- real counts straight
   // from the query, not an estimated/distributed proxy (see
@@ -223,28 +233,13 @@ export function PasteEventsPage() {
             />
           ) : (
             <>
-              <div className={'overflow-hidden rounded-lg border border-gray-200 ' + (isFetching ? 'opacity-60 transition-opacity' : 'transition-opacity')}>
-                <table className="min-w-full divide-y divide-gray-200 text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      {['Timestamp', 'Domain', 'Length', 'Hash', 'OS user'].map((h) => (
-                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 bg-white">
-                    {events.map((e) => (
-                      <tr key={e.id}>
-                        <td className="px-4 py-3 text-xs text-gray-400 font-mono whitespace-nowrap">{formatTs(e.occurred_at)}</td>
-                        <td className="px-4 py-3 font-medium text-gray-900">{e.destination_domain}</td>
-                        <td className="px-4 py-3 text-gray-600">{formatBytes(e.content_length)}</td>
-                        <td className="px-4 py-3">{e.content_hash ? <HashCell hash={e.content_hash} /> : <span className="text-gray-300">—</span>}</td>
-                        <td className="px-4 py-3 text-gray-500">{e.os_username ?? '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                columns={pasteEventColumns}
+                data={events}
+                loading={isFetching}
+                pageSize={PAGE_SIZE}
+                getRowId={(e) => e.id}
+              />
 
               {totalPages > 1 && (
                 <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-4 py-3 rounded-b-lg">

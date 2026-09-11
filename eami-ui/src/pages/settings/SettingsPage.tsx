@@ -9,6 +9,8 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { Button } from '@/components/common/Button'
+import { DataTable } from '@/components/common/DataTable'
+import type { Column } from '@/components/common/DataTable'
 import { useAuthStore } from '@/stores/authStore'
 import { useOrgSettings, useUpdateOrgSettings } from '@/hooks/useOrgSettings'
 import { useUsers, useInviteUser, useChangeUserRole, useRevokeUser, type UserRole } from '@/hooks/useUsers'
@@ -225,6 +227,61 @@ function UsersTab() {
 
   const users: OrgUser[] = data?.data ?? []
 
+  const userColumns: Column<OrgUser>[] = [
+    {
+      key: 'name',
+      header: 'User',
+      render: (u) => (
+        <div className="flex items-center gap-3">
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-bold text-brand-700">
+            {(u.name ?? u.email).slice(0, 2).toUpperCase()}
+          </div>
+          <div>
+            <p className="font-medium text-gray-900">{u.name ?? u.email}</p>
+            {u.name && <p className="text-xs text-gray-400">{u.email}</p>}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'role',
+      header: 'Role',
+      render: (u) => {
+        const isSelf = u.id === currentUser?.id
+        return isSelf ? (
+          <RoleBadge role={u.role} />
+        ) : (
+          <select
+            value={u.role}
+            onChange={(e) => changeRole.mutate({ userId: u.id, role: e.target.value as UserRole })}
+            className="rounded border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500"
+          >
+            {(['admin', 'operator', 'approver', 'viewer'] as UserRole[]).map((r) => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+        )
+      },
+    },
+    {
+      key: 'last_login',
+      header: 'Last login',
+      render: (u) => <span className="text-gray-400 text-xs">{u.last_login ? new Date(u.last_login).toLocaleDateString() : 'Never'}</span>,
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      render: (u) => {
+        const isSelf = u.id === currentUser?.id
+        return !isSelf ? (
+          <button onClick={() => setRevokeTarget(u)} className="text-xs text-red-600 hover:underline">
+            Revoke
+          </button>
+        ) : null
+      },
+    },
+  ]
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -237,71 +294,14 @@ function UsersTab() {
         </button>
       </div>
 
-      {isLoading ? (
-        <div className="flex justify-center py-8"><LoadingSpinner /></div>
-      ) : users.length === 0 ? (
-        <EmptyState title="No users yet" />
-      ) : (
-        <div className="overflow-hidden rounded-lg border border-gray-200">
-          <table className="min-w-full divide-y divide-gray-200 text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                {['User', 'Role', 'Last login', 'Actions'].map((h) => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 bg-white">
-              {users.map((u) => {
-                const isSelf = u.id === currentUser?.id
-                return (
-                  <tr key={u.id}>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-bold text-brand-700">
-                          {(u.name ?? u.email).slice(0, 2).toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-900">{u.name ?? u.email}</p>
-                          {u.name && <p className="text-xs text-gray-400">{u.email}</p>}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      {isSelf ? (
-                        <RoleBadge role={u.role} />
-                      ) : (
-                        <select
-                          value={u.role}
-                          onChange={(e) => changeRole.mutate({ userId: u.id, role: e.target.value as UserRole })}
-                          className="rounded border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500"
-                        >
-                          {(['admin', 'operator', 'approver', 'viewer'] as UserRole[]).map((r) => (
-                            <option key={r} value={r}>{r}</option>
-                          ))}
-                        </select>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-gray-400 text-xs">
-                      {u.last_login ? new Date(u.last_login).toLocaleDateString() : 'Never'}
-                    </td>
-                    <td className="px-4 py-3">
-                      {!isSelf && (
-                        <button
-                          onClick={() => setRevokeTarget(u)}
-                          className="text-xs text-red-600 hover:underline"
-                        >
-                          Revoke
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        columns={userColumns}
+        data={users}
+        loading={isLoading}
+        emptyMessage="No users yet"
+        pageSize={1000}
+        getRowId={(u) => u.id}
+      />
 
       {/* Invite modal */}
       {showInvite && (
@@ -534,6 +534,34 @@ function ApiKeysTab() {
     return agents.find((a) => a.id === agentId)?.name ?? `Unknown agent (${agentId.slice(0, 8)}…)`
   }
 
+  const apiKeyColumns: Column<ApiKey>[] = [
+    { key: 'name', header: 'Name', render: (k) => <span className="font-medium text-gray-900">{k.name}</span> },
+    { key: 'prefix', header: 'Prefix', render: (k) => <span className="font-mono text-xs text-gray-500">{k.prefix.slice(0, 7)}…</span> },
+    {
+      key: 'agent_id',
+      header: 'Scoped agent',
+      render: (k) => {
+        const agentId = (k as { agent_id?: string }).agent_id
+        return (
+          <span className="text-gray-500 text-xs">
+            {agentId ? agentName(agentId) : <span className="text-gray-300">Org-wide</span>}
+          </span>
+        )
+      },
+    },
+    { key: 'created_at', header: 'Created', render: (k) => <span className="text-gray-400 text-xs">{new Date(k.created_at).toLocaleDateString()}</span> },
+    { key: 'last_used', header: 'Last used', render: (k) => <span className="text-gray-400 text-xs">{k.last_used ? new Date(k.last_used).toLocaleDateString() : '—'}</span> },
+    {
+      key: 'actions',
+      header: '',
+      render: (k) => (
+        <button onClick={() => setRevokeTarget(k)} className="text-xs text-red-600 hover:underline">
+          Revoke
+        </button>
+      ),
+    },
+  ]
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -546,46 +574,17 @@ function ApiKeysTab() {
         </button>
       </div>
 
-      {isLoading ? (
-        <div className="flex justify-center py-8"><LoadingSpinner /></div>
-      ) : keys.length === 0 ? (
-        <EmptyState title="No API keys" description="Create a key to authenticate the collector or other services." />
-      ) : (
-        <div className="overflow-hidden rounded-lg border border-gray-200">
-          <table className="min-w-full divide-y divide-gray-200 text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                {['Name', 'Prefix', 'Scoped agent', 'Created', 'Last used', ''].map((h, i) => (
-                  <th key={i} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 bg-white">
-              {keys.map((k) => (
-                <tr key={k.id}>
-                  <td className="px-4 py-3 font-medium text-gray-900">{k.name}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-500">{k.prefix.slice(0, 7)}…</td>
-                  <td className="px-4 py-3 text-gray-500 text-xs">
-                    {(k as { agent_id?: string }).agent_id ? agentName((k as { agent_id?: string }).agent_id) : <span className="text-gray-300">Org-wide</span>}
-                  </td>
-                  <td className="px-4 py-3 text-gray-400 text-xs">{new Date(k.created_at).toLocaleDateString()}</td>
-                  <td className="px-4 py-3 text-gray-400 text-xs">
-                    {k.last_used ? new Date(k.last_used).toLocaleDateString() : '—'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => setRevokeTarget(k)}
-                      className="text-xs text-red-600 hover:underline"
-                    >
-                      Revoke
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        columns={apiKeyColumns}
+        data={keys}
+        loading={isLoading}
+        emptyMessage="No API keys"
+        pageSize={1000}
+        getRowId={(k) => k.id}
+        renderEmpty={() => (
+          <EmptyState title="No API keys" description="Create a key to authenticate the collector or other services." />
+        )}
+      />
 
       {/* Create modal */}
       {showCreate && (
@@ -760,6 +759,27 @@ function ModelPricingTab() {
 
   const rows: ModelPricing[] = data?.data ?? []
 
+  const pricingColumns: Column<ModelPricing>[] = [
+    { key: 'model', header: 'Model', render: (m) => <span className="font-mono text-xs font-medium text-gray-900">{m.model}</span> },
+    { key: 'cost_per_1k_in', header: 'Input /1k', render: (m) => <span className="text-gray-700">${m.cost_per_1k_in.toFixed(6)}</span> },
+    { key: 'cost_per_1k_out', header: 'Output /1k', render: (m) => <span className="text-gray-700">${m.cost_per_1k_out.toFixed(6)}</span> },
+    { key: 'cost_per_1k_cache_write_5m', header: 'Cache write 5m /1k', className: 'whitespace-nowrap', render: (m) => <span className="text-gray-500">{fmtRate(m.cost_per_1k_cache_write_5m)}</span> },
+    { key: 'cost_per_1k_cache_write_1h', header: 'Cache write 1h /1k', className: 'whitespace-nowrap', render: (m) => <span className="text-gray-500">{fmtRate(m.cost_per_1k_cache_write_1h)}</span> },
+    { key: 'cost_per_1k_cache_read', header: 'Cache read /1k', className: 'whitespace-nowrap', render: (m) => <span className="text-gray-500">{fmtRate(m.cost_per_1k_cache_read)}</span> },
+    { key: 'updated_at', header: 'Updated', render: (m) => <span className="text-xs text-gray-400">{new Date(m.updated_at).toLocaleDateString()}</span> },
+    {
+      key: 'actions',
+      header: '',
+      className: 'whitespace-nowrap text-right',
+      render: (m) => (
+        <>
+          <button onClick={() => openEdit(m)} className="mr-3 text-xs text-brand-600 hover:underline">Edit</button>
+          <button onClick={() => setDeleteTarget(m)} className="text-xs text-red-600 hover:underline">Delete</button>
+        </>
+      ),
+    },
+  ]
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -772,40 +792,16 @@ function ModelPricingTab() {
         </button>
       </div>
 
-      {isLoading ? (
-        <div className="flex justify-center py-8"><LoadingSpinner /></div>
-      ) : rows.length === 0 ? (
-        <EmptyState title="No model pricing configured" description="Add a model's rates so its dispatches price correctly in FinOps." />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-gray-200">
-          <table className="min-w-full divide-y divide-gray-200 text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                {['Model', 'Input /1k', 'Output /1k', 'Cache write 5m /1k', 'Cache write 1h /1k', 'Cache read /1k', 'Updated', ''].map((h, i) => (
-                  <th key={i} className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 bg-white">
-              {rows.map((m) => (
-                <tr key={m.model}>
-                  <td className="px-4 py-3 font-mono text-xs font-medium text-gray-900">{m.model}</td>
-                  <td className="px-4 py-3 text-gray-700">${m.cost_per_1k_in.toFixed(6)}</td>
-                  <td className="px-4 py-3 text-gray-700">${m.cost_per_1k_out.toFixed(6)}</td>
-                  <td className="px-4 py-3 text-gray-500">{fmtRate(m.cost_per_1k_cache_write_5m)}</td>
-                  <td className="px-4 py-3 text-gray-500">{fmtRate(m.cost_per_1k_cache_write_1h)}</td>
-                  <td className="px-4 py-3 text-gray-500">{fmtRate(m.cost_per_1k_cache_read)}</td>
-                  <td className="px-4 py-3 text-xs text-gray-400">{new Date(m.updated_at).toLocaleDateString()}</td>
-                  <td className="whitespace-nowrap px-4 py-3 text-right">
-                    <button onClick={() => openEdit(m)} className="mr-3 text-xs text-brand-600 hover:underline">Edit</button>
-                    <button onClick={() => setDeleteTarget(m)} className="text-xs text-red-600 hover:underline">Delete</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        columns={pricingColumns}
+        data={rows}
+        loading={isLoading}
+        pageSize={1000}
+        getRowId={(m) => m.model}
+        renderEmpty={() => (
+          <EmptyState title="No model pricing configured" description="Add a model's rates so its dispatches price correctly in FinOps." />
+        )}
+      />
 
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

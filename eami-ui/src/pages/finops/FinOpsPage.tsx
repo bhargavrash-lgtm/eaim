@@ -9,6 +9,8 @@ import { MetricCard } from '@/components/common/MetricCard'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Card } from '@/components/common/Card'
+import { DataTable } from '@/components/common/DataTable'
+import type { Column } from '@/components/common/DataTable'
 import { useFinOpsSummary, useFinOpsTimeSeries } from '@/hooks/useFinOps'
 import { CHART_PALETTE } from '@/lib/chartPalette'
 import type { components } from '@/api/schema'
@@ -25,6 +27,7 @@ interface ToolSpend {
   cost_usd: number
   tokens_in: number
   tokens_out: number
+  [key: string]: unknown
 }
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
@@ -195,6 +198,50 @@ export function FinOpsPage() {
     .slice()
     .sort((a, b) => (b.cost_usd ?? 0) - (a.cost_usd ?? 0))
 
+  // Shared "% of total" progress-bar cell -- identical across all 3 spend
+  // tables below, only the cost_usd field read differs per row type.
+  function pctBar(costUsd: number | null | undefined) {
+    const pct = totalSpend && totalSpend > 0 && costUsd != null
+      ? ((costUsd / totalSpend) * 100).toFixed(1)
+      : '—'
+    return (
+      <div className="flex items-center gap-2">
+        <div className="h-1.5 flex-1 rounded-full bg-gray-100 max-w-20">
+          <div
+            className="h-1.5 rounded-full bg-brand-500"
+            style={{ width: `${Math.min(100, parseFloat(pct as string) || 0)}%` }}
+          />
+        </div>
+        <span className="text-gray-500 text-xs">{pct}%</span>
+      </div>
+    )
+  }
+
+  const agentSpendColumns: Column<AgentSpend>[] = [
+    { key: 'agent_name', header: 'Agent', render: (a) => <span className="font-medium text-gray-900">{a.agent_name}</span> },
+    { key: 'tokens_in', header: 'Input tokens', render: (a) => <span className="text-gray-600">{formatTokens(a.tokens_in)}</span> },
+    { key: 'tokens_out', header: 'Output tokens', render: (a) => <span className="text-gray-600">{formatTokens(a.tokens_out)}</span> },
+    { key: 'request_count', header: 'Requests', render: (a) => <span className="text-gray-600">{a.request_count ?? '—'}</span> },
+    { key: 'cost_usd', header: 'Total cost', render: (a) => <span className="font-medium text-gray-900">{formatUsd(a.cost_usd)}</span> },
+    { key: 'pct', header: '% of total', render: (a) => pctBar(a.cost_usd) },
+  ]
+
+  const teamSpendColumns: Column<TeamSpend>[] = [
+    { key: 'team', header: 'Team', render: (t) => <span className="font-medium text-gray-900">{t.team}</span> },
+    { key: 'tokens_in', header: 'Input tokens', render: (t) => <span className="text-gray-600">{formatTokens(t.tokens_in)}</span> },
+    { key: 'tokens_out', header: 'Output tokens', render: (t) => <span className="text-gray-600">{formatTokens(t.tokens_out)}</span> },
+    { key: 'cost_usd', header: 'Total cost', render: (t) => <span className="font-medium text-gray-900">{formatUsd(t.cost_usd)}</span> },
+    { key: 'pct', header: '% of total', render: (t) => pctBar(t.cost_usd) },
+  ]
+
+  const toolSpendColumns: Column<ToolSpend>[] = [
+    { key: 'tool', header: 'Connector', render: (tl) => <span className="font-medium text-gray-900">{tl.tool}</span> },
+    { key: 'tokens_in', header: 'Input tokens', render: (tl) => <span className="text-gray-600">{formatTokens(tl.tokens_in)}</span> },
+    { key: 'tokens_out', header: 'Output tokens', render: (tl) => <span className="text-gray-600">{formatTokens(tl.tokens_out)}</span> },
+    { key: 'cost_usd', header: 'Total cost', render: (tl) => <span className="font-medium text-gray-900">{formatUsd(tl.cost_usd)}</span> },
+    { key: 'pct', header: '% of total', render: (tl) => pctBar(tl.cost_usd) },
+  ]
+
   // unrecognized_model_request_count (B-112): a nonzero value means
   // total_cost_usd above is a silent undercount -- some dispatches this
   // period used a model with no configured rate, priced at $0 rather than
@@ -316,146 +363,40 @@ export function FinOpsPage() {
         {/* Agent spend table */}
         <section>
           <h2 className="mb-3 text-sm font-semibold text-gray-700">Spend by Agent</h2>
-          {summaryLoading ? (
-            <div className="flex justify-center py-8"><LoadingSpinner /></div>
-          ) : agentSpend.length === 0 ? (
-            <EmptyState title="No spend data for this period" />
-          ) : (
-            <div className="overflow-hidden rounded-lg border border-gray-200">
-              <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    {['Agent', 'Input tokens', 'Output tokens', 'Requests', 'Total cost', '% of total'].map((h) => (
-                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 bg-white">
-                  {agentSpend.map((a) => {
-                    const pct = totalSpend && totalSpend > 0 && a.cost_usd != null
-                      ? ((a.cost_usd / totalSpend) * 100).toFixed(1)
-                      : '—'
-                    return (
-                      <tr key={a.agent_id ?? a.agent_name}>
-                        <td className="px-4 py-3 font-medium text-gray-900">{a.agent_name}</td>
-                        <td className="px-4 py-3 text-gray-600">{formatTokens(a.tokens_in)}</td>
-                        <td className="px-4 py-3 text-gray-600">{formatTokens(a.tokens_out)}</td>
-                        <td className="px-4 py-3 text-gray-600">{a.request_count ?? '—'}</td>
-                        <td className="px-4 py-3 font-medium text-gray-900">{formatUsd(a.cost_usd)}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <div className="h-1.5 flex-1 rounded-full bg-gray-100 max-w-20">
-                              <div
-                                className="h-1.5 rounded-full bg-brand-500"
-                                style={{ width: `${Math.min(100, parseFloat(pct as string) || 0)}%` }}
-                              />
-                            </div>
-                            <span className="text-gray-500 text-xs">{pct}%</span>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <DataTable
+            columns={agentSpendColumns}
+            data={agentSpend}
+            loading={summaryLoading}
+            emptyMessage="No spend data for this period"
+            pageSize={1000}
+            getRowId={(a) => a.agent_id ?? a.agent_name ?? ''}
+          />
         </section>
 
         {/* Team spend table (B-108) */}
         <section>
           <h2 className="mb-3 text-sm font-semibold text-gray-700">Spend by Team</h2>
-          {summaryLoading ? (
-            <div className="flex justify-center py-8"><LoadingSpinner /></div>
-          ) : teamSpend.length === 0 ? (
-            <EmptyState title="No spend data for this period" />
-          ) : (
-            <div className="overflow-hidden rounded-lg border border-gray-200">
-              <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    {['Team', 'Input tokens', 'Output tokens', 'Total cost', '% of total'].map((h) => (
-                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 bg-white">
-                  {teamSpend.map((t) => {
-                    const pct = totalSpend && totalSpend > 0 && t.cost_usd != null
-                      ? ((t.cost_usd / totalSpend) * 100).toFixed(1)
-                      : '—'
-                    return (
-                      <tr key={t.team}>
-                        <td className="px-4 py-3 font-medium text-gray-900">{t.team}</td>
-                        <td className="px-4 py-3 text-gray-600">{formatTokens(t.tokens_in)}</td>
-                        <td className="px-4 py-3 text-gray-600">{formatTokens(t.tokens_out)}</td>
-                        <td className="px-4 py-3 font-medium text-gray-900">{formatUsd(t.cost_usd)}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <div className="h-1.5 flex-1 rounded-full bg-gray-100 max-w-20">
-                              <div
-                                className="h-1.5 rounded-full bg-brand-500"
-                                style={{ width: `${Math.min(100, parseFloat(pct as string) || 0)}%` }}
-                              />
-                            </div>
-                            <span className="text-gray-500 text-xs">{pct}%</span>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <DataTable
+            columns={teamSpendColumns}
+            data={teamSpend}
+            loading={summaryLoading}
+            emptyMessage="No spend data for this period"
+            pageSize={1000}
+            getRowId={(t) => t.team ?? ''}
+          />
         </section>
 
         {/* Connector (tool) spend table (B-108) */}
         <section>
           <h2 className="mb-3 text-sm font-semibold text-gray-700">Spend by Connector</h2>
-          {summaryLoading ? (
-            <div className="flex justify-center py-8"><LoadingSpinner /></div>
-          ) : toolSpend.length === 0 ? (
-            <EmptyState title="No spend data for this period" />
-          ) : (
-            <div className="overflow-hidden rounded-lg border border-gray-200">
-              <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    {['Connector', 'Input tokens', 'Output tokens', 'Total cost', '% of total'].map((h) => (
-                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 bg-white">
-                  {toolSpend.map((tl) => {
-                    const pct = totalSpend && totalSpend > 0 && tl.cost_usd != null
-                      ? ((tl.cost_usd / totalSpend) * 100).toFixed(1)
-                      : '—'
-                    return (
-                      <tr key={tl.tool}>
-                        <td className="px-4 py-3 font-medium text-gray-900">{tl.tool}</td>
-                        <td className="px-4 py-3 text-gray-600">{formatTokens(tl.tokens_in)}</td>
-                        <td className="px-4 py-3 text-gray-600">{formatTokens(tl.tokens_out)}</td>
-                        <td className="px-4 py-3 font-medium text-gray-900">{formatUsd(tl.cost_usd)}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <div className="h-1.5 flex-1 rounded-full bg-gray-100 max-w-20">
-                              <div
-                                className="h-1.5 rounded-full bg-brand-500"
-                                style={{ width: `${Math.min(100, parseFloat(pct as string) || 0)}%` }}
-                              />
-                            </div>
-                            <span className="text-gray-500 text-xs">{pct}%</span>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <DataTable
+            columns={toolSpendColumns}
+            data={toolSpend}
+            loading={summaryLoading}
+            emptyMessage="No spend data for this period"
+            pageSize={1000}
+            getRowId={(tl) => tl.tool}
+          />
         </section>
 
       </div>

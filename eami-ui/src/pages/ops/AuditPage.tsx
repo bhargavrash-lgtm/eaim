@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { Search, Shield, ShieldOff, ShieldAlert } from 'lucide-react'
 import { PageHeader, LoadingSpinner, EmptyState } from '@/components/common'
+import { DataTable } from '@/components/common/DataTable'
+import type { Column } from '@/components/common/DataTable'
 import { useAudit } from '@/hooks/useAudit'
 import type { AuditParams, AuditEntry } from '@/hooks/useAudit'
 import { AuditEntryDetailPanel } from './AuditEntryDetailPanel'
@@ -105,6 +107,66 @@ export function AuditPage() {
   const total: number = (data as any)?.meta?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
+  const auditColumns: Column<AuditEntry>[] = [
+    {
+      key: 'timestamp',
+      header: 'Timestamp',
+      className: 'whitespace-nowrap',
+      render: (entry) => <span className="text-xs text-gray-400 font-mono whitespace-nowrap">{formatTs(entry.timestamp)}</span>,
+    },
+    {
+      key: 'agent_name',
+      header: 'Agent',
+      render: (entry) => <span className="text-gray-700 max-w-[140px] truncate block" title={entry.agent_name}>{entry.agent_name}</span>,
+    },
+    {
+      key: 'tool_name',
+      header: 'Tool',
+      render: (entry) => <span className="font-mono text-xs text-gray-600 max-w-[120px] truncate block" title={entry.tool_name}>{entry.tool_name}</span>,
+    },
+    {
+      key: 'action',
+      header: 'Action',
+      render: (entry) => <span className="text-gray-600 max-w-[200px] truncate block" title={entry.action}>{entry.action}</span>,
+    },
+    {
+      key: 'decision',
+      header: 'Decision',
+      render: (entry) => (
+        <>
+          <DecisionBadge decision={entry.decision} />
+          {entry.approved_by && (
+            <div className="text-xs text-gray-400 mt-0.5">by {entry.approved_by}</div>
+          )}
+        </>
+      ),
+    },
+    {
+      key: 'latency_ms',
+      header: 'Latency',
+      className: 'whitespace-nowrap',
+      render: (entry) => <span className="text-xs text-gray-500 font-mono whitespace-nowrap">{entry.latency_ms != null ? entry.latency_ms + ' ms' : '--'}</span>,
+    },
+    {
+      key: 'tokens',
+      header: 'Tokens',
+      className: 'whitespace-nowrap',
+      render: (entry) => (
+        <span className="text-xs text-gray-500 font-mono whitespace-nowrap">
+          {entry.token_in != null
+            ? <span title={'in: ' + entry.token_in + ' / out: ' + entry.token_out}>{(entry.token_in + (entry.token_out ?? 0)).toLocaleString()}</span>
+            : '--'}
+        </span>
+      ),
+    },
+    {
+      key: 'hash',
+      header: 'Hash',
+      className: 'w-px',
+      render: (entry) => <HashCell hash={entry.hash} />,
+    },
+  ]
+
   return (
     <div className="flex flex-col h-full">
       <PageHeader
@@ -178,58 +240,13 @@ export function AuditPage() {
           </div>
         ) : (
           <>
-            <div className={isFetching ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Timestamp</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Agent</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Tool</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Action</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Decision</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Latency</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Tokens</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase" title="SHA-256 chain">Hash</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 bg-white">
-                  {entries.map(entry => (
-                    <tr key={entry.id} onClick={() => setSelected(entry)}
-                      className="hover:bg-gray-50 cursor-pointer">
-                      <td className="px-4 py-3 text-xs text-gray-400 font-mono whitespace-nowrap">
-                        {formatTs(entry.timestamp)}
-                      </td>
-                      <td className="px-4 py-3 text-gray-700 max-w-[140px] truncate" title={entry.agent_name}>
-                        {entry.agent_name}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-600 max-w-[120px] truncate" title={entry.tool_name}>
-                        {entry.tool_name}
-                      </td>
-                      <td className="px-4 py-3 text-gray-600 max-w-[200px] truncate" title={entry.action}>
-                        {entry.action}
-                      </td>
-                      <td className="px-4 py-3">
-                        <DecisionBadge decision={entry.decision} />
-                        {entry.approved_by && (
-                          <div className="text-xs text-gray-400 mt-0.5">by {entry.approved_by}</div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-gray-500 font-mono whitespace-nowrap">
-                        {entry.latency_ms != null ? entry.latency_ms + ' ms' : '--'}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-gray-500 font-mono whitespace-nowrap">
-                        {entry.token_in != null
-                          ? <span title={'in: ' + entry.token_in + ' / out: ' + entry.token_out}>{(entry.token_in + (entry.token_out ?? 0)).toLocaleString()}</span>
-                          : '--'}
-                      </td>
-                      <td className="px-4 py-3">
-                        <HashCell hash={entry.hash} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              columns={auditColumns}
+              data={entries}
+              loading={isFetching}
+              pageSize={PAGE_SIZE}
+              onRowClick={(entry) => setSelected(entry)}
+            />
 
             {totalPages > 1 && (
               <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-6 py-3">

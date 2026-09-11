@@ -3,6 +3,8 @@ import { Topbar } from '@/components/layout/Topbar'
 import { PageHeader } from '@/components/common/PageHeader'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
+import { DataTable } from '@/components/common/DataTable'
+import type { Column } from '@/components/common/DataTable'
 import { useEndpoints, useEndpoint, useLinkEndpointAgent } from '@/hooks/useEndpoints'
 import { useAgents } from '@/hooks/useAgents'
 import type { components } from '@/api/schema'
@@ -330,6 +332,17 @@ export function DiscoverPage() {
     osFilter ? (ep.os ?? '').toLowerCase().includes(osFilter.toLowerCase()) : true,
   )
 
+  const endpointColumns: Column<Endpoint>[] = [
+    { key: 'hostname', header: 'Hostname', render: (ep) => <span className="font-medium text-gray-900">{ep.hostname}</span> },
+    { key: 'os', header: 'OS', render: (ep) => <span className="text-gray-500 capitalize">{ep.os ?? '—'}</span> },
+    { key: 'agent_version', header: 'Agent version', render: (ep) => <span className="text-gray-500">{ep.agent_version ?? '—'}</span> },
+    { key: 'ai_app_count', header: 'AI apps', render: (ep) => <span className="text-gray-600">{ep.ai_app_count ?? 0}</span> },
+    { key: 'local_model_count', header: 'Local models', render: (ep) => <span className="text-gray-600">{ep.local_model_count ?? 0}</span> },
+    { key: 'mcp_server_count', header: 'MCPs', render: (ep) => <span className="text-gray-600">{ep.mcp_server_count ?? 0}</span> },
+    { key: 'gpu_count', header: 'GPUs', render: (ep) => <span className="text-gray-600">{ep.gpu_count ?? 0}</span> },
+    { key: 'last_seen', header: 'Last seen', render: (ep) => <span className="text-gray-400">{formatRelativeTime(ep.last_seen)}</span> },
+  ]
+
   return (
     <div>
       <Topbar title="Discover" subtitle="Endpoint AI asset inventory" />
@@ -363,41 +376,21 @@ export function DiscoverPage() {
 
         {/* Table */}
         <div className="mt-4">
-          {isLoading ? (
-            <div className="flex justify-center py-16"><LoadingSpinner size="lg" /></div>
-          ) : endpoints.length === 0 ? (
-            <EmptyState
-              icon={<Monitor className="h-10 w-10" />}
-              title="No endpoints found"
-              description="Adjust your filters or wait for agents to check in."
-            />
-          ) : (
-            <div className="overflow-hidden rounded-lg border border-gray-200">
-              <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    {['Hostname', 'OS', 'Agent version', 'AI apps', 'Local models', 'MCPs', 'GPUs', 'Last seen'].map((h) => (
-                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 bg-white">
-                  {endpoints.map((ep) => (
-                    <tr key={ep.id} className="cursor-pointer hover:bg-gray-50" onClick={() => setSelectedId(ep.id)}>
-                      <td className="px-4 py-3 font-medium text-gray-900">{ep.hostname}</td>
-                      <td className="px-4 py-3 text-gray-500 capitalize">{ep.os ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-500">{ep.agent_version ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-600">{ep.ai_app_count ?? 0}</td>
-                      <td className="px-4 py-3 text-gray-600">{ep.local_model_count ?? 0}</td>
-                      <td className="px-4 py-3 text-gray-600">{ep.mcp_server_count ?? 0}</td>
-                      <td className="px-4 py-3 text-gray-600">{ep.gpu_count ?? 0}</td>
-                      <td className="px-4 py-3 text-gray-400">{formatRelativeTime(ep.last_seen)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <DataTable
+            columns={endpointColumns}
+            data={endpoints}
+            loading={isLoading}
+            pageSize={1000}
+            getRowId={(ep) => ep.id}
+            onRowClick={(ep) => setSelectedId(ep.id)}
+            renderEmpty={() => (
+              <EmptyState
+                icon={<Monitor className="h-10 w-10" />}
+                title="No endpoints found"
+                description="Adjust your filters or wait for agents to check in."
+              />
+            )}
+          />
         </div>
       </div>
 

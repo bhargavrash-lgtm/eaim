@@ -5,6 +5,8 @@ import { RiskPill } from '@/components/common/RiskPill'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Card } from '@/components/common/Card'
+import { DataTable } from '@/components/common/DataTable'
+import type { Column } from '@/components/common/DataTable'
 import { useActiveSessions, usePendingApprovals, useMonthlySpend } from '@/hooks/useDashboard'
 import { useAlerts } from '@/hooks/useAlerts'
 import { useAudit } from '@/hooks/useAudit'
@@ -52,6 +54,14 @@ export function DashboardPage() {
   const { data: auditData, isLoading: auditLoading } = useAudit({ per_page: 10 })
 
   const sessions: Agent[] = sessionsData?.data ?? []
+  const sessionColumns: Column<Agent>[] = [
+    { key: 'name', header: 'Agent', render: (a) => <span className="font-medium text-gray-900">{a.name}</span> },
+    { key: 'model', header: 'Model', render: (a) => <span className="text-gray-600">{a.model}</span> },
+    { key: 'scope', header: 'Task scope', render: (a) => <span className="text-gray-600 max-w-xs truncate block">{a.scope}</span> },
+    { key: 'last_seen', header: 'Active since', render: (a) => <span className="text-gray-500">{a.last_seen ? formatTs(a.last_seen) : '—'}</span> },
+    { key: 'duration', header: 'Duration', render: (a) => <span className="text-gray-500">{formatDuration(a.last_seen)}</span> },
+    { key: 'risk_tier', header: 'Risk', render: (a) => <RiskPill tier={a.risk_tier} /> },
+  ]
   const pendingCount = approvalsData?.meta?.total ?? 0
   const totalSpend = spendData?.total_cost_usd
   const endpointCount = endpointsData?.meta?.total
@@ -108,39 +118,15 @@ export function DashboardPage() {
         {/* Active Sessions */}
         <section>
           <h2 className="mb-3 text-sm font-semibold text-gray-700">Active Sessions</h2>
-          {sessionsLoading ? (
-            <div className="flex justify-center py-8"><LoadingSpinner /></div>
-          ) : sessions.length === 0 ? (
-            <EmptyState title="No active sessions" />
-          ) : (
-            <div className="overflow-hidden rounded-lg border border-gray-200">
-              <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    {['Agent', 'Model', 'Task scope', 'Active since', 'Duration', 'Risk'].map((h) => (
-                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 bg-white">
-                  {sessions.map((a) => (
-                    <tr
-                      key={a.id}
-                      className="cursor-pointer hover:bg-gray-50"
-                      onClick={() => navigate(`/audit?agent_name=${encodeURIComponent(a.name)}`)}
-                    >
-                      <td className="px-4 py-3 font-medium text-gray-900">{a.name}</td>
-                      <td className="px-4 py-3 text-gray-600">{a.model}</td>
-                      <td className="px-4 py-3 text-gray-600 max-w-xs truncate">{a.scope}</td>
-                      <td className="px-4 py-3 text-gray-500">{a.last_seen ? formatTs(a.last_seen) : '—'}</td>
-                      <td className="px-4 py-3 text-gray-500">{formatDuration(a.last_seen)}</td>
-                      <td className="px-4 py-3"><RiskPill tier={a.risk_tier} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <DataTable
+            columns={sessionColumns}
+            data={sessions}
+            loading={sessionsLoading}
+            emptyMessage="No active sessions"
+            pageSize={1000}
+            getRowId={(a) => a.id}
+            onRowClick={(a) => navigate(`/audit?agent_name=${encodeURIComponent(a.name)}`)}
+          />
         </section>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

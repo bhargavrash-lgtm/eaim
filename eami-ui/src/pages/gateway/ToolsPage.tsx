@@ -10,6 +10,8 @@ import {
   SlideOverPanel,
   Button,
 } from '@/components/common'
+import { DataTable } from '@/components/common/DataTable'
+import type { Column } from '@/components/common/DataTable'
 import {
   useTools,
   useCreateTool,
@@ -901,6 +903,73 @@ export function ToolsPage() {
 
   const tools: ToolWithActions[] = (data as any)?.data ?? []
 
+  const toolColumns: Column<ToolWithActions>[] = [
+    { key: 'name', header: 'Name', render: (tool) => <span className="font-medium text-gray-900">{tool.name}</span> },
+    {
+      key: 'type',
+      header: 'Type',
+      render: (tool) => (
+        <div className="flex items-center gap-1.5">
+          <TypeBadge type={tool.type} />
+          {tool.type === 'ai_provider' && (tool.data_handling_designation ?? 'unknown') === 'unknown' && (
+            <span title="No data-handling designation confirmed for this connector -- open it to set one."
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-100 text-amber-800">
+              <AlertCircle className="h-3 w-3" />
+              data handling unknown
+            </span>
+          )}
+        </div>
+      ),
+    },
+    { key: 'auth_type', header: 'Auth', render: (tool) => <span className="text-xs text-gray-500 font-mono">{tool.auth_type ?? '--'}</span> },
+    { key: 'status', header: 'Status', render: (tool) => <StatusBadge status={tool.status} /> },
+    {
+      key: 'endpoint',
+      header: 'Endpoint / Command',
+      render: (tool) => (
+        <span className="text-xs font-mono text-gray-500 max-w-xs truncate block">
+          {tool.mcp_command ?? tool.base_url ?? tool.provider ?? '--'}
+        </span>
+      ),
+    },
+    { key: 'last_used', header: 'Last used', render: (tool) => <span className="text-xs text-gray-400">{formatLastUsed(tool.last_used)}</span> },
+    {
+      key: 'actions',
+      header: '',
+      className: 'text-right',
+      render: (tool) => {
+        const tr = testResult[tool.id]
+        const cfg = tr && tr.state !== 'testing' ? TEST_STATE_CONFIG[tr.state] : undefined
+        const Icon = cfg?.icon ?? Zap
+        return (
+          <div className="flex items-center justify-end gap-3">
+            <button
+              onClick={() => handleTest(tool.id)}
+              disabled={tr?.state === 'testing'}
+              title={tr?.message ?? 'Test connection'}
+              className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded ${
+                cfg ? cfg.className :
+                tr?.state === 'testing' ? 'text-gray-400' :
+                'text-indigo-600 hover:text-indigo-800'
+              }`}
+            >
+              <Icon className="h-3 w-3" />
+              {tr?.state === 'testing' ? 'Testing...' : cfg ? cfg.label : 'Test'}
+            </button>
+            <button onClick={() => setEditTarget(tool)}
+              className="text-gray-400 hover:text-indigo-600" title="Edit">
+              <Pencil className="h-4 w-4" />
+            </button>
+            <button onClick={() => setDeleteTarget(tool)}
+              className="text-gray-400 hover:text-red-600" title="Remove">
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+        )
+      },
+    },
+  ]
+
   async function handleTest(id: string) {
     setTestResult(prev => ({ ...prev, [id]: { state: 'testing' } }))
     try {
@@ -941,87 +1010,18 @@ export function ToolsPage() {
       />
 
       <div className="flex-1 overflow-auto p-6">
-        {tools.length === 0 ? (
-          <EmptyState
-            title="No tools connected"
-            description="Add an MCP server or REST API to allow gateway-controlled access."
-          />
-        ) : (
-          <div className="rounded-lg border border-gray-200 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
-                <tr>
-                  <th className="px-4 py-3 text-left">Name</th>
-                  <th className="px-4 py-3 text-left">Type</th>
-                  <th className="px-4 py-3 text-left">Auth</th>
-                  <th className="px-4 py-3 text-left">Status</th>
-                  <th className="px-4 py-3 text-left">Endpoint / Command</th>
-                  <th className="px-4 py-3 text-left">Last used</th>
-                  <th className="px-4 py-3 text-right"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {tools.map(tool => {
-                  const tr = testResult[tool.id]
-                  return (
-                    <tr key={tool.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-900">{tool.name}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5">
-                          <TypeBadge type={tool.type} />
-                          {tool.type === 'ai_provider' && (tool.data_handling_designation ?? 'unknown') === 'unknown' && (
-                            <span title="No data-handling designation confirmed for this connector -- open it to set one."
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-100 text-amber-800">
-                              <AlertCircle className="h-3 w-3" />
-                              data handling unknown
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-gray-500 font-mono">{tool.auth_type ?? '--'}</td>
-                      <td className="px-4 py-3"><StatusBadge status={tool.status} /></td>
-                      <td className="px-4 py-3 text-xs font-mono text-gray-500 max-w-xs truncate">
-                        {tool.mcp_command ?? tool.base_url ?? tool.provider ?? '--'}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-gray-400">{formatLastUsed(tool.last_used)}</td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-3">
-                          {(() => {
-                            const cfg = tr && tr.state !== 'testing' ? TEST_STATE_CONFIG[tr.state] : undefined
-                            const Icon = cfg?.icon ?? Zap
-                            return (
-                              <button
-                                onClick={() => handleTest(tool.id)}
-                                disabled={tr?.state === 'testing'}
-                                title={tr?.message ?? 'Test connection'}
-                                className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded ${
-                                  cfg ? cfg.className :
-                                  tr?.state === 'testing' ? 'text-gray-400' :
-                                  'text-indigo-600 hover:text-indigo-800'
-                                }`}
-                              >
-                                <Icon className="h-3 w-3" />
-                                {tr?.state === 'testing' ? 'Testing...' : cfg ? cfg.label : 'Test'}
-                              </button>
-                            )
-                          })()}
-                          <button onClick={() => setEditTarget(tool)}
-                            className="text-gray-400 hover:text-indigo-600" title="Edit">
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button onClick={() => setDeleteTarget(tool)}
-                            className="text-gray-400 hover:text-red-600" title="Remove">
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <DataTable
+          columns={toolColumns}
+          data={tools}
+          pageSize={1000}
+          getRowId={(tool) => tool.id}
+          renderEmpty={() => (
+            <EmptyState
+              title="No tools connected"
+              description="Add an MCP server or REST API to allow gateway-controlled access."
+            />
+          )}
+        />
       </div>
 
       {showAdd && (

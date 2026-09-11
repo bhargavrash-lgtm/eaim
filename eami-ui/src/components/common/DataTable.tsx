@@ -16,6 +16,12 @@ interface DataTableProps<T extends Record<string, unknown>> {
   data: T[]
   loading?: boolean
   emptyMessage?: string
+  // Genuine extension (B-104's remaining-pages migration): DiscoverPage's
+  // existing empty state has a real icon + description EmptyState itself
+  // already supports -- emptyMessage alone (a plain string title) can't
+  // reproduce that. Optional, backward compatible: every other consumer
+  // keeps using the plain `emptyMessage` string with no change.
+  renderEmpty?: () => ReactNode
   onRowClick?: (row: T) => void
   pageSize?: number
   // Deep-linking/highlighting by ID (B-092) -- getRowId identifies each
@@ -34,6 +40,7 @@ export function DataTable<T extends Record<string, unknown>>({
   data,
   loading,
   emptyMessage = 'No results',
+  renderEmpty,
   onRowClick,
   pageSize = 25,
   getRowId,
@@ -104,7 +111,7 @@ export function DataTable<T extends Record<string, unknown>>({
   }
 
   if (data.length === 0) {
-    return <EmptyState title={emptyMessage} />
+    return renderEmpty ? <>{renderEmpty()}</> : <EmptyState title={emptyMessage} />
   }
 
   return (

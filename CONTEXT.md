@@ -1373,6 +1373,23 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-11) — B-180: `DataTable` adoption, remaining 7 pages, closes B-079
+Completes B-104's original incomplete rollout and B-176's own recommended follow-on to B-179: migrated the last 7 pages with hand-rolled `<table>` markup onto `DataTable` (`DashboardPage`, `DiscoverPage`, `FinOpsPage` ×3 tables, `ToolsPage`, `AuditPage`, `PasteEventsPage`, `SettingsPage` ×3 tables — 11 table instances, not 7 as the task brief itself incorrectly counted; corrected before building, confirmed with the user).
+
+**B-079 closed as a structural side effect, not a separate fix:** `ToolsPage.tsx`'s table previously had `hover:bg-gray-50` with no `onClick` on the row — a real, live hover-implies-clickable bug B-176's own audit re-confirmed present. Migrated with no `onRowClick` passed; `DataTable`'s existing conditional means the row now structurally shows no hover at all. Live-verified via Playwright: row `class` went from `"cursor-pointer hover:bg-gray-50 "` to `" "`.
+
+**Server-pagination precedent reused, not reinvented:** `AuditPage`/`PasteEventsPage` both pass `pageSize={PAGE_SIZE}` (=50, the real server page size) so `DataTable`'s own client-side pager never engages, keeping each page's existing manual Previous/Next block — exactly the pattern `ApprovalsPage.tsx` already established, including that precedent's `loading={isFetching}` full-spinner-swap-on-refetch (a deliberate, disclosed change from the prior in-place opacity-dim).
+
+**One genuine, minimal, backward-compatible extension to `DataTable.tsx` itself:** added `renderEmpty?: () => ReactNode`, used only where a page's original empty state needed a real icon+description (`DiscoverPage`, `ToolsPage`, 2 of `SettingsPage`'s 3 tables) that the plain `emptyMessage` string can't reproduce — every other consumer unaffected.
+
+**Mandatory reviewer pass (independent, full diff read directly) found one real, low-severity gap, fixed before shipping:** `FinOpsPage`'s 3 tables and `ToolsPage` had silently dropped their stable row keys (no `getRowId` passed, falling back to array-index keys instead of the original `agent_id`/`team`/`tool`/`tool.id`) — fixed immediately, `getRowId` added to all 4 plus proactively to `DashboardPage`/`DiscoverPage` too, re-typechecked and rebuilt clean. Mandatory security pass: clean, pure presentational refactor, zero new data flow.
+
+**Live verification (Playwright, real rebuilt/restarted `eami-ui` container):** 15/15 checks passed across all 7 migrated pages plus a regression spot-check of the 3 pages already on `DataTable` (`ApprovalsPage`, `WorkflowsPage`, `PoliciesPage`) — zero console errors, `DiscoverPage`/`AuditPage` row-clicks confirmed still opening their respective drawer/panel (no regression to B-178's `SlideOverPanel` integration). One test-script bug caught mid-verification (navigated to a nonexistent `/tools` route, silently redirected to `/dashboard` by the router's catch-all, producing a misleading initial "B-079 still broken" result against the wrong page) — corrected to the real route (`/gateway/tools`) and re-verified clean, not left as a false finding.
+
+**Discovered work, logged fresh as B-181, explicitly not folded into this brief per the user's own instruction:** `DiscoverPage.tsx`'s `EndpointDrawer` is a 10th hand-rolled slide-out panel B-178's audit missed (`fixed inset-0 ... flex justify-end`, textually different from the `fixed inset-y-0 right-0` pattern B-178's grep matched on, though functionally the same shape) — still not migrated onto `SlideOverPanel`.
+
+Full technical detail in `BACKLOG.md`'s new B-180 (DONE) and B-181 (QUEUED) entries, and `BUILT.md`'s `eami-ui` section.
+
 ## Active decision thread (2026-09-11) — B-179: shared Button, closing the button loading/disabled-state gap
 Closes B-176's Q7 finding. Re-verified fresh before building rather than trusting the original tally: the 11 text-swap-only submit buttons Q7 found were unchanged, but two more real gaps surfaced on top -- none of 7 paired Cancel buttons were disabled during their sibling's pending state (ConfirmDialog's B-091 fix never propagated past ConfirmDialog itself), and `SettingsPage.tsx` turned out to have its own already-correct local `SaveButton` (6 usages) plus 2 more correctly-behaving "Send test" buttons, undocumented, never generalized -- real, live evidence the right shape already existed in one file.
 
@@ -1629,6 +1646,28 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-11 by Claude Code — B-180 built: migrated the last 7 pages with
+hand-rolled `<table>` markup onto the shared DataTable component (11 table
+instances across 7 files, corrected from the task brief's own wrong count
+of 7 before building), completing B-104's original incomplete rollout and
+B-176's recommended follow-on to B-179. Closed B-079 (ToolsPage's
+hover-implies-clickable bug) as a structural side effect of migrating with
+no onRowClick passed -- live-verified via Playwright, the row's class
+attribute went from "cursor-pointer hover:bg-gray-50" to empty. Reused
+ApprovalsPage's existing server-pagination precedent for AuditPage/
+PasteEventsPage rather than inventing a new pattern. One genuine,
+backward-compatible extension to DataTable.tsx itself (renderEmpty, for
+the 3 pages whose original empty state needed an icon+description).
+Mandatory reviewer pass caught one real low-severity gap (4 tables had
+silently lost their stable row keys) -- fixed immediately, retypechecked
+and rebuilt clean. Mandatory security pass: clean, pure presentational
+refactor. Live-verified 15/15 checks across all 7 pages plus a regression
+spot-check of the 3 already-migrated pages, zero console errors. Logged
+DiscoverPage's EndpointDrawer as new work (B-181, QUEUED) -- a 10th
+hand-rolled slide-out panel B-178's own audit missed. See Active decision
+thread above; full detail in BACKLOG.md's new B-180/B-181 entries.
+Previous entry, preserved below:
+
 2026-09-11 by Claude Code — B-179 built: shared Button component, closing
 the button loading/disabled-state gap (B-176 Q7). Re-verification found a
 bigger real scope than the original audit tally -- 7 paired Cancel
