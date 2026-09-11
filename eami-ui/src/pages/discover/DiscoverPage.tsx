@@ -5,6 +5,7 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { DataTable } from '@/components/common/DataTable'
 import type { Column } from '@/components/common/DataTable'
+import { SlideOverPanel } from '@/components/common/SlideOverPanel'
 import { useEndpoints, useEndpoint, useLinkEndpointAgent } from '@/hooks/useEndpoints'
 import { useAgents } from '@/hooks/useAgents'
 import type { components } from '@/api/schema'
@@ -51,7 +52,7 @@ function Section({ title, count, children }: { title: string; count: number; chi
         <span className="flex items-center gap-2">
           {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           {title}
-          <span className="rounded-full bg-gray-200 px-1.5 py-0.5 text-[10px] font-bold text-gray-600">{count}</span>
+          <span className="rounded-full bg-gray-200 px-1.5 py-0.5 text-2xs font-bold text-gray-600">{count}</span>
         </span>
       </button>
       {open && <div className="px-4 py-3 text-sm text-gray-700 bg-white">{children}</div>}
@@ -102,7 +103,7 @@ function LinkedAgentControl({ endpoint }: { endpoint: Endpoint }) {
       {linkMutation.isError && (
         <p className="mt-1 text-xs text-red-600">Failed to update link. Try again.</p>
       )}
-      <p className="mt-1.5 text-[11px] text-gray-400">
+      <p className="mt-1.5 text-2xs text-gray-400">
         No automatic match exists between this endpoint's discovery identity and a governed agent — link it manually if you know who operates it.
       </p>
     </div>
@@ -116,13 +117,11 @@ function EndpointDrawer({ endpointId, onClose }: { endpointId: string; onClose: 
   const report: EndpointReport | undefined = endpoint?.latest_report
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative z-50 w-full max-w-xl bg-white shadow-xl overflow-y-auto flex flex-col">
-        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
-          <h2 className="text-base font-semibold text-gray-900">{endpoint?.hostname ?? '…'}</h2>
-          <button onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X className="h-4 w-4" /></button>
-        </div>
+    <SlideOverPanel onClose={onClose}>
+      <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+        <h2 className="text-base font-semibold text-gray-900">{endpoint?.hostname ?? '…'}</h2>
+        <button onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X className="h-4 w-4" /></button>
+      </div>
 
         {isLoading ? (
           <div className="flex flex-1 items-center justify-center py-16"><LoadingSpinner /></div>
@@ -142,7 +141,7 @@ function EndpointDrawer({ endpointId, onClose }: { endpointId: string; onClose: 
                 ['Risk score', endpoint.risk_score != null ? `${endpoint.risk_score.toFixed(0)} / 100` : '—'],
               ] as [string, string][]).map(([k, v]) => (
                 <div key={k} className="rounded bg-gray-50 px-3 py-2">
-                  <div className="text-gray-400 uppercase tracking-wide text-[9px] font-semibold">{k}</div>
+                  <div className="text-gray-400 uppercase tracking-wide text-2xs font-semibold">{k}</div>
                   <div className="mt-0.5 font-medium text-gray-800 break-all">{v}</div>
                 </div>
               ))}
@@ -276,7 +275,7 @@ function EndpointDrawer({ endpointId, onClose }: { endpointId: string; onClose: 
                         {(env.ai_packages ?? []).length > 0 && (
                           <div className="mt-1 flex flex-wrap gap-1">
                             {(env.ai_packages as string[]).map((pkg, j) => (
-                              <span key={j} className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">{pkg}</span>
+                              <span key={j} className="rounded bg-gray-100 px-1.5 py-0.5 text-2xs text-gray-600">{pkg}</span>
                             ))}
                           </div>
                         )}
@@ -300,7 +299,7 @@ function EndpointDrawer({ endpointId, onClose }: { endpointId: string; onClose: 
                         {(p.ai_packages ?? []).length > 0 && (
                           <div className="mt-1 flex flex-wrap gap-1">
                             {(p.ai_packages as string[]).map((pkg, j) => (
-                              <span key={j} className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">{pkg}</span>
+                              <span key={j} className="rounded bg-gray-100 px-1.5 py-0.5 text-2xs text-gray-600">{pkg}</span>
                             ))}
                           </div>
                         )}
@@ -311,8 +310,7 @@ function EndpointDrawer({ endpointId, onClose }: { endpointId: string; onClose: 
             </Section>
           </div>
         )}
-      </div>
-    </div>
+    </SlideOverPanel>
   )
 }
 

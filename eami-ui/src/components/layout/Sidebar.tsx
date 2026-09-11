@@ -26,7 +26,7 @@ export function Sidebar() {
           if (items.length === 0) return null
           return (
             <div key={group.key} className="mb-4">
-              <p className="mb-1 px-4 text-[10px] font-semibold uppercase tracking-widest text-gray-400">
+              <p className="mb-1 px-4 text-2xs font-semibold uppercase tracking-widest text-gray-400">
                 {group.label}
               </p>
               {items.map((item) => (
@@ -44,7 +44,7 @@ export function Sidebar() {
                   <item.icon className="h-4 w-4 flex-shrink-0" />
                   <span className="flex-1">{item.label}</span>
                   {item.badgeKey === 'pendingApprovals' && pendingApprovals > 0 && (
-                    <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-2xs font-bold text-white">
                       {pendingApprovals > 99 ? '99+' : pendingApprovals}
                     </span>
                   )}

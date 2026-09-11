@@ -11,6 +11,7 @@ import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { Button } from '@/components/common/Button'
 import { DataTable } from '@/components/common/DataTable'
 import type { Column } from '@/components/common/DataTable'
+import { useToast } from '@/components/common/Toast'
 import { useAuthStore } from '@/stores/authStore'
 import { useOrgSettings, useUpdateOrgSettings } from '@/hooks/useOrgSettings'
 import { useUsers, useInviteUser, useChangeUserRole, useRevokeUser, type UserRole } from '@/hooks/useUsers'
@@ -63,14 +64,6 @@ function FieldError({ message }: { message?: string }) {
 }
 
 
-function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
-  return (
-    <div className={`rounded-md px-4 py-2 text-sm font-medium ${type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
-      {message}
-    </div>
-  )
-}
-
 function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false)
   function copy() {
@@ -120,7 +113,7 @@ type OrgFormValues = z.infer<typeof orgSchema>
 function OrgTab() {
   const { data: settings, isLoading } = useOrgSettings()
   const update = useUpdateOrgSettings()
-  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
+  const { showToast } = useToast()
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<OrgFormValues>({
     resolver: zodResolver(orgSchema),
@@ -140,11 +133,10 @@ function OrgTab() {
   async function onSubmit(values: OrgFormValues) {
     try {
       await update.mutateAsync(values)
-      setToast({ msg: 'Settings saved.', type: 'success' })
+      showToast('Settings saved.', { type: 'success', durationMs: 3000 })
     } catch {
-      setToast({ msg: 'Failed to save settings.', type: 'error' })
+      showToast('Failed to save settings.', { type: 'error', durationMs: 3000 })
     }
-    setTimeout(() => setToast(null), 3000)
   }
 
   if (isLoading) return <div className="flex justify-center py-16"><LoadingSpinner /></div>
@@ -189,7 +181,6 @@ function OrgTab() {
 
       <div className="flex items-center gap-4">
         <Button type="submit" isLoading={update.isPending}>Save changes</Button>
-        {toast && <Toast message={toast.msg} type={toast.type} />}
       </div>
     </form>
   )
@@ -376,7 +367,7 @@ function NotificationsTab() {
   const { data: settings, isLoading } = useNotificationSettings()
   const update = useUpdateNotificationSettings()
   const test = useTestNotification()
-  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
+  const { showToast } = useToast()
   const [showWebhook, setShowWebhook] = useState(false)
 
   const { register, handleSubmit, formState: { errors } } = useForm<SlackFormValues>({
@@ -387,21 +378,19 @@ function NotificationsTab() {
   async function onSaveSlack(values: SlackFormValues) {
     try {
       await update.mutateAsync({ slack_webhook_url: values.slack_webhook_url })
-      setToast({ msg: 'Slack webhook saved.', type: 'success' })
+      showToast('Slack webhook saved.', { type: 'success', durationMs: 3000 })
     } catch {
-      setToast({ msg: 'Failed to save.', type: 'error' })
+      showToast('Failed to save.', { type: 'error', durationMs: 3000 })
     }
-    setTimeout(() => setToast(null), 3000)
   }
 
   async function onTest() {
     try {
       const result = await test.mutateAsync('slack')
-      setToast({ msg: result?.error ?? 'Test sent.', type: result?.success ? 'success' : 'error' })
+      showToast(result?.error ?? 'Test sent.', { type: result?.success ? 'success' : 'error', durationMs: 4000 })
     } catch {
-      setToast({ msg: 'Test failed.', type: 'error' })
+      showToast('Test failed.', { type: 'error', durationMs: 4000 })
     }
-    setTimeout(() => setToast(null), 4000)
   }
 
   if (isLoading) return <div className="flex justify-center py-16"><LoadingSpinner /></div>
@@ -454,8 +443,6 @@ function NotificationsTab() {
             Send test message
           </Button>
         )}
-
-        {toast && <div className="mt-3"><Toast message={toast.msg} type={toast.type} /></div>}
       </section>
 
       {/* Email — coming soon */}
@@ -897,7 +884,7 @@ const MODULE_LABELS: Record<string, string> = {
 function LicenseTab() {
   const { data: license, isLoading } = useLicense()
   const upload = useUploadLicense()
-  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
+  const { showToast } = useToast()
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<LicenseFormValues>({
     resolver: zodResolver(licenseSchema),
@@ -907,12 +894,11 @@ function LicenseTab() {
   async function onSubmit(values: LicenseFormValues) {
     try {
       await upload.mutateAsync(values.raw_license)
-      setToast({ msg: 'License uploaded and verified.', type: 'success' })
+      showToast('License uploaded and verified.', { type: 'success', durationMs: 4000 })
       reset()
     } catch (err) {
-      setToast({ msg: err instanceof Error ? err.message : 'License upload failed.', type: 'error' })
+      showToast(err instanceof Error ? err.message : 'License upload failed.', { type: 'error', durationMs: 4000 })
     }
-    setTimeout(() => setToast(null), 4000)
   }
 
   if (isLoading) return <div className="flex justify-center py-16"><LoadingSpinner /></div>
@@ -962,7 +948,6 @@ function LicenseTab() {
           </div>
           <div className="flex items-center gap-4">
             <Button type="submit" isLoading={upload.isPending}>Upload license</Button>
-            {toast && <Toast message={toast.msg} type={toast.type} />}
           </div>
         </form>
       </section>

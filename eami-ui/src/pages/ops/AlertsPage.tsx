@@ -10,6 +10,7 @@ import {
   ConfirmDialog,
   EmptyState,
   LoadingSpinner,
+  useToast,
 } from '@/components/common'
 import {
   useAlerts,
@@ -73,27 +74,6 @@ function timeAgo(iso: string): string {
   const hrs = Math.floor(mins / 60)
   if (hrs < 24) return `${hrs}h ago`
   return `${Math.floor(hrs / 24)}d ago`
-}
-
-// ── Inline toast ──────────────────────────────────────────────────────────────
-interface ToastProps {
-  message: string
-  onDismiss: () => void
-}
-
-function Toast({ message, onDismiss }: ToastProps) {
-  return (
-    <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-lg bg-gray-900 px-4 py-3 text-sm text-white shadow-lg max-w-sm">
-      <span className="flex-1">{message}</span>
-      <button
-        onClick={onDismiss}
-        className="text-gray-400 hover:text-white transition-colors shrink-0"
-        aria-label="Dismiss"
-      >
-        ×
-      </button>
-    </div>
-  )
 }
 
 // ── Rule form (slide-out panel) ───────────────────────────────────────────────
@@ -385,7 +365,7 @@ interface AlertRulesTabProps {
 
 function AlertRulesTab({ formState, setFormState }: AlertRulesTabProps) {
   const [deleteTarget, setDeleteTarget] = useState<AlertRule | null>(null)
-  const [toast, setToast] = useState<string | null>(null)
+  const { showToast } = useToast()
 
   const { data, isLoading, isFetching } = useAlertRules()
   const createRule = useCreateAlertRule()
@@ -416,8 +396,7 @@ function AlertRulesTab({ formState, setFormState }: AlertRulesTabProps) {
         const msg = result.would_fire
           ? `Would fire: ${metricLabel} = ${result.current_value} (threshold: ${result.threshold})`
           : `Would not fire: ${metricLabel} = ${result.current_value} (threshold: ${result.threshold})`
-        setToast(msg)
-        window.setTimeout(() => setToast(null), 6000)
+        showToast(msg, { durationMs: 6000 })
       },
     })
   }
@@ -569,8 +548,6 @@ function AlertRulesTab({ formState, setFormState }: AlertRulesTabProps) {
         />
       )}
 
-      {/* Test result toast */}
-      {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
     </>
   )
 }

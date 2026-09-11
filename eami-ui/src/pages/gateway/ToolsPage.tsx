@@ -240,7 +240,7 @@ function ActionPathsEditor({ rows, onChange }: { rows: ActionPathRow[]; onChange
                 </button>
               </div>
               {row.path.includes('{') && (
-                <p className="flex items-center gap-1 text-[11px] text-amber-700 mt-0.5 ml-0.5">
+                <p className="flex items-center gap-1 text-2xs text-amber-700 mt-0.5 ml-0.5">
                   <AlertCircle className="h-3 w-3 shrink-0" />
                   Has a <code className="font-mono">{'{param}'}</code> in its path -- the gateway doesn't substitute path parameters yet, so this action won't reach the intended endpoint until you rewrite the path.
                 </p>
@@ -347,7 +347,7 @@ function OpenAPIDiscoverySection({ onAddActions }: { onAddActions: (rows: Action
       {result && (
         <div className="mt-3 border-t pt-3">
           {(result.warnings ?? []).map((w, i) => (
-            <p key={i} className="flex items-start gap-1 text-[11px] text-amber-700 mb-1">
+            <p key={i} className="flex items-start gap-1 text-2xs text-amber-700 mb-1">
               <AlertCircle className="h-3 w-3 shrink-0 mt-0.5" />
               <span>{w}</span>
             </p>
@@ -913,7 +913,7 @@ export function ToolsPage() {
           <TypeBadge type={tool.type} />
           {tool.type === 'ai_provider' && (tool.data_handling_designation ?? 'unknown') === 'unknown' && (
             <span title="No data-handling designation confirmed for this connector -- open it to set one."
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-100 text-amber-800">
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs font-medium bg-amber-100 text-amber-800">
               <AlertCircle className="h-3 w-3" />
               data handling unknown
             </span>

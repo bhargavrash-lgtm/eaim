@@ -1373,6 +1373,23 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-11) — B-182: `Toast`/`useToast()`, B-181's `EndpointDrawer` migration, micro-typography sweep
+Closes 3 remaining small UI-consistency items from B-176's own recommended sequence, plus closes B-181 (`EndpointDrawer` → `SlideOverPanel`).
+
+**Toast scope, re-verified fresh before building — found a real, larger scope than the brief named, correctly excluded most of it:** the brief named `AlertsPage`/`SettingsPage`'s 2 literal `Toast` components. A full sweep found 8 more `toast`-shaped call sites (`AgentsPage`/`PoliciesPage`/`ToolsPage`/`WorkflowsPage`) — but these are structurally different, un-named, content-string-sniffing inline banners, and B-176 itself already separately logged that exact class of thing as its own future "inline form validation" item. Correctly left alone, not folded in.
+
+**Design decision, flagged and explicitly approved before building:** unifying `AlertsPage`'s real floating/dismissible toast and `SettingsPage`'s inline (non-floating) one into a single app-level `useToast()`/`<ToastHost>` means `SettingsPage`'s 3 toasts move from inline-in-form to floating bottom-right — a real, visible position change. Approved explicitly as consistent with the app-level design and matching `AlertsPage`'s existing behavior.
+
+**What shipped:** `components/common/Toast.tsx` (`ToastProvider`/`useToast()`, one `<ToastHost>` mounted once at `AppShell.tsx`'s root), 4 real call sites migrated with every original message/type/duration preserved exactly (confirmed by the mandatory reviewer pass). `EndpointDrawer` migrated onto `SlideOverPanel` exactly per B-178's pattern (closes B-181) — narrows from 576px to the shared 480px (expected side effect, same as B-178's other migrations), gains real click-outside-to-close it never had. All 11 confirmed-current micro-typography sites (`Sidebar`/`DashboardPage`/`DiscoverPage`/`ToolsPage`) swept onto `text-2xs`.
+
+**Mandatory reviewer pass: clean, zero findings.** No security pass, per explicit approval consistent with B-179's own precedent (presentation-only, no new data flow).
+
+**Live-verified, 14/14 Playwright checks:** both Toast trigger points (distinct visual assertions per site — floating position, neutral-dark-vs-success/error coloring, manual-dismiss), `EndpointDrawer` opening with real content at its new 480px width with a real `SlideOverPanel` backdrop, click-outside-to-close genuinely working.
+
+**Two real, severe, pre-existing bugs found and disclosed, not fixed (logged as B-184):** while seeding a real alert rule to test the Toast trigger, found `AlertsPage.tsx`'s "New rule" creation is completely broken for every input — its request body never includes the backend-required `condition: "gt"` field at all — compounded by a second, independent bug where `METRIC_LABELS`' frontend keys don't match the backend's `validMetrics` set (only `token_spend_usd` happens to match). Verification worked around both via an authenticated in-page `fetch()` reusing the SPA's own session token, not a form submission — exactly this session's established disclose-don't-silently-fix discipline. Also found and logged B-183: `AlertsPage.tsx`'s `RuleFormPanel` is an 11th hand-rolled slide-out panel, missed by both B-178's and B-181's audits.
+
+Full technical detail in `BACKLOG.md`'s new B-182 (DONE), B-183 (QUEUED), B-184 (QUEUED) entries, and `BUILT.md`'s `eami-ui` section.
+
 ## Active decision thread (2026-09-11) — B-180: `DataTable` adoption, remaining 7 pages, closes B-079
 Completes B-104's original incomplete rollout and B-176's own recommended follow-on to B-179: migrated the last 7 pages with hand-rolled `<table>` markup onto `DataTable` (`DashboardPage`, `DiscoverPage`, `FinOpsPage` ×3 tables, `ToolsPage`, `AuditPage`, `PasteEventsPage`, `SettingsPage` ×3 tables — 11 table instances, not 7 as the task brief itself incorrectly counted; corrected before building, confirmed with the user).
 
@@ -1646,6 +1663,32 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-11 by Claude Code — B-182 built: consolidated the two hand-rolled
+Toast implementations (AlertsPage, SettingsPage) into one shared
+useToast()/<ToastHost>, migrated DiscoverPage's EndpointDrawer onto
+SlideOverPanel (closing B-181), and swept all 11 confirmed-current
+text-[9/10/11px] arbitrary values onto the fontSize['2xs'] token.
+Re-verification found the real Toast scope was larger than the brief
+named (8 more toast-shaped call sites in AgentsPage/PoliciesPage/
+ToolsPage/WorkflowsPage) but correctly excluded them -- they're a
+structurally different, already-separately-logged "inline form
+validation" item, not this one. Explicitly approved design decision:
+SettingsPage's 3 toasts move from inline-in-form to floating bottom-right,
+consolidating onto one app-level toast host. Mandatory reviewer pass:
+clean, zero findings; no security pass needed (presentation-only,
+consistent with B-179's precedent). Live-verified 14/14 Playwright checks
+-- both Toast trigger points, EndpointDrawer's new 480px width/backdrop/
+click-outside-close. While seeding a real alert rule to test the Toast
+trigger, found and disclosed (not fixed) two real, severe, pre-existing
+bugs: AlertsPage's rule-creation form never sends a required `condition`
+field (breaks creation for every input) and its METRIC_LABELS keys don't
+match the backend's validMetrics set (breaks 5 of 6 metrics
+independently) -- logged fresh as B-184. Also logged B-183: AlertsPage's
+RuleFormPanel is an 11th hand-rolled slide-out panel missed by both
+B-178's and B-181's audits. See Active decision thread above; full detail
+in BACKLOG.md's new B-182/B-183/B-184 entries.
+Previous entry, preserved below:
+
 2026-09-11 by Claude Code — B-180 built: migrated the last 7 pages with
 hand-rolled `<table>` markup onto the shared DataTable component (11 table
 instances across 7 files, corrected from the task brief's own wrong count
