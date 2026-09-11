@@ -6,6 +6,7 @@ import { Navigate, Link } from 'react-router-dom'
 import { KeyRound, Building2, CheckCircle2 } from 'lucide-react'
 import { apiFetch, ApiFetchError } from '@/api/client'
 import { Card } from '@/components/common/Card'
+import { Button } from '@/components/common/Button'
 
 // Mirrors eami-api/internal/api/bootstrap.go's SetupStatusResp/
 // BootstrapResponse shapes -- these three routes are undocumented in
@@ -164,13 +165,9 @@ export function SetupWizardPage() {
                 </p>
               )}
 
-              <button
-                type="submit"
-                disabled={tokenForm.formState.isSubmitting}
-                className="w-full rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
-              >
-                {tokenForm.formState.isSubmitting ? 'Checking…' : 'Continue'}
-              </button>
+              <Button type="submit" isLoading={tokenForm.formState.isSubmitting} className="w-full">
+                Continue
+              </Button>
             </form>
           </>
         )}
@@ -265,13 +262,9 @@ export function SetupWizardPage() {
                 </p>
               )}
 
-              <button
-                type="submit"
-                disabled={bootstrapForm.formState.isSubmitting}
-                className="w-full rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
-              >
-                {bootstrapForm.formState.isSubmitting ? 'Creating…' : 'Create organization'}
-              </button>
+              <Button type="submit" isLoading={bootstrapForm.formState.isSubmitting} className="w-full">
+                Create organization
+              </Button>
             </form>
           </>
         )}

@@ -3,11 +3,12 @@ import { useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Copy, Check, Eye, EyeOff, RefreshCw } from 'lucide-react'
+import { Copy, Check, Eye, EyeOff } from 'lucide-react'
 import { Topbar } from '@/components/layout/Topbar'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
+import { Button } from '@/components/common/Button'
 import { useAuthStore } from '@/stores/authStore'
 import { useOrgSettings, useUpdateOrgSettings } from '@/hooks/useOrgSettings'
 import { useUsers, useInviteUser, useChangeUserRole, useRevokeUser, type UserRole } from '@/hooks/useUsers'
@@ -59,18 +60,6 @@ function FieldError({ message }: { message?: string }) {
   return <p className="mt-1 text-xs text-red-600">{message}</p>
 }
 
-function SaveButton({ isLoading, label = 'Save changes' }: { isLoading?: boolean; label?: string }) {
-  return (
-    <button
-      type="submit"
-      disabled={isLoading}
-      className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
-    >
-      {isLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
-      {label}
-    </button>
-  )
-}
 
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
   return (
@@ -197,7 +186,7 @@ function OrgTab() {
       </div>
 
       <div className="flex items-center gap-4">
-        <SaveButton isLoading={update.isPending} />
+        <Button type="submit" isLoading={update.isPending}>Save changes</Button>
         {toast && <Toast message={toast.msg} type={toast.type} />}
       </div>
     </form>
@@ -350,11 +339,10 @@ function UsersTab() {
                   </Select>
                 </div>
                 <div className="flex justify-end gap-3">
-                  <button type="button" onClick={() => setShowInvite(false)}
-                    className="rounded border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                  <Button type="button" variant="outline" onClick={() => setShowInvite(false)} disabled={invite.isPending}>
                     Cancel
-                  </button>
-                  <SaveButton isLoading={invite.isPending} label="Send invite" />
+                  </Button>
+                  <Button type="submit" isLoading={invite.isPending}>Send invite</Button>
                 </div>
               </form>
             )}
@@ -451,31 +439,20 @@ function NotificationsTab() {
               <FieldError message={errors.slack_webhook_url?.message} />
             </div>
             <div className="flex items-center gap-3">
-              <SaveButton isLoading={update.isPending} />
+              <Button type="submit" isLoading={update.isPending}>Save changes</Button>
               {settings?.slack_enabled && (
-                <button
-                  type="button"
-                  onClick={onTest}
-                  disabled={test.isPending}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60"
-                >
-                  {test.isPending && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
+                <Button type="button" variant="outline" onClick={onTest} isLoading={test.isPending}>
                   Send test
-                </button>
+                </Button>
               )}
             </div>
           </form>
         )}
 
         {settings?.slack_enabled && showWebhook === false && (
-          <button
-            onClick={onTest}
-            disabled={test.isPending}
-            className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60"
-          >
-            {test.isPending && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
+          <Button type="button" variant="outline" onClick={onTest} isLoading={test.isPending} className="mt-2">
             Send test message
-          </button>
+          </Button>
         )}
 
         {toast && <div className="mt-3"><Toast message={toast.msg} type={toast.type} /></div>}
@@ -663,11 +640,10 @@ function ApiKeysTab() {
                   </p>
                 </div>
                 <div className="flex justify-end gap-3">
-                  <button type="button" onClick={() => setShowCreate(false)}
-                    className="rounded border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                  <Button type="button" variant="outline" onClick={() => setShowCreate(false)} disabled={createKey.isPending}>
                     Cancel
-                  </button>
-                  <SaveButton isLoading={createKey.isPending} label="Create key" />
+                  </Button>
+                  <Button type="submit" isLoading={createKey.isPending}>Create key</Button>
                 </div>
               </form>
             )}
@@ -873,17 +849,17 @@ function ModelPricingTab() {
                 </div>
               </div>
               <div className="flex justify-end gap-3">
-                <button
+                <Button
                   type="button"
+                  variant="outline"
                   onClick={() => { setShowForm(false); setEditTarget(null) }}
-                  className="rounded border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  disabled={createPricing.isPending || updatePricing.isPending}
                 >
                   Cancel
-                </button>
-                <SaveButton
-                  isLoading={createPricing.isPending || updatePricing.isPending}
-                  label={editTarget ? 'Save changes' : 'Add pricing'}
-                />
+                </Button>
+                <Button type="submit" isLoading={createPricing.isPending || updatePricing.isPending}>
+                  {editTarget ? 'Save changes' : 'Add pricing'}
+                </Button>
               </div>
             </form>
           </div>
@@ -989,7 +965,7 @@ function LicenseTab() {
             <FieldError message={errors.raw_license?.message} />
           </div>
           <div className="flex items-center gap-4">
-            <SaveButton isLoading={upload.isPending} label="Upload license" />
+            <Button type="submit" isLoading={upload.isPending}>Upload license</Button>
             {toast && <Toast message={toast.msg} type={toast.type} />}
           </div>
         </form>

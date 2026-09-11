@@ -10,6 +10,7 @@ import {
   LoadingSpinner,
   DataTable,
   SlideOverPanel,
+  Button,
 } from '@/components/common'
 import type { Column } from '@/components/common'
 import {
@@ -288,11 +289,10 @@ function PolicyPanel({ mode, policy, onClose }: PanelProps) {
       </div>
 
       <div className="px-6 py-4 border-t flex gap-3">
-        <button type="submit" form="policy-form" disabled={isPending}
-          className="flex-1 bg-indigo-600 text-white rounded px-4 py-2 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
-          {isPending ? 'Saving...' : mode === 'create' ? 'Create policy' : 'Save changes'}
-        </button>
-        <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+        <Button type="submit" form="policy-form" isLoading={isPending} className="flex-1">
+          {mode === 'create' ? 'Create policy' : 'Save changes'}
+        </Button>
+        <Button variant="secondary" onClick={onClose} disabled={isPending}>Cancel</Button>
       </div>
     </SlideOverPanel>
   )

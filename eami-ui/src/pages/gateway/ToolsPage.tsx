@@ -8,6 +8,7 @@ import {
   EmptyState,
   LoadingSpinner,
   SlideOverPanel,
+  Button,
 } from '@/components/common'
 import {
   useTools,
@@ -329,10 +330,10 @@ function OpenAPIDiscoverySection({ onAddActions }: { onAddActions: (rows: Action
           className="w-full border rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
       )}
 
-      <button type="button" onClick={handleDiscover} disabled={!canDiscover || discover.isPending}
-        className="mt-2 text-xs bg-white border text-indigo-700 font-medium rounded px-2.5 py-1 hover:bg-indigo-50 disabled:opacity-50">
-        {discover.isPending ? 'Parsing spec...' : 'Discover actions'}
-      </button>
+      <Button type="button" variant="outline" size="sm" onClick={handleDiscover}
+        disabled={!canDiscover} isLoading={discover.isPending} className="mt-2">
+        Discover actions
+      </Button>
 
       {error && (
         <p className="flex items-center gap-1 text-xs text-red-600 mt-2">
@@ -614,11 +615,10 @@ function AddToolPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="px-6 py-4 border-t flex gap-3">
-        <button type="submit" form="tool-form" disabled={create.isPending}
-          className="flex-1 bg-indigo-600 text-white rounded px-4 py-2 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
-          {create.isPending ? 'Adding...' : 'Add tool'}
-        </button>
-        <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+        <Button type="submit" form="tool-form" isLoading={create.isPending} className="flex-1">
+          Add tool
+        </Button>
+        <Button variant="secondary" onClick={onClose} disabled={create.isPending}>Cancel</Button>
       </div>
     </SlideOverPanel>
   )
@@ -865,11 +865,10 @@ function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () =
       </div>
 
       <div className="px-6 py-4 border-t flex gap-3">
-        <button type="submit" form="tool-edit-form" disabled={update.isPending}
-          className="flex-1 bg-indigo-600 text-white rounded px-4 py-2 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
-          {update.isPending ? 'Saving...' : 'Save changes'}
-        </button>
-        <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+        <Button type="submit" form="tool-edit-form" isLoading={update.isPending} className="flex-1">
+          Save changes
+        </Button>
+        <Button variant="secondary" onClick={onClose} disabled={update.isPending}>Cancel</Button>
       </div>
     </SlideOverPanel>
   )

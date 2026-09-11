@@ -1373,6 +1373,23 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-11) — B-179: shared Button, closing the button loading/disabled-state gap
+Closes B-176's Q7 finding. Re-verified fresh before building rather than trusting the original tally: the 11 text-swap-only submit buttons Q7 found were unchanged, but two more real gaps surfaced on top -- none of 7 paired Cancel buttons were disabled during their sibling's pending state (ConfirmDialog's B-091 fix never propagated past ConfirmDialog itself), and `SettingsPage.tsx` turned out to have its own already-correct local `SaveButton` (6 usages) plus 2 more correctly-behaving "Send test" buttons, undocumented, never generalized -- real, live evidence the right shape already existed in one file.
+
+**Component over hook, same reasoning already validated for Card/SlideOverPanel:** the defect is a rendering gap (a spinner some call sites simply forgot), which only a component that owns the JSX can structurally prevent -- a hook returning `{disabled, onClick}` still leaves spinner-rendering to each call site, reproducing the same inconsistency. Built `components/common/Button.tsx` (`variant`, `size` -- `sm` added only because one real button needed it, not speculatively -- `isLoading`, full native passthrough). `variant="primary"` uses the real `brand.600` token, closing the indigo-vs-brand drift B-176 explicitly bundled with this item.
+
+**~32 real instances migrated**, zero click-handler changes: 11 primary submit buttons, 7 paired Cancel buttons (disabled on the sibling's pending boolean, not `isLoading` themselves), `SettingsPage`'s local `SaveButton` deleted (6 call sites repointed), its 2 "Send test" buttons, `AuditEntryDetailPanel`'s "Verify chain" button, `ConfirmDialog`'s own 2 buttons (now the convention's demonstration, not a duplicate of it).
+
+**Explicitly excluded, confirmed before building:** `NodesPage.tsx`'s refresh button -- a genuinely different, deliberately-still-clickable-while-fetching idempotent-refresh pattern, forcing `disabled`-while-loading would be a real behavior change outside this brief's contract. Also left alone: 6 `bg-indigo-600` buttons found in a post-migration sweep, all confirmed to be plain synchronous triggers with zero pending state -- no loading/disabled inconsistency exists there to fix, migrating them would be unrelated color-only scope creep.
+
+**Code review (run given the real scope exceeded the brief's own ~29-site estimate) found a real, valuable gap:** 3 Cancel buttons in `SettingsPage.tsx` (invite-user, create-API-key, model-pricing forms) were left as raw `<button>` elements during the first pass -- missed while already mid-edit on that file for other reasons, the exact Cancel-gap class this item exists to close. Fixed immediately, rebuilt, re-verified before live testing.
+
+**Live verification, real in-flight requests via Playwright route-delay interception, not code-level assertion:** 3 clean successes across different pages, each a genuine 2-second-delayed real network call with a mid-flight screenshot -- LoginPage Sign in, SettingsPage Save changes, PoliciesPage Create policy (this one also showing the paired Cancel button visibly disabled -- the actual fix, live). Two further attempts investigated and disclosed rather than counted as false successes: AgentsPage's Save config never fired a real request, traced via request logging to the pre-existing B-178-disclosed 401 on its own config GET blocking client-side validation before the mutation call -- confirmed not a regression here either. ToolsPage's Add tool also didn't fire its POST, traced to incomplete automated form-filling in the test script itself, not a reproduced product issue.
+
+**Real-world side effects from live testing, cleaned up:** a real throwaway policy (`button-loading-verify-policy`) was actually created against the real dev database by the Policies test (the route was delayed, not blocked, so it genuinely completed) -- deleted afterward, confirmed removed. Confirmed the Settings test's empty-organisation-name submit did not actually blank Dev Org's real name in the database.
+
+Full technical detail in `BACKLOG.md`'s new B-179 entry (DONE) and `BUILT.md`'s `eami-ui` section.
+
 ## Active decision thread (2026-09-10) — B-178: shared SlideOverPanel, closing the real Audit-panel click-outside bug
 Built B-176's own single highest-value finding: one `components/common/SlideOverPanel.tsx` replacing 9 independently hand-rolled slide-out-panel implementations across 5 files, retroactively fixing `AuditEntryDetailPanel.tsx`'s real, live bug — it was the only one of the 9 with no backdrop at all, so click-outside-to-close silently didn't work there despite every other panel in the app training users to expect it.
 
@@ -1612,6 +1629,26 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-11 by Claude Code — B-179 built: shared Button component, closing
+the button loading/disabled-state gap (B-176 Q7). Re-verification found a
+bigger real scope than the original audit tally -- 7 paired Cancel
+buttons never disabled during a sibling's pending state (ConfirmDialog's
+B-091 fix never propagated), plus SettingsPage's own undocumented local
+SaveButton (6 uses) validating the exact component shape built here.
+~32 instances migrated, zero click-handler changes. NodesPage's refresh
+button and 6 unrelated bg-indigo-600 buttons with no pending state
+explicitly excluded, confirmed before building. Code review (run given
+the scope exceeded the brief's own estimate) caught 3 more un-migrated
+Cancel buttons in SettingsPage, fixed before shipping. Live-verified with
+3 real in-flight requests via Playwright route-delay interception (not
+code-level assertion) across Login/Settings/Policies, the last also
+showing the Cancel-disable fix live; 2 further attempts (Agents, Tools)
+investigated and disclosed as not reaching the network layer rather than
+counted as false successes. A real throwaway policy created during
+testing was cleaned up from the live dev database afterward. See Active
+decision thread above; full detail in BACKLOG.md's new B-179 entry.
+Previous entry, preserved below:
+
 2026-09-10 by Claude Code — B-178 built: shared SlideOverPanel component,
 closing AuditEntryDetailPanel's real click-outside-to-close bug (the only
 one of 9 hand-rolled panels with no backdrop) and migrating all 9 call

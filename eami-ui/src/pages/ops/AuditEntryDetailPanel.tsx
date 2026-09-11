@@ -7,9 +7,9 @@
 // approval names, and two DELIBERATELY DISTINCT hash-chain claims -- see
 // the CRITICAL REQUIREMENT in this brief: never blur them together.
 import { useState, useEffect, type ReactNode } from 'react'
-import { Copy, Check, Info, ShieldCheck, ShieldAlert, Loader2 } from 'lucide-react'
+import { Copy, Check, Info, ShieldCheck, ShieldAlert } from 'lucide-react'
 import { apiFetch, ApiFetchError } from '@/api/client'
-import { SlideOverPanel } from '@/components/common'
+import { SlideOverPanel, Button } from '@/components/common'
 import { useAuthStore } from '@/stores/authStore'
 import { useVerifyAuditChainToEntry } from '@/hooks/useAudit'
 import type { AuditEntry } from '@/hooks/useAudit'
@@ -210,14 +210,9 @@ function FullChainVerification({ entry }: { entry: AuditEntry }) {
         Walks the real hash chain from the very first audit entry through this one and recomputes every hash.
         This is the only check here that actually confirms no earlier row has been tampered with.
       </p>
-      <button
-        onClick={() => verify.mutate(entry.timestamp)}
-        disabled={verify.isPending}
-        className="flex items-center gap-1.5 bg-indigo-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
-      >
-        {verify.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+      <Button onClick={() => verify.mutate(entry.timestamp)} isLoading={verify.isPending}>
         Verify chain to this entry
-      </button>
+      </Button>
 
       {verify.isSuccess && verify.data && (
         <div className={`mt-3 rounded px-3 py-2 text-sm flex items-start gap-2 ${

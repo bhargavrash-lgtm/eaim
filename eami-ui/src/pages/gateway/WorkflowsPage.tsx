@@ -22,6 +22,7 @@ import {
   DataTable,
   Card,
   SlideOverPanel,
+  Button,
 } from '@/components/common'
 import type { Column } from '@/components/common'
 import { apiFetch } from '@/api/client'
@@ -585,11 +586,10 @@ function AddWorkflowPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="px-6 py-4 border-t flex gap-3">
-        <button type="submit" form="workflow-form" disabled={create.isPending}
-          className="flex-1 bg-indigo-600 text-white rounded px-4 py-2 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
-          {create.isPending ? 'Creating...' : 'Create workflow'}
-        </button>
-        <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+        <Button type="submit" form="workflow-form" isLoading={create.isPending} className="flex-1">
+          Create workflow
+        </Button>
+        <Button variant="secondary" onClick={onClose} disabled={create.isPending}>Cancel</Button>
       </div>
     </SlideOverPanel>
   )
@@ -750,11 +750,11 @@ function EditWorkflowPanel({ workflowId, onClose }: { workflowId: string; onClos
       </div>
 
       <div className="px-6 py-4 border-t flex gap-3">
-        <button type="submit" form="workflow-edit-form" disabled={update.isPending || rows === null}
-          className="flex-1 bg-indigo-600 text-white rounded px-4 py-2 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
-          {update.isPending ? 'Saving...' : 'Save changes'}
-        </button>
-        <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+        <Button type="submit" form="workflow-edit-form" disabled={rows === null}
+          isLoading={update.isPending} className="flex-1">
+          Save changes
+        </Button>
+        <Button variant="secondary" onClick={onClose} disabled={update.isPending}>Cancel</Button>
       </div>
     </SlideOverPanel>
   )

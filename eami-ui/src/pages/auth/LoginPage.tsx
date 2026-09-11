@@ -6,6 +6,7 @@ import { api } from '@/api/client'
 import { useAuthStore, consumeRedirectPath } from '@/stores/authStore'
 import { Logo } from '@/components/layout/Logo'
 import { Card } from '@/components/common/Card'
+import { Button } from '@/components/common/Button'
 
 const loginSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -94,13 +95,9 @@ export function LoginPage() {
             </p>
           )}
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
-          >
-            {isSubmitting ? 'Signing in…' : 'Sign in'}
-          </button>
+          <Button type="submit" isLoading={isSubmitting} className="w-full">
+            Sign in
+          </Button>
         </form>
       </Card>
     </div>

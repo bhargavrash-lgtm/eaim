@@ -5,7 +5,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ConfirmDialog, DataTable, SlideOverPanel } from '@/components/common'
+import { ConfirmDialog, DataTable, SlideOverPanel, Button } from '@/components/common'
 import type { Column } from '@/components/common'
 import {
   useAgents,
@@ -173,20 +173,12 @@ function ConfigPanel({ agent, onClose }: { agent: Agent; onClose: () => void }) 
 
       {/* Footer */}
       <div className="px-6 py-4 border-t flex gap-3">
-        <button
-          type="submit"
-          form="config-form"
-          disabled={update.isPending}
-          className="flex-1 bg-indigo-600 text-white rounded px-4 py-2 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
-        >
-          {update.isPending ? 'Saving…' : 'Save config'}
-        </button>
-        <button
-          onClick={onClose}
-          className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
-        >
+        <Button type="submit" form="config-form" isLoading={update.isPending} className="flex-1">
+          Save config
+        </Button>
+        <Button variant="secondary" onClick={onClose} disabled={update.isPending}>
           Cancel
-        </button>
+        </Button>
       </div>
     </SlideOverPanel>
   )
@@ -294,11 +286,10 @@ function AddAgentPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="px-6 py-4 border-t flex gap-3">
-        <button type="submit" form="add-agent-form" disabled={create.isPending}
-          className="flex-1 bg-indigo-600 text-white rounded px-4 py-2 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
-          {create.isPending ? 'Creating…' : 'Create agent'}
-        </button>
-        <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+        <Button type="submit" form="add-agent-form" isLoading={create.isPending} className="flex-1">
+          Create agent
+        </Button>
+        <Button variant="secondary" onClick={onClose} disabled={create.isPending}>Cancel</Button>
       </div>
     </SlideOverPanel>
   )
