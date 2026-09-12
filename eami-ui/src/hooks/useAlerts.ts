@@ -8,12 +8,12 @@ import type { components } from '@/api/schema'
 export type AlertStatus = 'open' | 'acknowledged' | 'resolved'
 
 export type MetricKey =
-  | 'denied_actions'
-  | 'escalated_actions'
-  | 'scope_drift'
-  | 'new_endpoints'
+  | 'denied_actions_count'
+  | 'escalated_actions_count'
+  | 'scope_drift_count'
+  | 'new_endpoints_count'
   | 'token_spend_usd'
-  | 'failed_deliveries'
+  | 'failed_delivery_count'
 
 export type Alert = components['schemas']['Alert']
 
@@ -41,52 +41,37 @@ export type AlertRuleInput = {
 export type TestRuleResult = {
   would_fire: boolean
   metric_value: number
-  metric_key: MetricKey
-  current_value: number
+  metric: MetricKey
   threshold: number
+  message?: string
 }
 
 // ── API mapping helpers ───────────────────────────────────────────────────────
-
-type ApiMetric   = components['schemas']['AlertRuleCreate']['metric']
-type ApiSeverity = components['schemas']['AlertRuleCreate']['severity']
-
-const METRIC_TO_API: Record<MetricKey, ApiMetric> = {
-  denied_actions:    'denied_actions_count',
-  escalated_actions: 'escalated_actions_count',
-  scope_drift:       'scope_drift_count',
-  new_endpoints:     'new_endpoints_count',
-  token_spend_usd:   'token_spend_usd',
-  failed_deliveries: 'failed_delivery_count',
-}
-
-const SEVERITY_TO_API: Record<NonNullable<AlertRuleInput['severity']>, ApiSeverity> = {
-  info:     'low',
-  warning:  'medium',
-  high:     'high',
-  critical: 'critical',
-}
+// MetricKey and AlertRuleInput['severity'] are now defined identically to the
+// OpenAPI AlertRuleCreate/Update schemas (both fixed under B-184 to match the
+// backend's actual validMetrics/severity sets), so no key/value translation
+// is needed here anymore -- input passes straight through to the wire shape.
 
 function toApiCreate(input: AlertRuleInput): components['schemas']['AlertRuleCreate'] {
   return {
-    name:      input.name!,
-    metric:    METRIC_TO_API[input.metric!],
-    condition: 'gt',
-    threshold: input.threshold!,
-    window:    input.window_minutes! as 5 | 15 | 60 | 1440,
-    severity:  SEVERITY_TO_API[input.severity!],
-    enabled:   input.enabled ?? true,
+    name:           input.name!,
+    metric:         input.metric!,
+    condition:      'gt',
+    threshold:      input.threshold!,
+    window_minutes: input.window_minutes! as 5 | 15 | 60 | 1440,
+    severity:       input.severity!,
+    enabled:        input.enabled ?? true,
   }
 }
 
 function toApiUpdate(input: Partial<AlertRuleInput>): components['schemas']['AlertRuleUpdate'] {
   const patch: components['schemas']['AlertRuleUpdate'] = {}
-  if (input.name !== undefined)           patch.name      = input.name
-  if (input.metric !== undefined)         patch.metric    = METRIC_TO_API[input.metric]
-  if (input.threshold !== undefined)      patch.threshold = input.threshold
-  if (input.window_minutes !== undefined) patch.window    = input.window_minutes as 5 | 15 | 60 | 1440
-  if (input.severity !== undefined)       patch.severity  = SEVERITY_TO_API[input.severity]
-  if (input.enabled !== undefined)        patch.enabled   = input.enabled
+  if (input.name !== undefined)           patch.name           = input.name
+  if (input.metric !== undefined)         patch.metric         = input.metric
+  if (input.threshold !== undefined)      patch.threshold      = input.threshold
+  if (input.window_minutes !== undefined) patch.window_minutes = input.window_minutes as 5 | 15 | 60 | 1440
+  if (input.severity !== undefined)       patch.severity       = input.severity
+  if (input.enabled !== undefined)        patch.enabled        = input.enabled
   return patch
 }
 
@@ -184,7 +169,7 @@ export function useTestAlertRule() {
       if (error) throw error
       if (!data) throw new Error('No data returned from test rule')
       // Single narrowing cast: TestRuleResult extends the API response shape,
-      // server returns the full object including metric_key/current_value/threshold.
+      // server returns the full object including metric/metric_value/threshold.
       return data as TestRuleResult
     },
   })

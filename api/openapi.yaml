@@ -747,28 +747,28 @@ components:
 
     AlertRuleCreate:
       type: object
-      required: [name, metric, condition, threshold, window, severity]
+      required: [name, metric, condition, threshold, window_minutes, severity]
       properties:
-        name:      { type: string }
-        metric:    { type: string, enum: [denied_actions_count, escalated_actions_count, scope_drift_count, new_endpoints_count, token_spend_usd, failed_delivery_count] }
-        condition: { type: string, enum: [gt], description: "Comparison operator. Only 'gt' supported." }
-        threshold: { type: number }
-        window:    { type: integer, enum: [5, 15, 60, 1440], description: "Evaluation window in minutes." }
-        severity:  { type: string, enum: [low, medium, high, critical] }
-        channels:  { type: array, items: { type: string, enum: [slack, email, teams, webhook] } }
-        enabled:   { type: boolean, default: true }
+        name:           { type: string }
+        metric:         { type: string, enum: [denied_actions_count, escalated_actions_count, scope_drift_count, new_endpoints_count, token_spend_usd, failed_delivery_count] }
+        condition:      { type: string, enum: [gt], description: "Comparison operator. Only 'gt' supported." }
+        threshold:      { type: number }
+        window_minutes: { type: integer, enum: [5, 15, 60, 1440], description: "Evaluation window in minutes." }
+        severity:       { type: string, enum: [info, warning, high, critical] }
+        channels:       { type: array, items: { type: string, enum: [slack, email, teams, webhook] } }
+        enabled:        { type: boolean, default: true }
 
     AlertRuleUpdate:
       type: object
       properties:
-        name:      { type: string }
-        metric:    { type: string, enum: [denied_actions_count, escalated_actions_count, scope_drift_count, new_endpoints_count, token_spend_usd, failed_delivery_count] }
-        condition: { type: string, enum: [gt] }
-        threshold: { type: number }
-        window:    { type: integer, enum: [5, 15, 60, 1440] }
-        severity:  { type: string, enum: [low, medium, high, critical] }
-        channels:  { type: array, items: { type: string, enum: [slack, email, teams, webhook] } }
-        enabled:   { type: boolean }
+        name:           { type: string }
+        metric:         { type: string, enum: [denied_actions_count, escalated_actions_count, scope_drift_count, new_endpoints_count, token_spend_usd, failed_delivery_count] }
+        condition:      { type: string, enum: [gt] }
+        threshold:      { type: number }
+        window_minutes: { type: integer, enum: [5, 15, 60, 1440] }
+        severity:       { type: string, enum: [info, warning, high, critical] }
+        channels:       { type: array, items: { type: string, enum: [slack, email, teams, webhook] } }
+        enabled:        { type: boolean }
 
     # ── Settings schemas ─────────────────────────────────
 

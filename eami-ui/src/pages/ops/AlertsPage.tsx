@@ -30,12 +30,12 @@ import {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const METRIC_LABELS: Record<MetricKey, string> = {
-  denied_actions:     'Denied Actions',
-  escalated_actions:  'Escalated Actions',
-  scope_drift:        'Scope Drift Detections',
-  new_endpoints:      'New Endpoints',
-  token_spend_usd:    'Token Spend (USD)',
-  failed_deliveries:  'Failed Deliveries',
+  denied_actions_count:     'Denied Actions',
+  escalated_actions_count:  'Escalated Actions',
+  scope_drift_count:        'Scope Drift Detections',
+  new_endpoints_count:      'New Endpoints',
+  token_spend_usd:          'Token Spend (USD)',
+  failed_delivery_count:    'Failed Deliveries',
 }
 
 const WINDOW_OPTIONS: { value: number; label: string }[] = [
@@ -80,8 +80,8 @@ function timeAgo(iso: string): string {
 const ruleSchema = z.object({
   name:           z.string().min(1, 'Name is required'),
   metric:         z.enum([
-    'denied_actions', 'escalated_actions', 'scope_drift',
-    'new_endpoints', 'token_spend_usd', 'failed_deliveries',
+    'denied_actions_count', 'escalated_actions_count', 'scope_drift_count',
+    'new_endpoints_count', 'token_spend_usd', 'failed_delivery_count',
   ] as const),
   threshold:      z.coerce.number().positive('Must be a positive number'),
   window_minutes: z.coerce.number().positive(),
@@ -392,10 +392,10 @@ function AlertRulesTab({ formState, setFormState }: AlertRulesTabProps) {
   function handleTest(rule: AlertRule) {
     testRule.mutate(rule.id, {
       onSuccess: (result: TestRuleResult) => {
-        const metricLabel = METRIC_LABELS[result.metric_key] ?? result.metric_key
+        const metricLabel = METRIC_LABELS[result.metric] ?? result.metric
         const msg = result.would_fire
-          ? `Would fire: ${metricLabel} = ${result.current_value} (threshold: ${result.threshold})`
-          : `Would not fire: ${metricLabel} = ${result.current_value} (threshold: ${result.threshold})`
+          ? `Would fire: ${metricLabel} = ${result.metric_value} (threshold: ${result.threshold})`
+          : `Would not fire: ${metricLabel} = ${result.metric_value} (threshold: ${result.threshold})`
         showToast(msg, { durationMs: 6000 })
       },
     })

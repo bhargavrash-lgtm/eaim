@@ -1373,6 +1373,17 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-12) — B-184: alert-rule creation/metric-key contract fixed — corrected from B-182's original diagnosis
+Task brief required re-verifying B-182's own two logged findings against current code before building, not trusting the discovery's description — the re-verification found both were wrong on the specifics, though right that the feature was broken.
+
+**Real root causes, different from what B-182 logged:** (1) `api/openapi.yaml`'s `AlertRuleCreate`/`AlertRuleUpdate` write schemas sent a `window` field where `eami-api`'s Go structs have always expected `window_minutes` — every real create/update silently zero-valued the window and failed validation. B-182's "missing `condition`" never actually reproduced through the real UI (`useAlerts.ts`'s `toApiCreate()` has always hardcoded `condition: 'gt'` — B-182's reproduction was a hand-built request body, not a captured real submission, so it missed this translation layer entirely). (2) An independent, previously-unlogged bug: the same write schemas' severity enum (`low/medium/high/critical`) didn't match the backend's `info/warning/high/critical` (used everywhere else, including the DB's own `CHECK` constraint) — also blocked every create. (3) The metric-key mismatch B-182 did flag was real, but its actual live impact was on **Edit**, not Create: `RuleFormPanel`'s edit-mode defaultValue bound to the backend's suffixed metric string, matching no dropdown `<option>` for 5 of 6 metrics — a native `<select>`'s silent fallback-to-first-option meant saving an edited rule without touching Metric would have silently corrupted it. Checked `alert_rules` on the real dev Postgres first, before any code change, per explicit instruction given that risk: 0 rows — never fired on real data. (4) Found independently while tracing the metric-key surface: `TestAlertRuleResp`/`TestRuleResult` field names never matched (`metric`/`metric_value` vs. `metric_key`/`current_value`) — every "Test rule" toast has shown `undefined`, missed by B-182's own Playwright checks (asserted toast styling, not message text). Approved as in-scope, not new work, since it's the same feature's own "verified live" claim this investigation was already checking.
+
+**Fix is spec + frontend only — zero `eami-api` production code changed** (the Go handlers/engine were already correct on every count above; the OpenAPI spec was the outlier). `openapi.yaml` is nominally Architect-EAMI-owned per `BOUNDARIES.md`; fixed directly per explicit approval ("the file-ownership convention doesn't block fixing a confirmed, live root cause").
+
+**Live verification, no browser-automation tool available this session (disclosed):** real `tsc`/`vite build` clean, live dev server confirmed serving the fix via `curl`. Substituted a real login against the actually-running `eami-api` container (not just the Go test harness) — created one real rule per each of the 6 metrics (all 201), tested each (all 200, correct fields), edited one's name only and confirmed metric/severity/window survived, deleted everything, confirmed cleanup. Security fork: zero findings. Code-review pass run.
+
+Full technical detail in `BACKLOG.md`'s B-184 entry (now DONE) and `BUILT.md`'s `eami-ui` section. B-183 (`RuleFormPanel` → `SlideOverPanel`) remains separately QUEUED, out of this brief's scope.
+
 ## Active decision thread (2026-09-11) — B-182: `Toast`/`useToast()`, B-181's `EndpointDrawer` migration, micro-typography sweep
 Closes 3 remaining small UI-consistency items from B-176's own recommended sequence, plus closes B-181 (`EndpointDrawer` → `SlideOverPanel`).
 
@@ -1663,6 +1674,23 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-12 by Claude Code — B-184 fixed: alert-rule creation and the
+metric-key contract, both broken since inception. Re-verification (required
+by the task brief before building) found B-182's original diagnosis wrong on
+both counts -- the real root causes were an openapi.yaml `window` vs.
+`window_minutes` field-name mismatch and an independent severity-enum
+mismatch (both blocking every create/update), plus a metric-key mismatch
+whose real live impact was silent metric corruption on Edit (not Create),
+and a TestAlertRule response field-name mismatch found along the way.
+Checked `alert_rules` for pre-existing data before any code change -- 0
+rows, so the Edit-corruption path never fired for real. Fixed in
+api/openapi.yaml + eami-ui only; zero eami-api production code changed.
+Live-verified via a real login against the running eami-api container (no
+browser-automation tool available this session) across all 6 metrics plus
+edit/test/delete. Security fork: zero findings; code-review pass run. See
+Active decision thread above; full detail in BACKLOG.md's B-184 entry (DONE)
+and BUILT.md's eami-ui section. Previous entry, preserved below:
+
 2026-09-11 by Claude Code — B-182 built: consolidated the two hand-rolled
 Toast implementations (AlertsPage, SettingsPage) into one shared
 useToast()/<ToastHost>, migrated DiscoverPage's EndpointDrawer onto
