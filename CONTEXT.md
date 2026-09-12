@@ -1373,6 +1373,17 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-12) — BACKLOG.md hygiene pass: B-110 formally closed, B-105 gap explained
+Small, low-priority cleanup requested after producing a full status export of `BACKLOG.md` for the founder. Two loose ends from that export, resolved:
+
+**B-110 closed:** its own entry was never marked DONE despite B-112 (2026-08-26) explicitly fixing its bug — B-112's write-up says outright "the real bug is narrower than B-110 described" (an unrecognized model silently priced at $0, not merged into a recognized model's totals) and includes a regression test for exactly that. B-110's header now reads `DONE, 2026-08-26, closed by B-112`, with a resolution note pointing to B-112 and disclosing that the cross-reference sat unclosed until this pass caught it.
+
+**B-105 explained, not lost:** grepped `CONTEXT.md` and found the source — a 2026-08-23 log entry for the B-102/B-103/B-104 minting batch states the counter was checked and "now stands at B-105" immediately afterward. B-105 was simply the next free number at that moment, never assigned to any item; B-106 (the next real item logged) was minted without it, for reasons not recorded. Not a renumbering casualty — an undocumented one-number skip. Noted inline in `BACKLOG.md` right after B-104's entry so it doesn't remain an open question.
+
+**B-039 was a false alarm, not a real gap:** the initial export claimed B-039 couldn't be located, but it was already fully present in `BACKLOG.md` as a complete bullet-point entry (predates the `### B-XXX` header convention) — missed only because the earlier read happened to skip the exact line range it sits in. Confirmed present and complete; no edit needed.
+
+Docs-only change (`BACKLOG.md`); no code touched.
+
 ## Active decision thread (2026-09-12) — B-184: alert-rule creation/metric-key contract fixed — corrected from B-182's original diagnosis
 Task brief required re-verifying B-182's own two logged findings against current code before building, not trusting the discovery's description — the re-verification found both were wrong on the specifics, though right that the feature was broken.
 
@@ -1674,6 +1685,15 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-12 by Claude Code — BACKLOG.md hygiene pass: B-110 formally closed
+(was fixed by B-112 on 2026-08-26 but never marked DONE -- cross-reference
+now corrected), and B-105 confirmed as an undocumented skipped counter
+value (never assigned to any item, not a renumbering casualty) with a note
+added inline. B-039 was checked too and found already fully present and
+complete -- an earlier read simply skipped its line range. Docs-only, no
+code changed. See Active decision thread above. Previous entry, preserved
+below:
+
 2026-09-12 by Claude Code — B-184 fixed: alert-rule creation and the
 metric-key contract, both broken since inception. Re-verification (required
 by the task brief before building) found B-182's original diagnosis wrong on
