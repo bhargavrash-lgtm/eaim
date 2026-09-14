@@ -1373,6 +1373,21 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-14) — Full eami-agent endpoint-software audit: platform coverage, deployment story, resource footprint, real-world status
+Founder requested a precise, code-grounded audit of the endpoint agent itself for materials representing the product's real maturity — explicitly asked for confirmed-via-code vs. genuinely-unknown/unmeasured to be kept separate, not assumed.
+
+**Scanner platform coverage, checked per-scanner via Go build-tag inspection (not assumed from filenames or B-164's prior prose):** all 10 scanners wired into `payload.Build()` have real, confirmed equivalent behavior across Windows/macOS/Linux, with exactly one exception — `network_activity`'s Linux DNS-hostname correlation is a silent no-op (`linuxDNSCache()` discards its own `resolvectl` output, always returns `nil`); the rest of that scanner (connection mapping) works fine on Linux. Already tracked as B-010 — re-verified unchanged, not a new finding, updated with today's precise framing ("the only builds-on-all-three-does-less-on-one case among the 10").
+
+**Deployment/distribution, corrected to precise language:** the Windows MSI/macOS pkg/Linux deb-rpm installers are genuinely built to real MDM conventions (Jamf's actual `$4`/`$5`/`$6` script-parameter convention is read by the real `postinstall` script, not just documented; the MSI has a real Intune/SCCM registry detection rule) — but none of this has ever been run through an actual MDM console. No `.intunewin` built, no Jamf Pro policy run, no GPO created on a real domain. Today it's manual, one-machine installation in practice; the packaging format itself isn't structurally limited to that.
+
+**Real-world execution status, stated precisely per platform:** Windows — actually executed repeatedly, including a real MSI install/uninstall cycle, but only on this session's single dev machine. macOS — never executed on any hardware, real or virtual. Linux — cross-compiles and vets clean, but no evidence found anywhere of the binary ever actually running. "Cross-platform" today means "builds cleanly for three `GOOS` targets," not "proven in the field," for two of the three platforms.
+
+**Resource footprint: confirmed genuinely absent, not just unreported.** No CPU/memory/disk measurement exists anywhere for `eami-agent` — `ARCHITECTURE.md`'s NFR table has only a binary-size *target* (<20MB) plus one real measured number (the MSI package itself, 2.5MB, which is package size not runtime memory/CPU). No profiling/load-test infrastructure exists for this component, unlike `eami-gateway`.
+
+**`ARCHITECTURE.md` §12 found stale:** still lists "macOS/Linux agent: post-v1, priority?" as an unresolved open question despite both having shipped code since the first commit. Flagged, not edited directly (Architect/PM-owned per `BOUNDARIES.md`, same precedent as B-017/B-089/B-106) — logged as B-188.
+
+**Nothing here required a new B-ID for the platform-coverage/deployment/footprint findings themselves** — they're status corrections to `BUILT.md`'s `eami-agent` summary and known-limitations, not actionable gaps distinct from what B-010/B-014/B-185/B-186/B-187 already track. Only the `ARCHITECTURE.md` staleness (a genuinely new, previously-unflagged finding) got a fresh B-ID (B-188).
+
 ## Active decision thread (2026-09-14) — Discovery gaps re-verified and formally tracked: B-185/B-186/B-187 minted, B-139 corrected
 Founder requested a fresh, code-grounded re-verification of B-164's known-incomplete Discovery items (2026-09-04), then asked for the result to be logged as real, separately-tracked backlog items rather than left living only inside B-164's own investigation record.
 
@@ -1699,6 +1714,28 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-14 by Claude Code — Full eami-agent endpoint-software audit for
+maturity-representation materials: scanner platform coverage confirmed
+per-scanner via build-tag inspection (all 10 wired scanners equivalent
+across Windows/macOS/Linux except network_activity's Linux DNS-hostname
+correlation, a silent no-op -- already tracked as B-010, updated with
+today's precise framing). Deployment story corrected: MDM-compatible
+packaging (real Jamf script-parameter support, real Intune/SCCM MSI
+detection rule) exists and is correct, but has never been run through an
+actual MDM console -- manual one-machine install in practice today.
+Real-world execution stated precisely per platform: Windows actually
+executed (single dev machine only), macOS never executed on any hardware,
+Linux cross-compiles clean but never actually executed anywhere. Resource
+footprint (CPU/memory/disk) confirmed genuinely unmeasured -- no
+profiling infrastructure exists for this component. ARCHITECTURE.md's
+Open Questions (Section 12) found stale (still lists macOS/Linux agent priority
+as unresolved despite shipped code since the first commit) -- flagged,
+not edited directly (Architect/PM-owned), logged as new B-188. BUILT.md's
+eami-agent summary updated with all of the above; B-010 updated with a
+2026-09-14 re-verification note. Counter now stands at B-189. Docs-only,
+no code changed. See Active decision thread above. Previous entry,
+preserved below:
+
 2026-09-14 by Claude Code — Discovery gaps from B-164 re-verified fresh
 against current code (zero drift found in 10 days) and formally logged as
 tracked work: B-185 (surface ai_processes/browser_extensions in
