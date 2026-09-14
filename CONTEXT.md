@@ -1373,6 +1373,20 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-14) — Discovery gaps re-verified and formally tracked: B-185/B-186/B-187 minted, B-139 corrected
+Founder requested a fresh, code-grounded re-verification of B-164's known-incomplete Discovery items (2026-09-04), then asked for the result to be logged as real, separately-tracked backlog items rather than left living only inside B-164's own investigation record.
+
+**Re-verification found zero drift in 10 days** — every file B-164 touched last shows no commits since the B-164/165/166 fix itself (`5d51ff9`, 2026-09-04): `ai_processes`/`browser_extensions` still collected and still rendered nowhere in `eami-ui`; `scheduled_tasks` still a real, working Windows detector with zero imports outside its own package; `file_changes` still a literal `return nil, nil` stub since the very first commit; B-139 still zero-built.
+
+**Three new items minted, each isolating a distinct kind of gap** rather than one bundled item, since they have genuinely different shapes and owners:
+- **B-185** — surface `ai_processes`/`browser_extensions` in `EndpointDrawer`. Pure frontend; data already flows end-to-end.
+- **B-186** — wire `scheduled_tasks` into `payload.Build()`. Pure backend wiring; the detector itself needs no changes.
+- **B-187** — `file_changes` needs an explicit build-or-shelve decision, not a wiring fix — it's a genuine unimplemented stub, a different class of gap than B-186's, deliberately not conflated with it.
+
+**B-139 corrected, not just re-confirmed:** its own entry previously said "mechanism not yet decided, needs real investigation" without stating plainly that literally zero technical scoping has ever happened on it specifically. Added an explicit "confirmed zero design exists" statement, plus B-164 Part C's two candidate mechanisms (mirror-port/proxy traffic inspection vs. DNS-query inspection) — previously only living inside B-164's own writeup — now cross-referenced directly in B-139's entry so a future reader picking up B-139 doesn't have to go hunting through a different item to find them, and doesn't mistake B-164's passing framing for actual scoping work (explicitly caveated in both entries as a starting reading list, not a shortlist or a recommendation).
+
+Docs-only change (`BACKLOG.md`, this file); no code touched. Counter now stands at B-188.
+
 ## Active decision thread (2026-09-12) — BACKLOG.md hygiene pass: B-110 formally closed, B-105 gap explained
 Small, low-priority cleanup requested after producing a full status export of `BACKLOG.md` for the founder. Two loose ends from that export, resolved:
 
@@ -1685,6 +1699,19 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-14 by Claude Code — Discovery gaps from B-164 re-verified fresh
+against current code (zero drift found in 10 days) and formally logged as
+tracked work: B-185 (surface ai_processes/browser_extensions in
+EndpointDrawer, frontend-only), B-186 (wire scheduled_tasks into
+payload.Build(), backend-wiring-only), B-187 (file_changes needs an
+explicit build-or-shelve decision, not a wiring fix -- distinct gap class
+from B-186). B-139 corrected to explicitly state zero design exists, with
+B-164 Part C's two candidate mechanisms (mirror-port/proxy traffic
+inspection vs. DNS-query inspection) cross-referenced directly into its
+own entry rather than left only inside B-164's. Counter now stands at
+B-188. Docs-only, no code changed. See Active decision thread above.
+Previous entry, preserved below:
+
 2026-09-12 by Claude Code — BACKLOG.md hygiene pass: B-110 formally closed
 (was fixed by B-112 on 2026-08-26 but never marked DONE -- cross-reference
 now corrected), and B-105 confirmed as an undocumented skipped counter
