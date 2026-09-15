@@ -180,6 +180,27 @@ type UsageLimitChecker interface {
 	WithinUsageLimit(ctx context.Context, orgID string) (bool, error)
 }
 
+// NearLimitReserver (B-173) is a SEPARATE, additive interface, same
+// reasoning and same optional-type-assertion mechanism as UsageLimitChecker
+// above: *license.Store implements this too, so real dispatches get the
+// real B-173 concurrency guard automatically, while every existing test's
+// bare stub (which implements neither UsageLimitChecker nor this) silently
+// skips it, unchanged.
+//
+// Closes the gap UsageLimitChecker's own check leaves open (see
+// license.Store.WithinUsageLimit's and ReserveIfNearLimit's own doc
+// comments): WithinUsageLimit is a correct-at-the-instant-it-runs read
+// against token_usage, but token_usage is populated asynchronously
+// (main.go's B-099 fire-and-forget goroutine), so several concurrent
+// dispatches can each pass that check before any of their own usage has
+// landed. ReserveIfNearLimit narrows exactly that race, once usage is
+// within a configurable margin of the license's cap -- see its own doc
+// comment for why this targets the race specifically, not a per-call token
+// estimate.
+type NearLimitReserver interface {
+	ReserveIfNearLimit(ctx context.Context, orgID string) (release func(), ok bool, err error)
+}
+
 type Dispatcher struct {
 	toolRouter       *toolrouter.Router
 	aiProviderRouter *aiprovider.Router
@@ -460,6 +481,34 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 			return d.rejectOnUsageLimitExceeded(reqCtx, ac, start)
 		}
 	}
+	// B-173: narrows the concurrency race WithinUsageLimit's own check
+	// above can't close by itself (see NearLimitReserver's own doc
+	// comment). Only ever engages once usage is near the org's real cap.
+	// releaseUsageReservation defaults to a no-op so every return point
+	// below can defer/call it unconditionally regardless of whether a real
+	// reservation was ever taken (unlimited license, comfortably under the
+	// margin, or no NearLimitReserver configured at all).
+	releaseUsageReservation := func() {}
+	if nlr, ok := d.licenseChecker.(NearLimitReserver); ok {
+		r, reserved, err := nlr.ReserveIfNearLimit(reqCtx, ac.OrgID)
+		if err != nil {
+			slog.Error("dispatch: usage limit reservation check failed -- rejecting closed", "org_id", ac.OrgID, "err", err)
+		}
+		if err != nil || !reserved {
+			return d.rejectOnUsageLimitContention(reqCtx, ac, start)
+		}
+		releaseUsageReservation = r
+	}
+	// Deferred here, at the top of Dispatch, so it fires no matter which of
+	// this function's several return points below is actually taken (every
+	// one of them is Dispatch's own return, not a nested function's -- Go's
+	// defer applies to this enclosing call). The Escalate branch below
+	// additionally calls releaseUsageReservation() explicitly, BEFORE
+	// blocking on Hold() -- see that branch's own comment for why holding
+	// the reservation across an entire human-approval wait would be a real
+	// regression, not what this fix is for. Safe to call twice: the second
+	// call (via this defer) is then just a no-op DELETE matching zero rows.
+	defer releaseUsageReservation()
 
 	// Resolve ac.Tool against gateway_tools, org-scoped, before policy
 	// evaluation (B-044) -- so a rule can target the resolved
@@ -639,6 +688,20 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 			}
 			break
 		}
+		// B-173: release the near-cap reservation now, before blocking on a
+		// possibly multi-minute human approval wait -- holding it for the
+		// full holdTimeout would serialize every OTHER near-cap dispatch
+		// for this org behind one pending escalation, far more than the
+		// "roughly one request's worth of latency" this guard is meant to
+		// cost. The escalated call hasn't actually reached the real
+		// downstream provider call yet (that only happens in
+		// dispatchApproved, if and when a human approves it), so it
+		// shouldn't hold this slot as if it had. A resumed dispatch's own
+		// usage-limit re-check (approval.Router's UsageLimitChecker, B-172)
+		// covers that later moment separately; this reservation's job ends
+		// here.
+		releaseUsageReservation()
+
 		slog.Info("dispatch: holding for approval decision",
 			"approval_id", approvalID,
 			"agent", ac.AgentName,
@@ -976,6 +1039,54 @@ func (d *Dispatcher) rejectOnUsageLimitExceeded(reqCtx context.Context, ac mcp.A
 	outcome := DispatchOutcome{
 		Decision:       "denied",
 		Err:            errors.New("dispatch: your organization has exceeded its licensed usage limit for this period"),
+		EpisodeSteps:   []episode.Step{newEpisodeStep(ac, "blocked", nil)},
+		EpisodeOutcome: "blocked",
+		AuditWriteErr:  auditWriteErr,
+		AuditDecision:  auditEntry.Decision,
+	}
+	outcome.Dispatched = outcome.Err == nil
+
+	for _, h := range d.hooks {
+		h(reqCtx, ac, outcome)
+	}
+	return outcome.Result, outcome.Err
+}
+
+// rejectOnUsageLimitContention (B-173) mirrors rejectOnUsageLimitExceeded's
+// exact shape -- same reason those two, and rejectOnMissingLicense/
+// rejectOnProviderResolveError before them, stay separate, non-consolidated
+// functions rather than one shared helper parameterized by message: the
+// rejection reasons are semantically distinct. This one is not "your
+// organization is over its cap" (that's rejectOnUsageLimitExceeded, a
+// clean, stable fact about real recorded usage) but "another dispatch for
+// your organization is currently in flight near its cap" -- a genuinely
+// transient condition a retry can reasonably resolve once that other
+// dispatch's usage lands, unlike a real over-cap rejection.
+func (d *Dispatcher) rejectOnUsageLimitContention(reqCtx context.Context, ac mcp.ActionContext, start time.Time) (json.RawMessage, error) {
+	slog.Warn("dispatch: org is near its usage limit and another dispatch is already in flight -- rejecting to avoid a concurrent overshoot",
+		"tool", ac.Tool, "org_id", ac.OrgID, "agent", ac.AgentName)
+
+	orgID, _ := uuid.Parse(ac.OrgID)
+	agentID, _ := uuid.Parse(ac.AgentUUID)
+	workflowRunID, _ := uuid.Parse(ac.WorkflowRunID)
+	auditEntry := audit.Entry{
+		OrgID:         orgID,
+		AgentID:       agentID,
+		AgentName:     ac.AgentName,
+		ToolName:      ac.Tool,
+		Action:        ac.Action,
+		Parameters:    nil,
+		LatencyMS:     time.Since(start).Milliseconds(),
+		Timestamp:     ac.ReceivedAt,
+		WorkflowRunID: workflowRunID,
+		StepIndex:     ac.StepIndex,
+		Decision:      "denied",
+	}
+	auditWriteErr := d.auditWriter.Write(reqCtx, auditEntry)
+
+	outcome := DispatchOutcome{
+		Decision:       "denied",
+		Err:            errors.New("dispatch: your organization is near its licensed usage limit and another call is currently in flight -- please retry shortly"),
 		EpisodeSteps:   []episode.Step{newEpisodeStep(ac, "blocked", nil)},
 		EpisodeOutcome: "blocked",
 		AuditWriteErr:  auditWriteErr,

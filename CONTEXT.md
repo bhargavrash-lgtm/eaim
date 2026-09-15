@@ -1373,6 +1373,19 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-15) — B-172/B-173 built: escalation-resume usage-limit re-check, near-cap concurrency guard for the usage-limit race
+Task brief: close the two TOCTOU-class gaps Brief 2 (B-171) disclosed but didn't fix. Kickoff line required confirming understanding and a recommended B-173 concurrency pattern, then waiting for approval before building — followed exactly; the founder was asked to choose between three concurrency-safe designs for B-173 before any code was written.
+
+**B-173 design decision (founder-approved before building):** three options presented — (1) a flat per-call token estimate reserved on every dispatch, (2) an `ai_provider`-specific estimate derived from a request's own `max_tokens` field, (3) no per-call token amount at all, instead capping concurrent in-flight dispatches to one per org once usage is within a configurable safety margin of the cap. **Founder chose option 3**, reasoning: options 1/2 both estimate a genuinely unknowable quantity (the gate applies to every dispatch, not just LLM calls with a declared ceiling) and share the same unavoidable residual gap (one huge call can still exceed a small remaining cap regardless of estimate) that no estimate closes either way — option 3 targets the actual fully-solvable problem (the race itself) without inventing an unfounded number. Safety margin (default 5%) and reservation TTL (default 120s) made configurable, not hardcoded, per explicit founder direction.
+
+**B-172 built as scoped** — `approval.Router` gained its own `UsageLimitChecker`, mirroring the existing module-license re-check pattern exactly, no design ambiguity.
+
+**Mandatory reviewer + security subagent passes both independently found the SAME must-fix gap**, neither a rubber stamp: the first implementation wired B-173's new `NearLimitReserver` guard into `Dispatch()` only, not into `approval.Router.dispatchApproved` — meaning two escalated near-cap requests for the same org, approved close together, could each pass `dispatchApproved`'s plain `WithinUsageLimit` re-check (B-172) and both genuinely dispatch, the exact race B-173 exists to close, just left open on the resume path specifically. A design subtlety already correctly handled (holding the reservation across a multi-minute human-approval wait would have been a real regression) masked this gap in the first draft's own reasoning. Fixed in-session before commit: `approval.Router` gained its own independent `NearLimitReserver` reservation, applied around the real resumed dispatch, released before `Hold()` was never the issue — the issue was dispatchApproved never re-acquiring one of its own. New concurrency test (`TestDispatchApproved_UsageLimitNearCap_ConcurrentResumesSerialize`) uses two independent `approval.Router` instances sharing one real Postgres pool to genuinely reproduce the multi-node race a single in-process LISTEN goroutine would otherwise mask.
+
+Two further security-review findings logged rather than fixed: a 32-bit advisory-lock hash-collision characteristic (informational, inherited from this codebase's existing lock pattern, not new) and a missing periodic purge for orphaned `usage_dispatch_inflight` rows (functionally harmless — TTL already excludes stale rows from every check — but real storage-growth hygiene gap on a long-running deployment). The purge gap queued fresh as **B-189**: the working `pg_cron` precedent lives entirely in the OLD `schema/migrations/` path, not the active `migrations-v2` path this fix's own new table lives in, and adding a cron job under this session's time budget — applied to every throwaway test database the whole real-Postgres suite creates — was judged a real regression risk to the test suite, not a small addition. Counter now stands at B-190.
+
+Full `eami-gateway` test suite (16 packages) and `schema/migrationtest` both re-run clean against real Postgres after every change in this session, including after the post-review fix. Full writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s B-172/B-173/B-189 entries.
+
 ## Active decision thread (2026-09-14) — Full eami-agent endpoint-software audit: platform coverage, deployment story, resource footprint, real-world status
 Founder requested a precise, code-grounded audit of the endpoint agent itself for materials representing the product's real maturity — explicitly asked for confirmed-via-code vs. genuinely-unknown/unmeasured to be kept separate, not assumed.
 
@@ -1714,6 +1727,26 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-15 by Claude Code — B-172/B-173 built: `approval.Router` gained a
+`UsageLimitChecker` (mirrors the existing module-license resume-time
+re-check) closing B-172, and `license.Store.ReserveIfNearLimit` (a
+Postgres advisory-lock-guarded near-cap in-flight-dispatch cap, founder-
+approved design over two rejected per-call-token-estimate alternatives)
+closing B-173. Mandatory reviewer + security passes both independently
+found the same must-fix (the new guard wasn't wired into the escalation-
+resume path, reopening the exact race for concurrently-approved
+escalations) -- fixed in-session before commit, with a new concurrency
+test using two independent `approval.Router` instances to genuinely
+reproduce the multi-node race. Two informational findings disclosed, one
+queued fresh as B-189 (periodic purge for the new `usage_dispatch_inflight`
+table -- no working `pg_cron` precedent exists in the active `migrations-v2`
+path, adding one under this session's budget was judged a real regression
+risk to the whole real-Postgres test suite, not a small addition). New
+migrations 000019/000020. Full `eami-gateway` suite (16 packages) and
+`schema/migrationtest` re-run clean against real Postgres throughout,
+including after the post-review fix. Counter now stands at B-190. See
+Active decision thread above. Previous entry, preserved below:
+
 2026-09-14 by Claude Code — Full eami-agent endpoint-software audit for
 maturity-representation materials: scanner platform coverage confirmed
 per-scanner via build-tag inspection (all 10 wired scanners equivalent

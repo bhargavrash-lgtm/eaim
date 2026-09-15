@@ -208,6 +208,87 @@ func TestLoad_TokenIssueRateLimitEnvVars_OverrideDefaults(t *testing.T) {
 	}
 }
 
+// TestValidate_AppliesUsageLimitDefaults (B-173) proves the documented
+// defaults (5% margin, 120s TTL) apply when unset.
+func TestValidate_AppliesUsageLimitDefaults(t *testing.T) {
+	cfg := validConfig()
+	if err := validate(cfg); err != nil {
+		t.Fatalf("validate() unexpected error: %v", err)
+	}
+	if cfg.Licensing.UsageLimitSafetyMarginPct != 5 {
+		t.Errorf("Licensing.UsageLimitSafetyMarginPct default = %d, want 5", cfg.Licensing.UsageLimitSafetyMarginPct)
+	}
+	if cfg.Licensing.UsageLimitInflightTTLSeconds != 120 {
+		t.Errorf("Licensing.UsageLimitInflightTTLSeconds default = %d, want 120", cfg.Licensing.UsageLimitInflightTTLSeconds)
+	}
+}
+
+// TestValidate_OverriddenUsageLimitConfig_NotOverwrittenByDefaults proves an
+// explicitly-set value survives validate()'s defaulting pass.
+func TestValidate_OverriddenUsageLimitConfig_NotOverwrittenByDefaults(t *testing.T) {
+	cfg := validConfig()
+	cfg.Licensing.UsageLimitSafetyMarginPct = 10
+	cfg.Licensing.UsageLimitInflightTTLSeconds = 45
+	if err := validate(cfg); err != nil {
+		t.Fatalf("validate() unexpected error: %v", err)
+	}
+	if cfg.Licensing.UsageLimitSafetyMarginPct != 10 {
+		t.Errorf("Licensing.UsageLimitSafetyMarginPct = %d, want the overridden 10", cfg.Licensing.UsageLimitSafetyMarginPct)
+	}
+	if cfg.Licensing.UsageLimitInflightTTLSeconds != 45 {
+		t.Errorf("Licensing.UsageLimitInflightTTLSeconds = %d, want the overridden 45", cfg.Licensing.UsageLimitInflightTTLSeconds)
+	}
+}
+
+// TestValidate_RejectsInvalidUsageLimitConfig proves an out-of-range margin
+// percentage and a negative TTL are both real misconfigurations, not
+// "unset" (0 is already covered by the defaults test above).
+func TestValidate_RejectsInvalidUsageLimitConfig(t *testing.T) {
+	cases := []struct {
+		name  string
+		apply func(*Config)
+	}{
+		{"MarginPctNegative", func(c *Config) { c.Licensing.UsageLimitSafetyMarginPct = -1 }},
+		{"MarginPctOver100", func(c *Config) { c.Licensing.UsageLimitSafetyMarginPct = 101 }},
+		{"TTLNegative", func(c *Config) { c.Licensing.UsageLimitInflightTTLSeconds = -1 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			tc.apply(cfg)
+			if err := validate(cfg); err == nil {
+				t.Errorf("validate() with %s: expected error, got nil", tc.name)
+			}
+		})
+	}
+}
+
+// TestLoad_UsageLimitEnvVars_OverrideDefaults (B-173) is the real,
+// end-to-end proof: setting the documented env vars changes Load()'s real
+// returned config, not just validate()'s internal defaulting.
+func TestLoad_UsageLimitEnvVars_OverrideDefaults(t *testing.T) {
+	clearSecretEnv(t)
+	t.Setenv("GATEWAY_API_SERVICE_KEY", "a-real-generated-service-key")
+	t.Setenv("GATEWAY_EPISODE_READ_SERVICE_KEY", "a-real-generated-episode-key")
+	t.Setenv("GATEWAY_TOKEN_REVOKE_SERVICE_KEY", "a-real-generated-revoke-key")
+	t.Setenv("GATEWAY_DB_HOST", "postgres")
+	t.Setenv("GATEWAY_DB_USER", "eami_app")
+	t.Setenv("GATEWAY_DB_PASSWORD", "S3cur3Pass")
+	t.Setenv("USAGE_LIMIT_SAFETY_MARGIN_PCT", "20")
+	t.Setenv("USAGE_LIMIT_INFLIGHT_TTL_SECONDS", "30")
+
+	cfg, err := Load(nonexistentConfigPath(t))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.Licensing.UsageLimitSafetyMarginPct != 20 {
+		t.Errorf("Licensing.UsageLimitSafetyMarginPct = %d, want 20 (from env)", cfg.Licensing.UsageLimitSafetyMarginPct)
+	}
+	if cfg.Licensing.UsageLimitInflightTTLSeconds != 30 {
+		t.Errorf("Licensing.UsageLimitInflightTTLSeconds = %d, want 30 (from env)", cfg.Licensing.UsageLimitInflightTTLSeconds)
+	}
+}
+
 // clearSecretEnv unsets every env var Load() reads, so each test starts from
 // a clean slate regardless of what's set in the host shell.
 func clearSecretEnv(t *testing.T) {

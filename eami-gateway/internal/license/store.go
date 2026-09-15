@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -24,13 +26,24 @@ var errOrgMismatch = errors.New("license: row org_id does not match the license'
 // trusts what Verify says about the row's real raw_license.
 type Store struct {
 	pool *pgxpool.Pool
+	// usageSafetyMarginPct/inflightTTLSeconds (B-173) configure
+	// ReserveIfNearLimit's near-limit concurrency guard -- see that
+	// method's own doc comment. Threaded through from cmd/gateway's own
+	// config (internal/config.LicensingConfig) rather than hardcoded: an
+	// explicit user decision made when this fix's design was scoped --
+	// the safety margin is a genuine operational tuning knob, not a fixed
+	// constant this package should own silently.
+	usageSafetyMarginPct int
+	inflightTTLSeconds   int
 }
 
 // New creates a license Store backed by pool -- the same real Postgres
 // pool eami-gateway already uses for gateway_tools/policies/audit_log,
-// not a separate connection or a call to eami-api.
-func New(pool *pgxpool.Pool) *Store {
-	return &Store{pool: pool}
+// not a separate connection or a call to eami-api. usageSafetyMarginPct/
+// inflightTTLSeconds configure ReserveIfNearLimit (B-173); see its own doc
+// comment.
+func New(pool *pgxpool.Pool, usageSafetyMarginPct, inflightTTLSeconds int) *Store {
+	return &Store{pool: pool, usageSafetyMarginPct: usageSafetyMarginPct, inflightTTLSeconds: inflightTTLSeconds}
 }
 
 // ModuleLicensed reports whether orgID's current, independently-
@@ -154,4 +167,167 @@ func (s *Store) WithinUsageLimit(ctx context.Context, orgID string) (bool, error
 		return false, fmt.Errorf("license: usage limit query failed: %w", err)
 	}
 	return used < limit, nil
+}
+
+// ReserveIfNearLimit narrows the concurrency race WithinUsageLimit's own
+// doc comment discloses as B-173: even a fresh, correct SUM read there is
+// a check-THEN-act against token_usage, which main.go's own B-099 fire-
+// and-forget goroutine populates asynchronously, well after a dispatch
+// actually completes -- a burst of concurrent/rapid dispatches can each
+// observe "under limit" before any of the PRIOR calls' own usage has
+// landed, letting an org collectively overshoot MaxTokensPerMonth.
+//
+// A per-call token estimate can't close this honestly: the real cost of a
+// not-yet-executed call isn't knowable in advance, and this gate applies
+// uniformly to every dispatch -- rest_api tool calls included, most of
+// which have no token concept at all -- so there is no caller-declared
+// estimate (e.g. an LLM request's own max_tokens field) this package could
+// generally rely on without inventing an arbitrary number for the common
+// case. WithinUsageLimit's own doc comment already accepts "a call's own
+// token count isn't known until the provider responds" as an inherent,
+// unavoidable limitation of any token-based quota; a single very large
+// call can still push an org over a small remaining cap no matter what
+// this method does, and that is NOT what this method targets.
+//
+// What IS fully solvable is the narrower problem: a genuine concurrent
+// RACE near the cap, several dispatches passing WithinUsageLimit's check
+// in the same narrow window while none of their usage has landed yet. This
+// is a deliberate design choice, not a compromise landed on by default --
+// two alternatives (a flat per-call token estimate reserved on every
+// dispatch; an ai_provider-specific estimate derived from a request's own
+// max_tokens field) were both explicitly considered and rejected in favor
+// of this one: see BACKLOG.md's B-173 entry for the full reasoning.
+//
+// Only engages once usage is within usageSafetyMarginPct percent of the
+// license's own limit -- comfortably-under-cap dispatches (the overwhelming
+// majority) pay no extra serialization or DB round trip beyond what this
+// check itself costs. Once in that zone, at most one in-flight (reserved,
+// not yet confirmed landed) dispatch is allowed per org at a time; a
+// second concurrent dispatch racing the same near-exhausted limit is
+// refused, not silently allowed through on a stale read.
+//
+// Must be called only AFTER WithinUsageLimit has already returned true --
+// this method does not itself re-check "is used < limit", only "is used
+// near the limit, and if so, is another dispatch already in flight."
+// Callers MUST invoke the returned release func exactly once, once the
+// dispatch this reservation covers has genuinely finished (success or
+// failure) -- via `defer`, mirroring this codebase's usual resource-release
+// convention. release is never nil (a caller never needs its own nil
+// check): a no-op when no reservation was actually taken (an unlimited
+// license, or usage comfortably under the margin).
+//
+// Reservations self-expire after inflightTTLSeconds regardless of whether
+// release is ever called -- the safety net for a crashed/panicked dispatch
+// goroutine that never reaches its own defer, so one lost reservation can
+// never permanently wedge an org's near-cap dispatches.
+func (s *Store) ReserveIfNearLimit(ctx context.Context, orgID string) (release func(), ok bool, err error) {
+	noop := func() {}
+
+	claims, err := s.currentClaims(ctx, orgID)
+	if err != nil {
+		return noop, false, err
+	}
+	if claims.UsageLimits == nil || claims.UsageLimits.MaxTokensPerMonth == nil {
+		return noop, true, nil // unlimited -- mirrors WithinUsageLimit's own contract
+	}
+	limit := *claims.UsageLimits.MaxTokensPerMonth
+
+	margin := limit * int64(s.usageSafetyMarginPct) / 100
+	if margin < 0 {
+		margin = 0
+	}
+	threshold := limit - margin
+	if threshold < 0 {
+		threshold = 0
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return noop, false, fmt.Errorf("license: begin usage reservation tx: %w", err)
+	}
+	defer tx.Rollback(ctx) // no-op once Commit has succeeded
+
+	// Org-scoped advisory lock, namespaced with a "usage_inflight:" prefix
+	// so this never collides with eami-api/internal/api/license.go's own
+	// unprefixed hashtext(orgID) upload-race lock -- a usage-limit check
+	// for one org must never unnecessarily serialize against a license
+	// upload for that same org.
+	//
+	// Security review finding (this brief, informational, not fixed): like
+	// every other hashtext(orgID)-keyed lock already in this codebase
+	// (eami-api/internal/api/bootstrap.go, license.go's own upload lock),
+	// this is a 32-bit hash -- two different orgIDs could theoretically
+	// collide, causing one org's check to spuriously serialize behind (and
+	// occasionally lose a contention race to) an unrelated org's. This
+	// cannot leak data (every query below still filters on the real
+	// org_id) and isn't attacker-targetable without a preimage search; it
+	// inherits an existing, already-accepted characteristic of this
+	// codebase's advisory-lock convention rather than introducing a new
+	// one, so it's not treated as its own fix here.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "usage_inflight:"+orgID); err != nil {
+		return noop, false, fmt.Errorf("license: acquire usage reservation lock: %w", err)
+	}
+
+	var used int64
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(SUM(tokens_in + tokens_out), 0)
+		FROM token_usage
+		WHERE org_id = $1
+		  AND recorded_at >= date_trunc('month', now())
+	`, orgID).Scan(&used); err != nil {
+		return noop, false, fmt.Errorf("license: usage reservation SUM query failed: %w", err)
+	}
+
+	if used < threshold {
+		// Comfortably under the cap -- no serialization needed.
+		if err := tx.Commit(ctx); err != nil {
+			return noop, false, fmt.Errorf("license: commit usage reservation check: %w", err)
+		}
+		return noop, true, nil
+	}
+
+	var inflightCount int
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*) FROM usage_dispatch_inflight
+		WHERE org_id = $1 AND expires_at > now()
+	`, orgID).Scan(&inflightCount); err != nil {
+		return noop, false, fmt.Errorf("license: usage in-flight count query failed: %w", err)
+	}
+	if inflightCount > 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return noop, false, fmt.Errorf("license: commit usage reservation contention check: %w", err)
+		}
+		// Another dispatch is already in flight near this org's cap --
+		// fail closed on the SIDE OF CONTENTION, not an error: this is the
+		// expected, correctly-enforced outcome of the race this method
+		// exists to close, not a failure of the mechanism itself.
+		return noop, false, nil
+	}
+
+	var reservationID string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO usage_dispatch_inflight (org_id, expires_at)
+		VALUES ($1, now() + make_interval(secs => $2))
+		RETURNING id
+	`, orgID, s.inflightTTLSeconds).Scan(&reservationID); err != nil {
+		return noop, false, fmt.Errorf("license: insert usage reservation failed: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return noop, false, fmt.Errorf("license: commit usage reservation: %w", err)
+	}
+
+	release = func() {
+		// Best-effort: a failed release here only means this reservation
+		// falls back to expiring via inflightTTLSeconds instead of being
+		// cleared immediately -- never worth failing or blocking the real
+		// dispatch outcome over. Own short-lived background context, not
+		// the caller's ctx: release typically runs from a defer after the
+		// caller's own ctx may already be winding down.
+		delCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := s.pool.Exec(delCtx, `DELETE FROM usage_dispatch_inflight WHERE id = $1`, reservationID); err != nil {
+			slog.Warn("license: failed to release usage in-flight reservation", "org_id", orgID, "reservation_id", reservationID, "err", err)
+		}
+	}
+	return release, true, nil
 }

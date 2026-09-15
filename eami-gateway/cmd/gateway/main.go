@@ -167,7 +167,7 @@ func run() error {
 	// re-verifies the stored raw_license against this package's own
 	// embedded vendor public key on every call; see internal/license's
 	// own doc comment for why that independence matters.
-	licenseChecker := license.New(pool)
+	licenseChecker := license.New(pool, cfg.Licensing.UsageLimitSafetyMarginPct, cfg.Licensing.UsageLimitInflightTTLSeconds)
 
 	holdTimeout := time.Duration(cfg.Approval.ExpirySeconds) * time.Second
 	approvalRouter := approval.New(

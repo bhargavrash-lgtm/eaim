@@ -142,6 +142,124 @@ func TestDispatch_UsageLimitUnderLimit_Allowed(t *testing.T) {
 	}
 }
 
+// TestDispatch_UsageLimitExceededDuringApprovalHold_ResumeBlocked (B-172,
+// AC1) mirrors TestDispatch_LicenseRevokedDuringApprovalHold_ResumeBlocked
+// (dispatcher_license_test.go) exactly, for the OTHER licensing axis: an
+// org genuinely within its usage limit at escalation-SUBMIT time (Dispatch's
+// own initial gate passes) that crosses its cap WHILE the request sits in
+// the approval hold window must have the resumed call refused, not silently
+// dispatched -- the real TOCTOU window approval.Router.UsageLimitChecker
+// (B-172) closes.
+func TestDispatch_UsageLimitExceededDuringApprovalHold_ResumeBlocked(t *testing.T) {
+	env := newDispatcherTestEnvRealLicense(t, policy.ActionEscalate)
+
+	limit := int64(100)
+	raw := signTestLicenseWithUsageLimit(t, env.env.orgID.String(), []string{"gateway"}, time.Now().Add(365*24*time.Hour), &limit)
+	if _, err := env.env.pool.Exec(context.Background(),
+		`INSERT INTO licenses (org_id, raw_license, modules, valid_from, valid_until) VALUES ($1, $2, $3, NOW(), $4)`,
+		env.env.orgID, raw, []string{"gateway"}, time.Now().Add(365*24*time.Hour)); err != nil {
+		t.Fatalf("insert license: %v", err)
+	}
+	// Well under the 100 limit at submit time -- Dispatch's own initial gate
+	// must pass cleanly, so this test genuinely proves the RESUME-time
+	// re-check, not the already-covered initial-gate case.
+	env.insertUsageRow(t, 10, 10)
+
+	type dispatchResult struct {
+		result []byte
+		err    error
+	}
+	resultCh := make(chan dispatchResult, 1)
+	go func() {
+		result, err := env.dispatcher.Dispatch(context.Background(), env.actionContext("some-tool"))
+		resultCh <- dispatchResult{result: result, err: err}
+	}()
+
+	approvalID := waitForPendingApproval(t, env.env.pool, env.env.orgID, 5*time.Second)
+
+	// The org crosses its usage cap WHILE the request is genuinely pending
+	// approval -- 40+40=80, plus the 20 already recorded above, is 100,
+	// no longer < the 100 limit. A real customer scenario: a burst of other
+	// activity from the same org consumes the remaining headroom during the
+	// minutes an approver takes to act on an unrelated escalated request.
+	env.insertUsageRow(t, 40, 20)
+	env.insertUsageRow(t, 40, 20)
+
+	decideTestApproval(t, env.env.pool, approvalID, "approved")
+
+	select {
+	case dr := <-resultCh:
+		if dr.err == nil {
+			t.Fatal("expected the resumed call to be blocked by the now-exceeded usage limit, got nil error")
+		}
+		if !strings.Contains(dr.err.Error(), "exceeded its licensed usage limit") {
+			t.Errorf("expected a clear usage-limit rejection message, got: %v", dr.err)
+		}
+		if dr.result != nil {
+			t.Errorf("expected nil result alongside the rejection, got %s", dr.result)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for Dispatch to return after approval decision")
+	}
+
+	var resumeOutcome string
+	if err := env.env.pool.QueryRow(context.Background(),
+		`SELECT resume_outcome FROM approval_requests WHERE id = $1`, approvalID).Scan(&resumeOutcome); err != nil {
+		t.Fatalf("read resume_outcome: %v", err)
+	}
+	if resumeOutcome != "usage_limit_exceeded" {
+		t.Errorf("resume_outcome = %q, want usage_limit_exceeded", resumeOutcome)
+	}
+}
+
+// TestDispatch_UsageLimitStillWithinDuringApprovalHold_ResumeAllowed is the
+// no-regression companion to the test above: a genuinely licensed org whose
+// usage stays comfortably under its cap through the whole hold window sees
+// its approved escalation resume completely unaffected by B-172.
+func TestDispatch_UsageLimitStillWithinDuringApprovalHold_ResumeAllowed(t *testing.T) {
+	env := newDispatcherTestEnvRealLicense(t, policy.ActionEscalate)
+
+	limit := int64(1000)
+	raw := signTestLicenseWithUsageLimit(t, env.env.orgID.String(), []string{"gateway"}, time.Now().Add(365*24*time.Hour), &limit)
+	if _, err := env.env.pool.Exec(context.Background(),
+		`INSERT INTO licenses (org_id, raw_license, modules, valid_from, valid_until) VALUES ($1, $2, $3, NOW(), $4)`,
+		env.env.orgID, raw, []string{"gateway"}, time.Now().Add(365*24*time.Hour)); err != nil {
+		t.Fatalf("insert license: %v", err)
+	}
+	env.insertUsageRow(t, 10, 10) // 20, well under 1000
+
+	type dispatchResult struct {
+		result []byte
+		err    error
+	}
+	resultCh := make(chan dispatchResult, 1)
+	go func() {
+		result, err := env.dispatcher.Dispatch(context.Background(), env.actionContext("some-tool"))
+		resultCh <- dispatchResult{result: result, err: err}
+	}()
+
+	approvalID := waitForPendingApproval(t, env.env.pool, env.env.orgID, 5*time.Second)
+	decideTestApproval(t, env.env.pool, approvalID, "approved")
+
+	select {
+	case dr := <-resultCh:
+		if dr.err != nil {
+			t.Errorf("expected the resumed call to succeed for usage well under the limit, got: %v", dr.err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for Dispatch to return after approval decision")
+	}
+
+	var resumeOutcome string
+	if err := env.env.pool.QueryRow(context.Background(),
+		`SELECT resume_outcome FROM approval_requests WHERE id = $1`, approvalID).Scan(&resumeOutcome); err != nil {
+		t.Fatalf("read resume_outcome: %v", err)
+	}
+	if resumeOutcome != "static_fallback" {
+		t.Errorf("resume_outcome = %q, want static_fallback (this tool never resolved dynamically)", resumeOutcome)
+	}
+}
+
 // TestDispatch_NoUsageLimitClaim_Unlimited proves a license with the
 // module but NO usage_limits claim at all is treated as unlimited --
 // Brief 1's own migration comment's contract ("usage_limits ... NOT

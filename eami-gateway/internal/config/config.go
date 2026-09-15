@@ -20,6 +20,34 @@ type Config struct {
 	API         APIConfig       `yaml:"api"`
 	Log         LogConfig       `yaml:"log"`
 	RateLimit   RateLimitConfig `yaml:"rate_limit"`
+	Licensing   LicensingConfig `yaml:"licensing"`
+}
+
+// LicensingConfig configures internal/license.Store's usage-limit
+// enforcement (B-157 epic). UsageLimitSafetyMarginPct/
+// UsageLimitInflightTTLSeconds tune ReserveIfNearLimit's B-173 concurrency
+// guard -- see that method's own doc comment for what they control and why
+// this is a configurable operational knob rather than a hardcoded
+// constant (explicit user decision made when this fix's design was
+// scoped).
+type LicensingConfig struct {
+	// UsageLimitSafetyMarginPct is how close to a license's usage cap (as
+	// a percentage of the cap) usage must be before ReserveIfNearLimit
+	// starts serializing concurrent dispatches for that org to one in
+	// flight at a time. 0 means "unset, use the default" (this file's
+	// established convention for every numeric field below) rather than
+	// "disabled" -- comfortably-under-cap dispatches are always unaffected
+	// regardless of this value either way.
+	UsageLimitSafetyMarginPct int `yaml:"usage_limit_safety_margin_pct"`
+	// UsageLimitInflightTTLSeconds bounds how long a single
+	// usage_dispatch_inflight reservation can block a second near-cap
+	// dispatch for the same org before self-expiring -- the safety net for
+	// a dispatch goroutine that crashes/panics before reaching its own
+	// release() defer. Should comfortably exceed the real async
+	// token_usage recording lag (B-099's fire-and-forget HTTP POST to
+	// eami-api) this mechanism exists to bound, not just typical request
+	// latency.
+	UsageLimitInflightTTLSeconds int `yaml:"usage_limit_inflight_ttl_seconds"`
 }
 
 // RateLimitConfig configures the in-memory limiters guarding
@@ -215,6 +243,9 @@ func Load(path string) (*Config, error) {
 	setIntEnv(os.Getenv("TOKEN_ISSUE_RATE_LIMIT_PER_AGENT"), &cfg.RateLimit.TokenIssuePerAgent)
 	setIntEnv(os.Getenv("TOKEN_ISSUE_RATE_LIMIT_WINDOW_SECONDS"), &cfg.RateLimit.TokenIssuePerAgentWindowSeconds)
 	setIntEnv(os.Getenv("TOKEN_ISSUE_PREAUTH_MAX_CONCURRENT"), &cfg.RateLimit.TokenIssuePreAuthMaxConcurrent)
+	// Licensing overrides (B-173).
+	setIntEnv(os.Getenv("USAGE_LIMIT_SAFETY_MARGIN_PCT"), &cfg.Licensing.UsageLimitSafetyMarginPct)
+	setIntEnv(os.Getenv("USAGE_LIMIT_INFLIGHT_TTL_SECONDS"), &cfg.Licensing.UsageLimitInflightTTLSeconds)
 
 	// Policy rules file: default to empty (allows gateway to start without rules)
 	if cfg.Policy.RulesPath == "" {
@@ -340,6 +371,16 @@ func validate(cfg *Config) error {
 	if cfg.RateLimit.TokenIssuePreAuthMaxConcurrent == 0 {
 		cfg.RateLimit.TokenIssuePreAuthMaxConcurrent = 10
 	}
+	// B-173 defaults: 5% margin, 120s TTL -- comfortably longer than the
+	// real async token_usage recording lag (B-099's fire-and-forget HTTP
+	// POST to eami-api, ordinarily well under a second) this mechanism
+	// exists to bound, without leaving a crashed reservation stuck for long.
+	if cfg.Licensing.UsageLimitSafetyMarginPct == 0 {
+		cfg.Licensing.UsageLimitSafetyMarginPct = 5
+	}
+	if cfg.Licensing.UsageLimitInflightTTLSeconds == 0 {
+		cfg.Licensing.UsageLimitInflightTTLSeconds = 120
+	}
 
 	// Required fields
 	if cfg.PostgresDSN == "" {
@@ -391,6 +432,15 @@ func validate(cfg *Config) error {
 	}
 	if cfg.RateLimit.TokenIssuePreAuthMaxConcurrent < 0 {
 		return fmt.Errorf("config: rate_limit.token_issue_preauth_max_concurrent (TOKEN_ISSUE_PREAUTH_MAX_CONCURRENT) must not be negative, got %d", cfg.RateLimit.TokenIssuePreAuthMaxConcurrent)
+	}
+	// B-173: a percentage outside [0, 100] is a real misconfiguration, not
+	// "unset" -- 0 is already handled as "use the default" above, so this
+	// only rejects a genuinely invalid value.
+	if cfg.Licensing.UsageLimitSafetyMarginPct < 0 || cfg.Licensing.UsageLimitSafetyMarginPct > 100 {
+		return fmt.Errorf("config: licensing.usage_limit_safety_margin_pct (USAGE_LIMIT_SAFETY_MARGIN_PCT) must be between 0 and 100, got %d", cfg.Licensing.UsageLimitSafetyMarginPct)
+	}
+	if cfg.Licensing.UsageLimitInflightTTLSeconds < 0 {
+		return fmt.Errorf("config: licensing.usage_limit_inflight_ttl_seconds (USAGE_LIMIT_INFLIGHT_TTL_SECONDS) must not be negative, got %d", cfg.Licensing.UsageLimitInflightTTLSeconds)
 	}
 
 	return nil

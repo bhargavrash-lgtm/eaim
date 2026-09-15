@@ -146,7 +146,12 @@ func newDispatcherTestEnvRealLicense(t *testing.T, action string) *dispatcherTes
 	toolRouter := toolrouter.New(env.pool, nil)
 	aiProviderRouter := aiprovider.New(env.pool, nil, map[string]aiprovider.Adapter{})
 	episodeRecorder := episode.New(env.pool)
-	licenseStore := license.New(env.pool)
+	// margin/TTL match config.go's own documented defaults (5%, 120s) --
+	// these tests aren't specifically about B-173's near-limit reservation
+	// mechanism (that's dispatcher_usage_limit_race_test.go), just the
+	// real Store's other behavior, so using the real production default
+	// keeps this env's wiring representative.
+	licenseStore := license.New(env.pool, 5, 120)
 	// The REAL licenseStore, not nil -- this file is specifically where
 	// the escalation-resume re-check (code review finding, this brief)
 	// needs a real Store to prove anything against.

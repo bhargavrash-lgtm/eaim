@@ -274,6 +274,58 @@ type LicenseChecker interface {
 	ModuleLicensed(ctx context.Context, orgID, module string) bool
 }
 
+// UsageLimitChecker (B-172) mirrors cmd/gateway/dispatcher.go's own
+// UsageLimitChecker interface exactly, same reason and same mechanism: a
+// SEPARATE, additive interface, not a new method on LicenseChecker, checked
+// via an optional type assertion on the SAME licenseChecker value in
+// dispatchApproved below rather than a new Router constructor parameter --
+// so every existing test in this package (router_dispatch_test.go,
+// router_pg_test.go, router_race_test.go, ...) that seeds a bare
+// ModuleLicensed-only LicenseChecker stub keeps compiling and behaving
+// exactly as before, unaware this interface exists at all. *license.Store
+// already satisfies both interfaces via Go's structural typing, so a real
+// Router (cmd/gateway/main.go, wired with the real license.Store) gets
+// real enforcement automatically.
+//
+// Closes B-172: Dispatch's own usage-limit gate (cmd/gateway/dispatcher.go)
+// runs once, at escalation-SUBMIT time -- the same TOCTOU reasoning
+// licenseChecker's own doc comment already gives for module-license
+// re-verification applies identically to usage limits: an org can be
+// genuinely within its cap at submit time and cross it while the request
+// sits in the (potentially long) hold window, and the real downstream call
+// for an approved escalation happens here, in dispatchApproved, not by
+// looping back through Dispatch().
+type UsageLimitChecker interface {
+	WithinUsageLimit(ctx context.Context, orgID string) (bool, error)
+}
+
+// NearLimitReserver (B-173, wired here per mandatory code/security review
+// findings on this same brief) mirrors cmd/gateway/dispatcher.go's own
+// NearLimitReserver interface exactly, same reason and same optional-
+// type-assertion mechanism as UsageLimitChecker above.
+//
+// This is NOT optional polish -- both this brief's own mandatory reviewer
+// and security passes independently flagged its absence as a real,
+// unmitigated instance of the exact race B-173 exists to close: Dispatch's
+// own ReserveIfNearLimit reservation is deliberately released BEFORE
+// Hold() blocks (see Dispatch's own comment on why holding it across a
+// human approval wait would be a real regression), which means the real
+// downstream call for an ESCALATED request happens here, in
+// dispatchApproved, with no near-cap serialization protecting it unless
+// this package re-applies its own. UsageLimitChecker's plain WithinUsageLimit
+// re-check just above is NOT a substitute -- it's the exact check-then-act
+// primitive B-173's own doc comment (license.Store.WithinUsageLimit) says
+// is racy under concurrency; it has none of ReserveIfNearLimit's
+// serialization. Concretely: two escalated requests for the same org, both
+// near its cap, approved within a tight window of each other (e.g. an
+// approver batch-approving a queue), could otherwise both pass
+// WithinUsageLimit in dispatchApproved and both genuinely dispatch --
+// the identical collective-overshoot scenario ReserveIfNearLimit exists to
+// prevent, just left open on this one path.
+type NearLimitReserver interface {
+	ReserveIfNearLimit(ctx context.Context, orgID string) (release func(), ok bool, err error)
+}
+
 // New creates a Router.
 //   - holdTimeout is the maximum time Hold() will wait before auto-denying.
 //   - slackWebhook may be empty to disable Slack notifications.
@@ -870,6 +922,44 @@ func (r *Router) dispatchApproved(ctx context.Context, approvalID string, req Re
 		r.recordResumeOutcome(ctx, approvalID, "license_revoked")
 		return proxy.ToolResponse{}, nil, errors.New("approval: your organization is no longer licensed for the Gateway module -- refusing to resume this approved call")
 	}
+	// B-172: re-check the usage-limit gate immediately before resuming too,
+	// same reasoning and same optional-type-assertion mechanism as the
+	// module-license re-check just above -- see UsageLimitChecker's own doc
+	// comment. A query error fails closed (blocked), same convention as
+	// Dispatch's own initial usage-limit gate.
+	if ulc, ok := r.licenseChecker.(UsageLimitChecker); ok {
+		within, err := ulc.WithinUsageLimit(ctx, req.OrgID)
+		if err != nil {
+			slog.Error("approval: usage limit re-check failed at resume time -- refusing to resume closed", "approval_id", approvalID, "org_id", req.OrgID, "err", err)
+		}
+		if err != nil || !within {
+			r.recordResumeOutcome(ctx, approvalID, "usage_limit_exceeded")
+			return proxy.ToolResponse{}, nil, errors.New("approval: your organization has exceeded its licensed usage limit for this period -- refusing to resume this approved call")
+		}
+	}
+	// B-173: also re-apply the near-cap concurrency guard here -- see
+	// NearLimitReserver's own doc comment for why WithinUsageLimit's
+	// re-check just above is not a substitute for this. Reservation is
+	// held only across the real dispatch below (both the static-fallback
+	// branch and the dynamically-resolved branch further down) via the
+	// deferred release -- never across anything before this point, and
+	// never across the earlier Hold() wait (Dispatch's own initial
+	// reservation is explicitly released before that blocks; this is a
+	// fresh, independent reservation for the resumed call specifically).
+	releaseUsageReservation := func() {}
+	if nlr, ok := r.licenseChecker.(NearLimitReserver); ok {
+		release, reserved, err := nlr.ReserveIfNearLimit(ctx, req.OrgID)
+		if err != nil {
+			slog.Error("approval: usage limit reservation re-check failed at resume time -- refusing to resume closed", "approval_id", approvalID, "org_id", req.OrgID, "err", err)
+		}
+		if err != nil || !reserved {
+			r.recordResumeOutcome(ctx, approvalID, "usage_limit_contention")
+			return proxy.ToolResponse{}, nil, errors.New("approval: your organization is near its licensed usage limit and another call is currently in flight -- please retry shortly")
+		}
+		releaseUsageReservation = release
+	}
+	defer releaseUsageReservation()
+
 	if req.ResolvedToolID == "" {
 		r.recordResumeOutcome(ctx, approvalID, "static_fallback")
 		tr, err := r.fwd.Forward(ctx, proxy.ToolRequest{
