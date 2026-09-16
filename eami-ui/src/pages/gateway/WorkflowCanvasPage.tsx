@@ -8,35 +8,51 @@
 // B-146's own lesson); only this file/component's name and
 // WorkflowsPage.tsx's one Eye-icon tooltip changed for this brief.
 //
-// CRITICAL BOUNDARY, unchanged from this epic's own original Brief 2
-// precedent (B-067): zero backend writes. Every add/remove/reorder/
-// configure action mutates only local React state (the designer's own
-// Definition) -- no useCreateWorkflow/useUpdateWorkflow/
-// useDeleteWorkflow/useSetWorkflowStepParams import or call anywhere in
-// this file (confirmed by grep, see BUILT.md). The only network calls
-// this page makes are reads: the same GetWorkflow Brief 1 already made,
-// plus the same per-step static-params read (B-059) WorkflowsPage.tsx's
-// EditWorkflowPanel already performs.
+// BOUNDARY, updated for Brief 3 (B-131): Brief 1/2's "zero backend
+// writes" applied to every add/remove/reorder/configure action on the
+// canvas itself -- that part is UNCHANGED, all still local-only React
+// state (the designer's own Definition), never triggered from
+// commit()/handleDefinitionChange. This revision adds exactly ONE real
+// write path, gated behind an explicit Save button click: handleSave's
+// useUpdateWorkflow PATCH + saveStaticParams PUTs below. No
+// useCreateWorkflow/useDeleteWorkflow import or call anywhere in this
+// file -- this page still never creates or deletes a workflow, only
+// updates one that already exists.
 //
-// WorkflowsPage.tsx (the card editor) is untouched beyond the two small,
-// explicitly-approved exceptions this brief needed: exporting
+// WorkflowsPage.tsx (the card editor) is untouched beyond the small,
+// explicitly-approved exceptions this epic needed: exporting
 // StepConfigPanel/StepRow/ParamRow/revalidateExtractionRefs/newStepRow/
-// newParamRow (zero logic change, reuse-only), and updating the existing
-// Eye-icon's tooltip text now that its destination is no longer
-// read-only. No cutover decision is made or implied here.
+// newParamRow (B-148), validateAndConvertRows/saveStaticParams (B-131
+// Brief 3, this file's Save action below) -- all zero logic change,
+// reuse-only -- and updating the existing Eye-icon's tooltip text. No
+// cutover decision is made or implied here.
+//
+// B-131 Brief 3 (this revision): a real Save action, reusing the SAME
+// validateAndConvertRows -> useUpdateWorkflow PATCH -> saveStaticParams
+// sequence EditWorkflowPanel's own handleSubmit already uses (see
+// WorkflowsPage.tsx) -- not a parallel, second save path. Fires ONLY on
+// an explicit button click; nothing here changes commit()'s content-
+// comparison guard (B-148) or introduces any new automatic setDefinition
+// call on the interactive-editing path above.
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { useQueries } from '@tanstack/react-query'
+import { useQueries, useQueryClient } from '@tanstack/react-query'
 import { SequentialWorkflowDesigner, wrapDefinition } from 'sequential-workflow-designer-react'
 import type { StepsConfiguration, ToolboxGroupConfiguration } from 'sequential-workflow-designer'
 import 'sequential-workflow-designer/css/designer.css'
 import 'sequential-workflow-designer/css/designer-light.css'
-import { PageHeader, LoadingSpinner, EmptyState } from '@/components/common'
+import { PageHeader, LoadingSpinner, EmptyState, Button, useToast } from '@/components/common'
 import { apiFetch } from '@/api/client'
-import { useWorkflow } from '@/hooks/useWorkflows'
+import { useWorkflow, useUpdateWorkflow, useSetWorkflowStepParams } from '@/hooks/useWorkflows'
 import { useTools } from '@/hooks/useTools'
 import type { ToolWithActions } from '@/hooks/useTools'
-import { StepConfigPanel, revalidateExtractionRefs, newParamRow } from './WorkflowsPage'
+import {
+  StepConfigPanel,
+  revalidateExtractionRefs,
+  newParamRow,
+  validateAndConvertRows,
+  saveStaticParams,
+} from './WorkflowsPage'
 import type { StepRow, ParamRow } from './WorkflowsPage'
 import {
   buildInitialDefinition,
@@ -76,6 +92,10 @@ export function WorkflowCanvasPage() {
   const { id } = useParams<{ id: string }>()
   const { data: workflow, isLoading, error } = useWorkflow(id ?? null)
   const { data: toolsData, isSuccess: toolsReady, isError: toolsErrored } = useTools()
+  const queryClient = useQueryClient()
+  const { showToast } = useToast()
+  const update = useUpdateWorkflow()
+  const setStepParams = useSetWorkflowStepParams()
   // Typed the same way WorkflowsPage.tsx's own StepsEditor does.
   const tools: ToolWithActions[] = (toolsData as any)?.data ?? []
 
@@ -108,6 +128,12 @@ export function WorkflowCanvasPage() {
   // user action and no visible cause).
   const [realStepIds, setRealStepIds] = useState<ReadonlySet<string> | null>(null)
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
+  // Local, explicit-action loading flag (mirrors EditWorkflowPanel's own
+  // `activating` for its standalone Activate action) -- covers the WHOLE
+  // save sequence (PATCH + the parallel static-param PUTs), not just
+  // update.isPending, so the Save button stays disabled/spinning until
+  // saveStaticParams has genuinely finished too.
+  const [saving, setSaving] = useState(false)
 
   // Initialize exactly ONCE, when the workflow, every step's static
   // params, AND the tools list have all first loaded -- guarded on
@@ -222,11 +248,84 @@ export function WorkflowCanvasPage() {
     commit(nextRows)
   }
 
+  // handleSave (B-131 Brief 3) -- the canvas's real backend write path,
+  // reusing EditWorkflowPanel's own save sequence unmodified
+  // (WorkflowsPage.tsx): validateAndConvertRows -> useUpdateWorkflow
+  // PATCH -> saveStaticParams. Fires ONLY from the Save button below --
+  // never from commit()/handleDefinitionChange above, so nothing about
+  // the interactive-editing path (or B-148's content-comparison guard)
+  // changes. name/status are deliberately omitted from the PATCH body:
+  // eami-api/internal/api/workflows.go's UpdateWorkflow treats both as
+  // nil-checked pointers, so omitting them leaves the workflow's real
+  // name/status untouched -- correct, since this page never edits
+  // either.
+  async function handleSave() {
+    if (!workflow) return
+    const { steps, staticParamsByIndex, error } = validateAndConvertRows(rows)
+    if (error) {
+      showToast(error, { type: 'error' })
+      return
+    }
+    setSaving(true)
+    try {
+      const updated = await update.mutateAsync({ id: workflow.id, body: { steps } })
+      const { failed } = await saveStaticParams(updated.steps ?? [], staticParamsByIndex, setStepParams)
+      // saveStaticParams performs no cache invalidation of its own
+      // (useSetWorkflowStepParams has none) -- without this, the reset
+      // below would re-seed `definition` by reading
+      // ['workflow-step-params', id] straight back out of cache,
+      // silently showing the PRE-save value for any step whose static
+      // params were just changed. Invalidated here, at this call site,
+      // per this brief's own scope boundary -- saveStaticParams itself
+      // stays untouched.
+      //
+      // MUST be awaited (real bug caught by review before shipping):
+      // invalidateQueries()'s returned promise only resolves once the
+      // background refetch of matching ACTIVE queries actually completes
+      // -- a real network round trip, not just marking the cache stale.
+      // A TanStack Query v5 query's isSuccess/data stay at their old
+      // values throughout that refetch (only fetchStatus changes), so
+      // paramsReady below would be satisfied immediately from the STALE
+      // cached data if this weren't awaited -- the one-time seed (which
+      // only ever fires once, guarded on definition === null) would then
+      // re-run on the very next render using pre-save param values, and
+      // the real refetch's fresh data would land too late to matter,
+      // silently ignored. Awaiting here closes that window for real.
+      await Promise.all(
+        (updated.steps ?? []).map((s) => queryClient.invalidateQueries({ queryKey: ['workflow-step-params', s.id] }))
+      )
+      showToast(
+        failed > 0 ? 'Workflow saved, but some parameters failed to save' : 'Workflow structure saved',
+        { type: failed > 0 ? 'error' : 'success' }
+      )
+      // Reset the one-time seed rather than hand-rolling id-remapping
+      // for steps that just became real (a toolbox-added step's local
+      // Step.id is the LIBRARY's id, not the new real workflow_steps.id
+      // the PATCH response just assigned). useUpdateWorkflow's onSuccess
+      // already invalidated ['workflows', id] (prefix match), so this
+      // re-seed reads genuinely fresh, real-id'd data through the exact
+      // same one-time-seed logic above -- not a second, parallel
+      // state-sync path.
+      setDefinition(null)
+      setRealStepIds(null)
+      setSelectedStepId(null)
+    } catch {
+      showToast('Failed to save workflow structure', { type: 'error' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div>
       <PageHeader
         title={workflow ? workflow.name : 'Workflow canvas'}
-        subtitle="Brief 2: add, remove, reorder, and configure steps -- entirely local, nothing is saved yet. The card editor at Gateway / Workflows remains the real save surface."
+        subtitle="Add, remove, reorder, and configure steps, then Save to persist the structure through the same endpoint the card editor uses."
+        actions={
+          <Button onClick={handleSave} isLoading={saving} disabled={!definition}>
+            Save changes
+          </Button>
+        }
       />
       {/* h-[75vh] + grid, not h-full/flex-1 + flex -- both required per
           Brief 1's own real, live-debugged finding (see BUILT.md's B-145

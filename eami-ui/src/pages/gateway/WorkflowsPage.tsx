@@ -138,7 +138,13 @@ export function revalidateExtractionRefs(rows: StepRow[]): StepRow[] {
 // not yet by real step id -- see AddWorkflowPanel/EditWorkflowPanel's
 // submit handlers for why: a new step's real id is only known once the
 // main Create/Update response comes back).
-function validateAndConvertRows(rows: StepRow[]): {
+//
+// Exported (B-131 Brief 3) so WorkflowCanvasPage.tsx's real Save action
+// can reuse this validation/conversion unmodified -- same justified-
+// exception category as StepConfigPanel/StepRow/ParamRow/
+// revalidateExtractionRefs/newStepRow/newParamRow's exports (B-148):
+// zero logic change here, reuse-only.
+export function validateAndConvertRows(rows: StepRow[]): {
   steps: { id?: string; gateway_tool_id: string; action: string; input_mapping?: Record<string, ExtractionRef> }[]
   staticParamsByIndex: (Record<string, string> | null)[]
   error: string | null
@@ -191,7 +197,14 @@ function validateAndConvertRows(rows: StepRow[]): {
 // Runs all step param saves in parallel; a failure surfaces a distinct
 // count rather than being silently swallowed (the workflow itself did
 // save successfully either way).
-async function saveStaticParams(
+//
+// Exported (B-131 Brief 3), same reuse-only exception as
+// validateAndConvertRows above -- zero logic change. Note for callers:
+// this performs no cache invalidation of its own (`useSetWorkflowStepParams`
+// has none) -- a caller that re-reads a saved step's params from the
+// `['workflow-step-params', stepId]` query cache afterward must
+// invalidate it explicitly, or risk reading the pre-save value back.
+export async function saveStaticParams(
   responseSteps: WorkflowStep[],
   staticParamsByIndex: (Record<string, string> | null)[],
   setStepParams: ReturnType<typeof useSetWorkflowStepParams>,

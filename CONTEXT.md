@@ -1373,6 +1373,19 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-16) — B-190 built: Workflow Canvas Brief 3 of 3, structural persistence, closes the B-131 epic
+Task brief closed the last gap in the Workflow Canvas rebuild: a real Save action persisting canvas edits through the EXISTING, unmodified `UpdateWorkflow` PATCH + B-059 static-param PUT endpoints — the same two the card editor already uses. Kickoff line required a fresh investigation re-verifying B-131/B-145/B-148's real current state before scoping, then a 5-line understanding + implementation plan, then explicit approval before building — followed exactly.
+
+**Investigation confirmed before building (not assumed from B-148's own report):** `rowFromStep` already existed and correctly converted `Step` → `StepRow`; the missing piece was `validateAndConvertRows`/`saveStaticParams` (both real, already-correct, but module-private in `WorkflowsPage.tsx`) needing `export` added — same justified-exception category as B-148's own six exports, confirmed via `git diff` to be genuinely zero-logic-change. Also found and flagged before building: `EditWorkflowPanel`'s own toast is a stale hand-rolled `useState`+`setTimeout` pattern predating B-182's `useToast()` convention (confirmed no commit since B-182 touched `WorkflowsPage.tsx`) — this brief mirrors the reference's save LOGIC only, using `useToast()` for its own feedback, not copying that stale piece.
+
+**Design decision, reasoned through and approved before building:** rather than hand-rolling id-remapping for canvas-added steps that just became real (their local `Step.id` is the library's own id, not the backend's new `workflow_steps.id`), `handleSave` resets the canvas's existing B-148 one-time-seed state (`definition`/`realStepIds`/`selectedStepId` → `null`) and lets the already-reviewed seed logic re-fire against freshly-invalidated data — reuse over a second, parallel state-sync path.
+
+**Mandatory reviewer + security subagent passes (first real backend write path for this canvas).** Security: zero findings — confirmed the backend (`UpdateWorkflow`/`validateWorkflowSteps`/`resolveStepIDs`/`PutWorkflowStepParams`) independently re-validates org/tool/step-membership regardless of which UI surface calls it, so nothing about reaching it from a second page changes the trust boundary. Code review: one real Medium bug — a new `queryClient.invalidateQueries(...)` loop (added to close a stale-cache gap the investigation itself flagged: `saveStaticParams`'s underlying mutation has no invalidation of its own) was not awaited, so the post-save state reset could re-seed from stale cached static-param data before the real background refetch landed. Fixed with `await Promise.all(...)`, re-verified live afterward.
+
+**Live-verified, all 5 ACs, real Playwright against the running dev stack** (`b059-live-verify`/`b063-live-verify`, the same fixtures B-145/B-148/B-149 established): canvas add+Save+reload persistence and static-param round-trip (AC1); card-editor showing identical structure after a canvas save (AC2); the reverse direction, canvas showing identical structure after a card-editor save (AC3); an intentionally broken extraction reference (source step deleted via context-menu, not a drag-reorder — more reliable to automate and equally valid per `revalidateExtractionRefs`'s own documented failure mode) rejected with a clear client-side `useToast()` error, DB confirmed untouched via reload (AC4); zero console-log volume over a 3s idle window after a save-triggered reset, ruling out a B-148-class destroy/rebuild loop, plus continued interactivity confirmed (AC5). Both seeded workflows restored to their exact original state afterward (confirmed via direct `psql`).
+
+The Workflow Canvas epic (B-131 investigation → B-145 Brief 1 → B-148 Brief 2 → B-190 Brief 3) is now closed. No cutover decision from cards to canvas was made or implied. Full writeup in `BUILT.md`'s `eami-ui` section and `BACKLOG.md`'s new B-190 entry. Counter now stands at B-191.
+
 ## Active decision thread (2026-09-15) — B-172/B-173 built: escalation-resume usage-limit re-check, near-cap concurrency guard for the usage-limit race
 Task brief: close the two TOCTOU-class gaps Brief 2 (B-171) disclosed but didn't fix. Kickoff line required confirming understanding and a recommended B-173 concurrency pattern, then waiting for approval before building — followed exactly; the founder was asked to choose between three concurrency-safe designs for B-173 before any code was written.
 
@@ -1727,6 +1740,32 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-16 by Claude Code — B-190 built and closed: Workflow Canvas rebuild
+Brief 3 of 3 (B-131 epic), structural persistence. `WorkflowCanvasPage.tsx`
+gained a real Save action reusing `EditWorkflowPanel`'s own save path
+unmodified (`validateAndConvertRows` -> `useUpdateWorkflow` PATCH ->
+`saveStaticParams`), newly exported from `WorkflowsPage.tsx` (zero logic
+change, same precedent as B-148's six exports). Fires only on an explicit
+click; B-148's `commit()` content-comparison loop-prevention guard
+untouched. Mandatory reviewer + security passes both ran (first real
+backend write path for this canvas): security found zero issues (backend
+independently re-validates org/tool/step-membership regardless of caller);
+code review found one real Medium bug -- a new cache-invalidation loop
+(closing a stale-cache gap the investigation itself flagged) was missing
+an `await`, letting the post-save state reset re-seed from stale static-
+param data -- fixed with `Promise.all`, re-verified live. All 5 ACs
+live-verified via real Playwright against the running dev stack (add/
+save/reload persistence + static-param round-trip; card-editor <-> canvas
+bidirectional parity in both directions; an intentionally broken
+extraction reference rejected via a clear client-side `useToast()` error
+with the DB confirmed untouched; zero console-log volume after a save-
+triggered reset, ruling out a B-148-class render loop). Both seeded test
+workflows restored to their exact original state afterward. The Workflow
+Canvas epic (B-131 -> B-145 -> B-148 -> B-190) is now closed; no cutover
+decision from cards to canvas was made or implied. Full writeup in
+BUILT.md's eami-ui section and BACKLOG.md's new B-190 entry. Counter now
+stands at B-191. Previous entry, preserved below:
+
 2026-09-15 by Claude Code — B-172/B-173 built: `approval.Router` gained a
 `UsageLimitChecker` (mirrors the existing module-license resume-time
 re-check) closing B-172, and `license.Store.ReserveIfNearLimit` (a
