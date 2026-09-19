@@ -1373,6 +1373,17 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-19, newest) — B-197 (Workspaces) extended: four scoped data domains beyond policy/spend, cross-referencing B-196 (CMDB), B-147 (training), B-151 (model hosting), and resolving an earlier open gap on Memory's real purpose
+Founder-directed epic extension, no code changes. Each Workspace gets its own scoped view into four data domains, not just policies and spend visibility: (1) **CMDB assets** (cross-references **B-196** directly — the CIs, endpoints, AI workloads, deployed LLMs, belonging to this workspace's team, reusing B-196's CI taxonomy rather than defining a new one); (2) **Memory** — **resolves this file's own earlier honest gap** (B-197's original entry flagged that Memory's real current functionality needed direct verification, purpose unconfirmed): Memory is the workspace-scoped RAG/context-gathering data layer, the existing episode-retrieval mechanism (B-002's org-isolated `/v1/memory/episodes*`, `MemoryPage.tsx`) narrowed one level deeper to workspace scope; (3) **Training metrics** (cross-references **B-147**) — per-workspace training-job dashboards including model-improvement-over-time evaluation, already folded into B-147's own scope, not re-solved here; (4) **Deployed LLMs** (cross-references **B-151**) — per-workspace model inventory, ownership count, spend, and the explicitly-flagged-hard ROI view B-196 already named as a real, non-trivial problem.
+
+**Confirmed real example scenario (Engineering workspace):** which employee assets have AI components, how they're connected (B-196's relationship-graph concept, scoped per-asset), spend, ROI, locally-deployed-LLM improvement over time, total LLM count owned.
+
+**Visibility rule:** the same Workspaces RBAC principle already designed (org floor / workspace-scoped slice), extended to these four domains, not a new rule — Admin/IT sees the aggregated cross-workspace rollup in the Admin experience; an ordinary workspace user sees only their own workspace's scoped slice.
+
+**Design principle preserved from the 2026-09-19 UI session:** these four domains render as their own focused, still-outcome-oriented pages within Workspace mode's navigation, **not** crammed onto a single dashboard — cramming would violate the "outcome-oriented, less clutter" principle distinguishing Workspace mode from the Admin experience.
+
+Scoping addendum to the existing B-197 epic — no new B-ID minted (checked: this extends an already-open epic entry, not a new concept requiring a fresh reservation). Full detail in `BACKLOG.md`'s updated B-197 entry.
+
 ## Active decision thread (2026-09-19, latest still) — B-130 updated: content-aware, policy-governed model routing confirmed as a CORE capability of the epic, not a separate idea
 Founder-directed addendum to B-130 (Native Governed AI Desktop Client), no code changes. The chat interface can connect to multiple models simultaneously — internal/self-hosted and external (Claude, ChatGPT, etc.), matching real precedent (Perplexity's own multi-model subscription-gated routing) — with prompt content/intent classified before dispatch and **policy, not the end user, deciding which model receives it** (e.g. classified-work content stays on a local governed model; general research routes to a subscribed external provider).
 
@@ -1780,6 +1791,20 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-19 (newest) by Claude Code — B-197 (Workspaces) extended, no code
+changes: each Workspace now scopes four data domains, not just policies/
+spend — CMDB assets (cross-refs B-196), Memory (resolves this file's own
+earlier open gap — Memory's real purpose is now confirmed as the
+workspace-scoped RAG/context layer, built on B-002's existing episode
+retrieval), Training metrics (cross-refs B-147), and Deployed LLMs
+(cross-refs B-151, including the already-flagged-hard ROI view). Same
+Workspaces RBAC principle (org rollup for Admin/IT, own-slice-only for
+workspace users) extended to cover all four. Design principle: four
+separate focused pages in Workspace mode's nav, not one crammed
+dashboard. No new B-ID — scoping addendum to the existing B-197 epic.
+Full detail in BACKLOG.md's updated B-197 entry. Previous entry,
+preserved below:
+
 2026-09-19 (latest still) by Claude Code — B-130 (Native Governed AI
 Desktop Client) updated, no code changes: content-aware, policy-governed
 model routing confirmed as a CORE capability, not a separate idea --
