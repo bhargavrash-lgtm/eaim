@@ -1373,6 +1373,19 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-19) — Live demo prep on this dev machine: B-191/B-192 built and shipped same-day, B-193/B-194 logged not fixed
+Founder-driven, real-time demo prep, not a task brief. Real, persistent changes made directly on this machine (not just code): a real `eami-agent` MSI built and installed via `msiexec` (service left running, not torn down), a real gateway-agent identity created and linked to this machine's endpoint via B-165's remote-config channel to demo a live scan-interval push (300s -> 60s), and the browser extension loaded unpacked into a real Chrome profile (native-messaging bridge confirmed wired; live paste-event test handed to the founder rather than automated — see below).
+
+**B-191 (`ai_apps` scanner blind to Claude Desktop/Code):** founder reported 0 AI apps detected despite both actively running here. Root cause confirmed on this real machine, not guessed: Claude Desktop is MSIX-packaged, Claude Code is a plain `~/.local/bin/claude.exe` binary — neither covered by the scanner's existing Uninstall-registry/Squirrel-only detection. A second, deeper gap surfaced while fixing it: `EAMIAgent` runs as `LocalSystem`, so any per-user check relying on the calling process's own context (`registry.CURRENT_USER`, `%LOCALAPPDATA%`) is structurally blind regardless of signature correctness — confirmed by running the same scan both interactively and as real `SYSTEM` via a one-off Task Scheduler task. Fixed with two new functions walking real logged-on user identities explicitly. Live-verified via a full MSI uninstall/reinstall on this machine: `ai_app_count: 2` via the real `GET /v1/endpoints/{id}` API. Full writeup in `BUILT.md`'s `eami-agent` section, `BACKLOG.md`'s B-191.
+
+**B-192 (`EndpointDrawer` doesn't scroll):** checked systemic blast radius FIRST, per explicit founder instruction, before fixing anything — confirmed `SlideOverPanel` itself is a bare shell with no scroll logic of its own, and all 8 other real usages already correctly use `flex-1 overflow-y-auto`. Isolated to `EndpointDrawer` alone (missing `overflow-y-auto` on 3 divs). Fixed to match the established pattern. `tsc`/`vite build` clean, HMR applied live; final visual scroll click-through handed to the founder rather than automated (see incident note below).
+
+**B-193/B-194 logged, explicitly not fixed under this session's time pressure:** B-193 generalizes B-191's LocalSystem-vs-interactive-user finding — the same blind spot already affects the pre-existing Squirrel/HKCU checks (e.g. Cursor), not just today's Claude gap; flagged as potentially significant for any real customer deployment, not just this dev machine. B-194 is a live, disclosed **data-minimization concern, not just a bug**: the `models` scanner was reporting 544 entries including personal video files to the backend, almost certainly matching on file size alone. Temporarily mitigated (not fixed) for this one demo endpoint only, via the same B-165 remote-config channel (`enabled_scanners` minus `"models"`) — confirmed live (`local_model_count: 0`) without touching the underlying detection code or any other endpoint's config.
+
+**A disclosed incident boundary, not a new one — a precaution taken because of an existing documented incident:** this session's shell runs elevated on this machine, the exact condition `BUILT.md`'s B1 (`eami-browser-extension`) entry documents as the root cause of an earlier session's accidental `taskkill /F /IM msedge.exe` against the founder's real Edge session. No browser process automation was attempted this session as a result — Chrome was opened once to `chrome://extensions` (a plain window open, no flags, no process control) and the founder was asked to do the actual extension-load/paste-test/scroll-click-through steps themselves. Nothing new went wrong; noting this so a future session understands why browser verification steps in this thread were handed off rather than completed directly.
+
+No CI/build-pipeline changes. `git push` completed (`4fa236e`). Full detail in `BUILT.md`'s `eami-agent` section and `BACKLOG.md`'s B-191/B-192/B-193/B-194 entries. Counter now stands at B-195.
+
 ## Active decision thread (2026-09-16) — B-190 built: Workflow Canvas Brief 3 of 3, structural persistence, closes the B-131 epic
 Task brief closed the last gap in the Workflow Canvas rebuild: a real Save action persisting canvas edits through the EXISTING, unmodified `UpdateWorkflow` PATCH + B-059 static-param PUT endpoints — the same two the card editor already uses. Kickoff line required a fresh investigation re-verifying B-131/B-145/B-148's real current state before scoping, then a 5-line understanding + implementation plan, then explicit approval before building — followed exactly.
 
@@ -1740,6 +1753,23 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-19 by Claude Code — Live demo prep, same-day: B-191 (`ai_apps` blind
+to MSIX/per-user-CLI-installed apps, fixed and live-verified via a real
+MSI reinstall on this machine) and B-192 (`EndpointDrawer` missing
+`overflow-y-auto`, isolated not systemic -- checked all 8 `SlideOverPanel`
+usages first) both built, committed, and pushed (`4fa236e`). B-193
+(broader LocalSystem-vs-interactive-user detection blind spot) and B-194
+(`models` scanner over-collection -- a real data-minimization concern,
+not just a bug -- mitigated for one demo endpoint only, not fixed)
+logged, explicitly deferred past the demo per founder direction. Real
+persistent machine state also changed outside git: `eami-agent` MSI
+installed for real (service left running), a demo gateway-agent identity
+created and linked via B-165's remote-config channel, browser extension
+loaded unpacked into a real Chrome profile. See the Active decision
+thread above for full detail, including a disclosed elevated-shell
+precaution around browser automation (an existing documented incident,
+not a new one). Previous entry, preserved below:
+
 2026-09-16 by Claude Code — B-190 built and closed: Workflow Canvas rebuild
 Brief 3 of 3 (B-131 epic), structural persistence. `WorkflowCanvasPage.tsx`
 gained a real Save action reusing `EditWorkflowPanel`'s own save path
