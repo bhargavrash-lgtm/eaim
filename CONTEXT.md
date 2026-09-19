@@ -1373,6 +1373,19 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-19, newest still) — `DESIGN_SYSTEM.md` adopted as the mandatory pre-build UI reference, verified against its live design canvas, `tailwind.config.ts` reconciliation done (documentation only, no page built)
+Founder-directed documentation task, no page built, no `tailwind.config.ts` changes. `DESIGN_SYSTEM.md` (7-artboard live design canvas at `https://claude.ai/artifact/4j2DqNrWQbHRxTZD3KAJYf`, 6 real artboards + Layer 3's explicitly-marked zoomed component study) committed to the repo root. Every concrete pixel-specific value the doc claims (colors, the 3 elevation shadow levels, typography scale, top-bar composition, the relationship-graph SVG structure) was checked directly against the canvas's real `.dc.html` source, not trusted from prose.
+
+**Verified exact, no discrepancies:** all three elevation levels, the relationship-graph's cubic-bezier SVG structure (exactly 4 junction dots, "governed by" confirmed as the one-to-many branching example), the common top bar's 5 elements plus its 2 named exceptions, core palettes, typography scale, and all 5 anti-patterns in §8.
+
+**Three real discrepancies found in the doc itself (flagged for a future doc fix, not corrected this session):** §5's icon-chip `border-radius:.045*N` formula doesn't match any real chip (~0.2–0.235×N actually used); §5's "thin accent-colored border" claim doesn't hold for most real chips (mostly no border, or neutral gray where present); the Chat Engine palette table omits several real, repeated hexes actually used in Layer 5.
+
+**`CLAUDE.md`'s Conventions section updated:** the prior, thinner Slice-1-era "UI design-system discipline" bullet is replaced with a reference to `DESIGN_SYSTEM.md` as the mandatory pre-build check for any new page or UI change — given the same standing-rule weight as the `aiprovider.Adapter` pattern and the dispatch-hook convergence rule already documented there, not additive.
+
+**`tailwind.config.ts` reconciliation, read directly rather than assumed:** IBM Plex fonts, the elevation `box-shadow` system, and the Chat Engine warm palette are all genuinely new — confirmed absent from the current shipped token set entirely, nothing to extend. `colors.status.success/warning/danger`'s current Tailwind-stock hex values (`green/amber/red-100/800`) are a real conflict with the new spec's documented Success/Warning/Danger hexes — adopting the spec supersedes them, not extends them, and repaints every existing `StatusPill`/`RiskPill`; needs a founder decision before any future brief touches it. The existing generated `colors.brand` ramp (logo-extracted navy/teal) shares zero hex values with the new spec's Ink/Accent — whether `brand` stays a logo-only reference or gets superseded is undecided by either document. `fontSize['2xs']` already fits the new spec's Label/caption range and can be kept/extended; `spacing.drawer` is unrelated, no conflict.
+
+Full detail, including the exact discrepancy line numbers and the full reconciliation table, in `BUILT.md`'s `eami-ui` section (2026-09-19 entry) and `CLAUDE.md`'s updated Conventions bullet. Real page-by-page implementation is explicitly deferred to its own properly scoped future briefs, per this session's own "one page proven before the next" discipline — no B-ID minted for that future work, since it isn't yet a single well-defined item.
+
 ## Active decision thread (2026-09-19, newest) — B-197 (Workspaces) extended: four scoped data domains beyond policy/spend, cross-referencing B-196 (CMDB), B-147 (training), B-151 (model hosting), and resolving an earlier open gap on Memory's real purpose
 Founder-directed epic extension, no code changes. Each Workspace gets its own scoped view into four data domains, not just policies and spend visibility: (1) **CMDB assets** (cross-references **B-196** directly — the CIs, endpoints, AI workloads, deployed LLMs, belonging to this workspace's team, reusing B-196's CI taxonomy rather than defining a new one); (2) **Memory** — **resolves this file's own earlier honest gap** (B-197's original entry flagged that Memory's real current functionality needed direct verification, purpose unconfirmed): Memory is the workspace-scoped RAG/context-gathering data layer, the existing episode-retrieval mechanism (B-002's org-isolated `/v1/memory/episodes*`, `MemoryPage.tsx`) narrowed one level deeper to workspace scope; (3) **Training metrics** (cross-references **B-147**) — per-workspace training-job dashboards including model-improvement-over-time evaluation, already folded into B-147's own scope, not re-solved here; (4) **Deployed LLMs** (cross-references **B-151**) — per-workspace model inventory, ownership count, spend, and the explicitly-flagged-hard ROI view B-196 already named as a real, non-trivial problem.
 
@@ -1791,6 +1804,23 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-19 (newest still) by Claude Code — `DESIGN_SYSTEM.md` committed to
+the repo root as the mandatory pre-build UI reference (replacing the
+prior thinner Slice-1-era bullet in CLAUDE.md's Conventions section,
+same standing-rule weight as the Adapter pattern / dispatch-hook rule).
+Every pixel-specific value verified directly against its live design
+canvas (7 artboards) before trusting the prose. 3 real discrepancies
+found in the doc itself (icon-chip border-radius formula, icon-chip
+border-color claim, incomplete Chat Engine palette table) — flagged for
+a future doc fix, not corrected this session. tailwind.config.ts
+reconciled but NOT changed: IBM Plex fonts, elevation shadows, and the
+Chat Engine warm palette are all genuinely new/absent; colors.status's
+current Tailwind-stock hexes conflict with the new spec's documented
+values and need a founder decision before any brief repaints existing
+StatusPill/RiskPill usage. No page built -- documentation and
+token-reconciliation only, per explicit task scope. Full detail in
+BUILT.md's eami-ui section. Previous entry, preserved below:
+
 2026-09-19 (newest) by Claude Code — B-197 (Workspaces) extended, no code
 changes: each Workspace now scopes four data domains, not just policies/
 spend — CMDB assets (cross-refs B-196), Memory (resolves this file's own
