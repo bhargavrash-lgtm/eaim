@@ -150,3 +150,95 @@ func writeDefaultValue(key, manifestPath string) error {
 	defer k.Close()
 	return k.SetStringValue("", manifestPath)
 }
+
+// EnsureRegistered verifies the native-messaging registration (launcher
+// hard link, manifest content, both browsers' registry entries) is fully
+// correct for exePath, repairing it via Install if not. Intended to be
+// called once on every eami-agent service start (cmd/agent/main.go), not
+// just relying on Product.wxs's install/upgrade CustomActions.
+//
+// Why this exists (2026-09-19): the WiX CustomActions are correct for a
+// fresh install and a clean uninstall, and were verified correct even for
+// a genuine single-invocation MajorUpgrade during this same investigation
+// -- so they are not, by themselves, a confirmed live bug. But they are
+// the ONLY mechanism keeping this registration correct, and they depend
+// entirely on MSI's own Installed/UPGRADINGPRODUCTCODE property semantics
+// evaluating exactly as intended across every possible install path,
+// including ones this codebase has never exercised (a repair install, a
+// future installer change, an admin's manual registry edit, MSI's own
+// file-replacement behavior not necessarily preserving a hard link it
+// knows nothing about -- Install's own doc comment already flags this
+// exact risk). A self-healing check that runs on every real service
+// start does not depend on getting any of that exactly right: it
+// verifies the actual on-disk/registry state directly, every time the
+// service that most needs it to be correct starts running, and repairs
+// it if not -- a strictly stronger guarantee than "the correct WiX
+// condition fired during this exact install," at the cost of one cheap
+// stat/read/registry-query on every service start.
+func EnsureRegistered(exePath string) error {
+	ok, err := registrationCorrect(exePath)
+	if ok && err == nil {
+		return nil
+	}
+	// Any error inspecting the current state is itself reason to repair --
+	// Install is idempotent and safe to run whether or not repair was
+	// strictly necessary, so an inconclusive check errs toward repairing
+	// rather than silently leaving a possibly-broken registration alone.
+	return Install(exePath)
+}
+
+// registrationCorrect reports whether every piece of the native-messaging
+// registration is present and internally consistent, without modifying
+// anything. A false result (or any error) means EnsureRegistered should
+// repair via Install.
+func registrationCorrect(exePath string) (bool, error) {
+	absExe, err := filepath.Abs(exePath)
+	if err != nil {
+		return false, fmt.Errorf("nmregister: resolve exe path: %w", err)
+	}
+	dir := filepath.Dir(absExe)
+	launcherPath := filepath.Join(dir, LauncherBaseName+".exe")
+	manifestPath := filepath.Join(dir, manifestFileName)
+
+	exeInfo, err := os.Stat(absExe)
+	if err != nil {
+		return false, nil
+	}
+	launcherInfo, err := os.Stat(launcherPath)
+	if err != nil {
+		return false, nil // launcher missing entirely
+	}
+	if !os.SameFile(exeInfo, launcherInfo) {
+		// Different underlying file -- the hard link has fallen out of
+		// sync with the real binary (e.g. a file-replace during install/
+		// upgrade/repair that didn't preserve it). This is the exact
+		// failure mode this function exists to catch.
+		return false, nil
+	}
+
+	body, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return false, nil // manifest missing
+	}
+	var m manifest
+	if err := json.Unmarshal(body, &m); err != nil {
+		return false, nil // corrupt manifest
+	}
+	wantOrigin := "chrome-extension://" + AllowedExtensionID + "/"
+	if m.Name != HostName || m.Path != launcherPath || len(m.AllowedOrigins) != 1 || m.AllowedOrigins[0] != wantOrigin {
+		return false, nil
+	}
+
+	for _, key := range registryKeys {
+		k, err := registry.OpenKey(registry.LOCAL_MACHINE, key, registry.QUERY_VALUE)
+		if err != nil {
+			return false, nil
+		}
+		val, _, err := k.GetStringValue("")
+		k.Close()
+		if err != nil || val != manifestPath {
+			return false, nil
+		}
+	}
+	return true, nil
+}

@@ -1373,6 +1373,15 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-19, later) — B-195: native-messaging reliability fixes shipped, live browser-paste failure investigated at length, root cause NOT found — closed out deliberately, not abandoned
+Same demo-prep day as the entry immediately below, later in the session, triggered by a real live failure: a real paste into `claude.ai` produced zero rows in `paste_events`. Founder-issued formal task brief (investigation-first, plan-then-approval), later escalated mid-investigation when a deployed fix didn't resolve the live symptom, and explicitly called off (**"stop the investigation now... this has stopped converging"**) once the failure point kept moving earlier in the causal chain with each new piece of real evidence rather than narrowing — a real, correctly-recognized signal to stop chasing rather than push through on diminishing returns.
+
+**What shipped and is real, not in question:** (1) a genuine PID-reuse race fixed in `nmlauncher.parentProcessName()` (paired PID with process-creation timestamp — a reused PID can never have a creation time before the process it supposedly parented), confirmed to be **the same underlying mechanism as the original B-037 incident**, not a new, unrelated bug; (2) `nmregister.EnsureRegistered()`, a new self-healing check on every `eami-agent` service start, replacing reliance on WiX install-sequence conditions alone; (3) `eami-api`'s `IngestPasteEvents` closed — confirmed dead via direct code tracing (zero real callers, superseded by B-035's real path since it shipped), not just unused. All three are real, tested (`pidreuse_test.go`, `nmregister_windows_test.go`'s throwaway-registry-path tests, the full `eami-api` suite), and (1)/(2) are live-deployed via multiple real MSI cycles today including a genuine single-invocation MajorUpgrade. **(3) is correct in source but the running `eami-api` container has not been rebuilt** (last built 2026-09-10) — explicitly left undeployed once the investigation was called off, first action for next session.
+
+**What did NOT get resolved, stated plainly:** the live paste-into-browser failure itself. Fix (1) shipping and being live did not make the founder's subsequent real paste succeed — meaning the PID-reuse race, while real, isn't the (or isn't the whole) explanation. Real evidence gathered across several rounds of live diagnosis (never automating the browser itself, per this session's own established elevated-shell precaution): the extension is confirmed correctly loaded; its real `chrome.storage.local` buffer (read directly, not inferred) has held real captured-but-never-flushed paste events since the original 2026-08-04 testing; the native-messaging host works correctly every time it's invoked directly, bypassing Chrome; and a real-time WMI process trace caught the host's actual parent process exiting before it could even be queried — directly contradicting this codebase's own existing B-037-era research claim that Chrome launches native hosts with no intermediary process. A final targeted diagnostic (a temporary file-log line at the exact refusal point) was built, deployed, and never got a conclusive answer in the time available — the symptom had shifted to an even earlier point in the chain (the host wasn't observed spawning at all in the final test window) by the time it ran. The diagnostic line was reverted before commit, not shipped.
+
+**Full evidence trail, concrete next-session leads, and the exact deployment gap are in `BACKLOG.md`'s B-195 entry and `BUILT.md`'s `eami-agent`/`eami-api` B-195 entries — read those before resuming, not just this summary.** Do not rely on a live browser-paste demo until this is actually resolved; nothing else from today's demo prep depends on it.
+
 ## Active decision thread (2026-09-19) — Live demo prep on this dev machine: B-191/B-192 built and shipped same-day, B-193/B-194 logged not fixed
 Founder-driven, real-time demo prep, not a task brief. Real, persistent changes made directly on this machine (not just code): a real `eami-agent` MSI built and installed via `msiexec` (service left running, not torn down), a real gateway-agent identity created and linked to this machine's endpoint via B-165's remote-config channel to demo a live scan-interval push (300s -> 60s), and the browser extension loaded unpacked into a real Chrome profile (native-messaging bridge confirmed wired; live paste-event test handed to the founder rather than automated — see below).
 
@@ -1753,6 +1762,26 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-19 (later same day) by Claude Code — B-195: real native-messaging
+reliability fixes shipped (nmlauncher PID-reuse race, the same underlying
+mechanism as B-037's original incident; nmregister.EnsureRegistered
+self-healing check; eami-api's dead IngestPasteEvents route closed) --
+but the live browser-paste failure that triggered this investigation was
+NOT resolved. Investigated at real length (extension confirmed correctly
+loaded; its real chrome.storage.local buffer proven to hold captured-
+but-never-flushed events since 2026-08-04; the native-messaging host
+proven to work when invoked directly, bypassing Chrome; a real-time WMI
+trace caught the host's actual parent process exiting before it could be
+queried, contradicting this codebase's own B-037-era "no intermediary
+process" research claim) -- explicitly called off once the failure point
+kept moving earlier in the chain rather than narrowing, per direct
+founder instruction ("this has stopped converging"), not abandoned.
+eami-api's fix is correct in source but the running container has not
+been rebuilt (last built 2026-09-10) -- flagged, not silently missed.
+Full evidence trail and concrete next-session leads in BACKLOG.md's B-195
+entry and BUILT.md's eami-agent/eami-api B-195 entries. Previous entry,
+preserved below:
+
 2026-09-19 by Claude Code — Live demo prep, same-day: B-191 (`ai_apps` blind
 to MSIX/per-user-CLI-installed apps, fixed and live-verified via a real
 MSI reinstall on this machine) and B-192 (`EndpointDrawer` missing

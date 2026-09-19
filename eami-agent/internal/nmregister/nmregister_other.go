@@ -18,3 +18,13 @@ func Install(exePath string) error { return ErrNotSupported }
 
 // Uninstall always fails on non-Windows builds; see ErrNotSupported.
 func Uninstall(exePath string) error { return ErrNotSupported }
+
+// EnsureRegistered is a no-op on non-Windows builds. The self-healing
+// concern it addresses on Windows (Product.wxs's install/upgrade
+// CustomActions being the only mechanism keeping registration correct)
+// doesn't apply the same way here -- Linux/macOS registration is a plain
+// manifest-file drop written once by the installer's postinstall script,
+// not something this process's own service lifecycle can help keep in
+// sync. Out of scope for this fix; see ErrNotSupported's doc comment for
+// where that registration actually happens on these platforms.
+func EnsureRegistered(exePath string) error { return nil }

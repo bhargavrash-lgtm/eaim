@@ -1,15 +1,22 @@
 // paste_events_read_test.go -- eami-api/internal/api
 // Integration tests for B-038's read-only admin UI over B-032's
 // paste_events table: GET /v1/paste-events (list) and
-// GET /v1/paste-events/timeseries (per-domain aggregation). Same
-// real-Postgres-only convention as paste_events_test.go (no mock/fake
-// store layer exists in this codebase for these queries) -- skips
-// cleanly without TEST_DATABASE_URL/POSTGRES_PASSWORD.
+// GET /v1/paste-events/timeseries (per-domain aggregation). No mock/fake
+// store layer exists in this codebase for these queries -- skips cleanly
+// without TEST_DATABASE_URL/POSTGRES_PASSWORD.
 //
-// Unlike paste_events_test.go's newPasteEventsTestEnv (authSvc=nil,
-// since ingestion only needs X-Service-Key), these routes are
-// JWT-protected (requireRole: admin/operator/viewer), so newReadEnv
-// below wires a real *auth.Service and issues real signed tokens --
+// Seeding (2026-09-19): these tests used to seed via a POST to
+// IngestPasteEvents (POST /v1/reports/paste-events), removed the same day
+// -- confirmed dead code with zero real callers, see BACKLOG.md's
+// B-19x entry. Seeding now goes directly through the store layer
+// (ResolvePasteSourceEndpoint + BatchInsertPasteEvents), the exact same
+// two calls the real ingestion path (ingest.go's
+// processPasteEventRelayItem) makes -- these tests exercise the read
+// side only and were never actually testing the removed endpoint's own
+// logic, just using it as a seeding convenience.
+//
+// These routes are JWT-protected (requireRole: admin/operator/viewer), so
+// newReadEnv wires a real *auth.Service and issues real signed tokens --
 // exercising the actual jwtMiddleware/requireRole/claimsFromContext
 // chain, not a bypass.
 //
@@ -36,36 +43,94 @@ import (
 	"github.com/eami/api/internal/api"
 	"github.com/eami/api/internal/auth"
 	"github.com/eami/api/internal/config"
+	"github.com/eami/api/internal/store"
 )
 
 // ─── shared read-side test env ─────────────────────────────────────────────
 
-// readEnv wraps paste_events_test.go's pasteEventsTestEnv (pool, queries,
-// orgID, serviceKey -- for seeding via env.post) with a second httptest
-// server backed by a real *auth.Service, so JWT-protected read routes can
-// be exercised with real signed tokens. env.post(...) still uses the
-// embedded env's original service-key-only server; env.srv (shadowing
-// the embedded field) is this new JWT-capable one, used by authedGet.
+// readEnv wires a real *pgxpool.Pool/*store.Queries against a throwaway
+// seeded org, plus a real *auth.Service, so JWT-protected read routes can
+// be exercised with real signed tokens against real seeded data.
 type readEnv struct {
-	*pasteEventsTestEnv
+	pool    *pgxpool.Pool
+	queries *store.Queries
+	orgID   uuid.UUID
 	srv     *httptest.Server
 	authSvc *auth.Service
 }
 
 func newReadEnv(t *testing.T) *readEnv {
 	t.Helper()
-	base := newPasteEventsTestEnv(t)
+	dsn := pasteEventsTestDSN(t)
+	ctx := context.Background()
+
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect to test database: %v", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		t.Skipf("skipping: could not reach test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	q := store.New(pool)
+
+	orgID := uuid.New()
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO orgs (id, name, slug) VALUES ($1::uuid, $2, $3)`,
+		orgID.String(), "paste-events-read-test-"+orgID.String()[:8], "paste-events-read-test-"+orgID.String(),
+	); err != nil {
+		t.Fatalf("seed test org: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1::uuid`, orgID.String())
+	})
 
 	authSvc, err := auth.NewService("", time.Hour, 30*24*time.Hour)
 	if err != nil {
 		t.Fatalf("auth.NewService: %v", err)
 	}
-	cfg := &config.Config{ServiceKey: base.serviceKey}
-	s := api.NewServer(base.queries, authSvc, nil, cfg)
+	cfg := &config.Config{ServiceKey: "test-service-key-paste-events-read"}
+	s := api.NewServer(q, authSvc, nil, cfg)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 
-	return &readEnv{pasteEventsTestEnv: base, srv: srv, authSvc: authSvc}
+	return &readEnv{pool: pool, queries: q, orgID: orgID, srv: srv, authSvc: authSvc}
+}
+
+// seededEvent is one event to write via seedPasteEvents -- a plain
+// time.Time rather than an RFC3339 string, since these tests write
+// straight to the store layer instead of round-tripping through JSON.
+type seededEvent struct {
+	Domain        string
+	OccurredAt    time.Time
+	ContentLength *int32
+}
+
+// seedPasteEvents writes events directly via the store layer -- the same
+// two calls (ResolvePasteSourceEndpoint, BatchInsertPasteEvents) the real
+// ingestion path makes -- for a single (agentID, hostname) source.
+func seedPasteEvents(t *testing.T, env *readEnv, agentID, hostname string, events []seededEvent) {
+	t.Helper()
+	endpointID, err := env.queries.ResolvePasteSourceEndpoint(context.Background(), store.ResolvePasteSourceEndpointParams{
+		OrgID: env.orgID, AgentID: agentID, Hostname: hostname,
+	})
+	if err != nil {
+		t.Fatalf("seedPasteEvents: resolve source endpoint: %v", err)
+	}
+	inputs := make([]store.PasteEventInput, len(events))
+	for i, e := range events {
+		inputs[i] = store.PasteEventInput{
+			OrgID:             env.orgID,
+			SourceEndpointID:  endpointID,
+			DestinationDomain: e.Domain,
+			OccurredAt:        e.OccurredAt,
+			ContentLength:     e.ContentLength,
+		}
+	}
+	if _, err := env.queries.BatchInsertPasteEvents(context.Background(), inputs); err != nil {
+		t.Fatalf("seedPasteEvents: batch insert: %v", err)
+	}
 }
 
 // authedGet performs a viewer-authenticated GET against env.srv, decoding
@@ -101,14 +166,11 @@ func TestPasteEventsRead_List_FiltersByDomainAndTime(t *testing.T) {
 	agentID := "agent-read-" + uuid.NewString()[:8]
 	base := time.Now().UTC().Add(-2 * time.Hour)
 
-	events := []api.PasteEventReport{
-		{OrgID: env.orgID.String(), AgentID: agentID, Hostname: "h", DestinationDomain: "chat.openai.com", OccurredAt: base.Format(time.RFC3339)},
-		{OrgID: env.orgID.String(), AgentID: agentID, Hostname: "h", DestinationDomain: "claude.ai", OccurredAt: base.Add(30 * time.Minute).Format(time.RFC3339)},
-		{OrgID: env.orgID.String(), AgentID: agentID, Hostname: "h", DestinationDomain: "chat.openai.com", OccurredAt: base.Add(90 * time.Minute).Format(time.RFC3339)},
-	}
-	if resp := env.post(t, events); resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("seed post: status %d", resp.StatusCode)
-	}
+	seedPasteEvents(t, env, agentID, "h", []seededEvent{
+		{Domain: "chat.openai.com", OccurredAt: base},
+		{Domain: "claude.ai", OccurredAt: base.Add(30 * time.Minute)},
+		{Domain: "chat.openai.com", OccurredAt: base.Add(90 * time.Minute)},
+	})
 
 	// Unfiltered: all 3 events for this org.
 	var all api.PasteEventListResponse
@@ -162,15 +224,14 @@ func TestPasteEventsRead_List_Paginates(t *testing.T) {
 	base := time.Now().UTC().Add(-time.Hour)
 
 	const n = 12
-	events := make([]api.PasteEventReport, n)
+	events := make([]seededEvent, n)
 	for i := 0; i < n; i++ {
-		events[i] = api.PasteEventReport{
-			OrgID: env.orgID.String(), AgentID: agentID, Hostname: "h",
-			DestinationDomain: "claude.ai",
-			OccurredAt:        base.Add(time.Duration(i) * time.Minute).Format(time.RFC3339),
+		events[i] = seededEvent{
+			Domain:     "claude.ai",
+			OccurredAt: base.Add(time.Duration(i) * time.Minute),
 		}
 	}
-	env.post(t, events)
+	seedPasteEvents(t, env, agentID, "h", events)
 
 	var page1, page2 api.PasteEventListResponse
 	env.authedGet(t, "/v1/paste-events?per_page=5&page=1", &page1)
@@ -192,10 +253,9 @@ func TestPasteEventsRead_List_OrgIsolation(t *testing.T) {
 	envB := newReadEnv(t)
 
 	// Seed an event for org A only.
-	envA.post(t, []api.PasteEventReport{{
-		OrgID: envA.orgID.String(), AgentID: "agent-iso-a", Hostname: "h",
-		DestinationDomain: "claude.ai", OccurredAt: time.Now().UTC().Format(time.RFC3339),
-	}})
+	seedPasteEvents(t, envA, "agent-iso-a", "h", []seededEvent{
+		{Domain: "claude.ai", OccurredAt: time.Now().UTC()},
+	})
 
 	// Query as org B's viewer -- must see zero events, never org A's.
 	var resp api.PasteEventListResponse
@@ -213,12 +273,11 @@ func TestPasteEventsRead_TimeSeries_GroupsByBucketAndDomain(t *testing.T) {
 	day1 := time.Now().UTC().Truncate(24 * time.Hour).Add(-48 * time.Hour)
 	day2 := day1.Add(24 * time.Hour)
 
-	events := []api.PasteEventReport{
-		{OrgID: env.orgID.String(), AgentID: agentID, Hostname: "h", DestinationDomain: "chat.openai.com", OccurredAt: day1.Add(time.Hour).Format(time.RFC3339)},
-		{OrgID: env.orgID.String(), AgentID: agentID, Hostname: "h", DestinationDomain: "chat.openai.com", OccurredAt: day1.Add(2 * time.Hour).Format(time.RFC3339)},
-		{OrgID: env.orgID.String(), AgentID: agentID, Hostname: "h", DestinationDomain: "claude.ai", OccurredAt: day2.Add(time.Hour).Format(time.RFC3339)},
-	}
-	env.post(t, events)
+	seedPasteEvents(t, env, agentID, "h", []seededEvent{
+		{Domain: "chat.openai.com", OccurredAt: day1.Add(time.Hour)},
+		{Domain: "chat.openai.com", OccurredAt: day1.Add(2 * time.Hour)},
+		{Domain: "claude.ai", OccurredAt: day2.Add(time.Hour)},
+	})
 
 	from := day1.Add(-time.Hour).Format("2006-01-02")
 	to := day2.Add(24 * time.Hour).Format("2006-01-02")

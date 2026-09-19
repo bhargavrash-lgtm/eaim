@@ -184,7 +184,12 @@ func (s *Server) Handler() http.Handler {
 	r.With(s.requireServiceKey).Post("/v1/reports", s.IngestReports)
 	r.With(s.requireServiceKey).Post("/v1/ingest/batch", s.IngestBatch)
 	r.With(s.requireServiceKey).Post("/v1/internal/token-usage", s.IngestTokenUsage)
-	r.With(s.requireServiceKey).Post("/v1/reports/paste-events", s.IngestPasteEvents)
+	// POST /v1/reports/paste-events (IngestPasteEvents) removed 2026-09-19:
+	// B-032's original pre-extension design, confirmed to have zero real
+	// callers and superseded by processPasteEventRelayItem (B-035, the
+	// real path -- see ingest.go and paste_events.go's validatePasteEvent
+	// doc comment). An unused, write-capable, client-supplied-org_id
+	// endpoint was judged a real liability not worth keeping live.
 	// eami-agent's own remote-config poll (B-165) -- read-only, but still
 	// service-key gated like every other collector-facing route above: an
 	// eami-agent instance authenticates as the fleet/collector identity,

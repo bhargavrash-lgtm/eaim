@@ -156,6 +156,20 @@ func main() {
 		return
 	}
 
+	// Self-healing native-messaging registration check (2026-09-19): don't
+	// rely solely on Product.wxs's install/upgrade CustomActions having
+	// fired correctly for whatever install path actually happened -- verify
+	// the real on-disk/registry state every time the long-lived agent
+	// process itself starts, and repair it if not. See
+	// nmregister.EnsureRegistered's doc comment for the full reasoning.
+	// Best-effort: a failure here must never block the agent's actual job
+	// (scanning/reporting) -- logged, not fatal.
+	if exe, err := os.Executable(); err != nil {
+		log.Warn("native-messaging registration self-check skipped: could not resolve own executable path", "err", err)
+	} else if err := nmregister.EnsureRegistered(exe); err != nil {
+		log.Warn("native-messaging registration self-check failed", "err", err)
+	}
+
 	run := func(ctx context.Context) {
 		runLoop(ctx, cfg, log)
 	}
