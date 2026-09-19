@@ -1373,6 +1373,13 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-19, latest still) — B-130 updated: content-aware, policy-governed model routing confirmed as a CORE capability of the epic, not a separate idea
+Founder-directed addendum to B-130 (Native Governed AI Desktop Client), no code changes. The chat interface can connect to multiple models simultaneously — internal/self-hosted and external (Claude, ChatGPT, etc.), matching real precedent (Perplexity's own multi-model subscription-gated routing) — with prompt content/intent classified before dispatch and **policy, not the end user, deciding which model receives it** (e.g. classified-work content stays on a local governed model; general research routes to a subscribed external provider).
+
+**Reuses existing mechanisms directly, no new dispatch infrastructure:** multi-model dispatch is the existing Adapter pattern (B-057/B-103); access/subscription gating is the existing connector/credential registration model (no registered connector, no route); admin-configured routing rules follow **the exact same policy-inheritance pattern just designed for B-197 (Workspaces)** — IT sets an inviolable floor, workspace admins can only add restrictions, never relax it. This is real evidence B-197's policy-inheritance design generalizes to a second real use case, not a one-off.
+
+**Real, explicitly open question, not resolved:** does prompt-content classification for routing share a mechanism with **B-150 (Guardrails)**'s own content classification (both inspect prompt content pre-dispatch and act on it — routing decides *where*, Guardrails decides *whether*)? Flagged so neither epic builds a duplicate foundational classifier without checking first. Full detail in `BACKLOG.md`'s B-130 entry (2026-09-19 addendum).
+
 ## Active decision thread (2026-09-19, latest) — Two new epics logged: B-196 (CMDB, broadened scope) and B-197 (Workspaces, delegated sub-org administration) — investigation-not-started, explicitly cross-referenced
 Founder-directed epic logging, no code changes. Both discussed extensively across conversation but **zero investigation or code started for either** — this is a scoping record, not a build.
 
@@ -1773,6 +1780,17 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-19 (latest still) by Claude Code — B-130 (Native Governed AI
+Desktop Client) updated, no code changes: content-aware, policy-governed
+model routing confirmed as a CORE capability, not a separate idea --
+multi-model dispatch reuses the Adapter pattern (B-057/B-103), access
+gating reuses the existing connector/credential model, and admin routing
+rules follow B-197 (Workspaces)'s exact policy-inheritance pattern (org
+floor, workspace can only tighten). Open question flagged, not resolved:
+does prompt-content classification for routing share a mechanism with
+B-150 (Guardrails)'s own classification? Full detail in BACKLOG.md's
+B-130 entry. Previous entry, preserved below:
+
 2026-09-19 (latest) by Claude Code — Two new epics logged, no code changes:
 B-196 (CMDB, broadened scope -- CI taxonomy incl. a new AI Workload
 category designed for B-151/B-147 to land in later; real multi-hop CI
