@@ -1373,6 +1373,17 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-19, latest) — Two new epics logged: B-196 (CMDB, broadened scope) and B-197 (Workspaces, delegated sub-org administration) — investigation-not-started, explicitly cross-referenced
+Founder-directed epic logging, no code changes. Both discussed extensively across conversation but **zero investigation or code started for either** — this is a scoping record, not a build.
+
+**B-196 (CMDB, broadened scope):** extends Discovery with a real Configuration Item (CI) data model, explicitly scoped to *feed into* a real ITAM/CMDB system (matching how Device42, now Freshworks, relates to Freshservice) rather than replace one. Broadened CI taxonomy from an initial endpoint-only scope to three categories: end-user compute (already built), server/infrastructure compute (on-prem vs. cloud as an *attribute*, not a separate CI type), and a new AI Workload category (Deployed LLM Instance, Training Job, Chat Interface) designed now so **B-151** (model hosting) and **B-147** (training orchestration) have a real place to land output later. Real multi-hop CI relationships (not just categorization) confirmed via research as CMDB's actual defining capability. Power/energy telemetry, ROI computation, and model-evaluation-over-time explicitly flagged as separate, hard problems **not** folded into this epic (the last folds into B-147 instead).
+
+**B-197 (Workspaces):** a genuine new org tier (Org → Workspace → Agent/Endpoint) for delegated administration — confirmed as **B-160's own vision's concrete architectural implementation**, not a separate idea. Grounded in real multi-tenant SaaS patterns (policy inheritance — workspace policies can only add restrictions, never loosen the org floor; RBAC — workspace role is a separate dimension from org role, same "org role vs. store role" pattern as multi-tenant e-commerce; data model — workspace views filter the same underlying tables, no per-workspace storage fragmentation). Also scopes a real per-endpoint consolidated detail view (hardware/software, computed policy/workflow tags, endpoint-level FinOps as a new cost dimension, the existing B-164 gateway-agent link, filtered Approvals/Audit) — flags that **Memory's real current functionality needs direct verification, not assumed**, before that view can honestly include it.
+
+**The real, explicitly unresolved question shared by both:** are Groups (CI/agent collections for policy assignment, B-196's need) and Workspaces (B-197's delegated-admin tier) the same primitive described two ways, or does a Workspace *contain* Groups? Neither epic assumes an answer. **Recommended investigation order: before or alongside each other, together** — building either epic's grouping concept in isolation risks reworking it once the other's real needs are understood; the goal is one shared grouping primitive, not three independent ones.
+
+B-ID assignment: grepped both `BACKLOG.md` and `CONTEXT.md` for "CMDB"/"Configuration Item"/"Workspace" before minting either — zero prior matches for either concept under any name, counter confirmed free at B-196/B-197 in sequence. Full detail in `BACKLOG.md`'s B-196/B-197 entries.
+
 ## Active decision thread (2026-09-19, later) — B-195: native-messaging reliability fixes shipped, live browser-paste failure investigated at length, root cause NOT found — closed out deliberately, not abandoned
 Same demo-prep day as the entry immediately below, later in the session, triggered by a real live failure: a real paste into `claude.ai` produced zero rows in `paste_events`. Founder-issued formal task brief (investigation-first, plan-then-approval), later escalated mid-investigation when a deployed fix didn't resolve the live symptom, and explicitly called off (**"stop the investigation now... this has stopped converging"**) once the failure point kept moving earlier in the causal chain with each new piece of real evidence rather than narrowing — a real, correctly-recognized signal to stop chasing rather than push through on diminishing returns.
 
@@ -1762,6 +1773,19 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-19 (latest) by Claude Code — Two new epics logged, no code changes:
+B-196 (CMDB, broadened scope -- CI taxonomy incl. a new AI Workload
+category designed for B-151/B-147 to land in later; real multi-hop CI
+relationships, not just categorization, confirmed as CMDB's actual
+defining capability) and B-197 (Workspaces -- a real Org->Workspace->
+Agent tier, confirmed as B-160's own vision's concrete implementation,
+grounded in real multi-tenant SaaS patterns for policy inheritance/RBAC/
+data-model). Both explicitly cross-reference an unresolved shared
+question (Groups vs. Workspaces -- same primitive or does one contain
+the other?) and recommend investigating together, not in isolation.
+Full detail in BACKLOG.md's B-196/B-197 entries. Previous entry,
+preserved below:
+
 2026-09-19 (later same day) by Claude Code — B-195: real native-messaging
 reliability fixes shipped (nmlauncher PID-reuse race, the same underlying
 mechanism as B-037's original incident; nmregister.EnsureRegistered
