@@ -124,13 +124,13 @@ function EndpointDrawer({ endpointId, onClose }: { endpointId: string; onClose: 
       </div>
 
         {isLoading ? (
-          <div className="flex flex-1 items-center justify-center py-16"><LoadingSpinner /></div>
+          <div className="flex flex-1 items-center justify-center overflow-y-auto py-16"><LoadingSpinner /></div>
         ) : !endpoint || !report ? (
-          <div className="flex flex-1 items-center justify-center py-16">
+          <div className="flex flex-1 items-center justify-center overflow-y-auto py-16">
             <EmptyState title="No report data available" />
           </div>
         ) : (
-          <div className="flex-1 p-5 space-y-3">
+          <div className="flex-1 overflow-y-auto p-5 space-y-3">
             {/* Summary */}
             <div className="grid grid-cols-2 gap-2 text-xs">
               {([
