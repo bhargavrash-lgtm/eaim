@@ -1373,6 +1373,17 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-20, later) — B-199: `tailwind.config.ts` repainted to `DESIGN_SYSTEM.md`'s palette, confirmed founder decision (REPLACE not reconcile), live-verified via Playwright against a disposable local server
+Founder-issued task brief, explicit kickoff-then-approval gate followed: confirmed understanding + full impact list + plan presented first, two genuinely blocking decisions asked via question (index.html font-link inclusion; screenshot scope expansion), both answered "Recommended" before any file was touched.
+
+**Real findings surfaced before building, not glossed over:** `Card`/`SlideOverPanel`/`ConfirmDialog`/`Toast`/etc. don't consume `brand`/`status` tokens at all (won't repaint); the design doc gives single hexes, not the full shade ramp the code actually calls (`brand-800` was referenced by `SettingsPage.tsx` but never defined — a real pre-existing no-op bug, fixed as a side effect of rebuilding the ramp); IBM Plex needs an actual font file, which needs `index.html` (outside the brief's literal file list — founder approved adding it); `boxShadow`'s 3 new elevation levels are genuinely new but confirmed inert (zero components reference them, wiring one in is a forbidden component edit); the Sidebar's actual visible logo (`Logo.tsx`'s `variant="full"`, a static `<img>`) cannot repaint at all — confirmed live in every screenshot, disclosed rather than implied fixed. **Corrected mid-verification, from real screenshots not assumption:** `LoginPage.tsx` does NOT use `Logo.tsx` — it hand-renders its wordmark as text, so it *does* repaint, unlike the Sidebar's image-based instance.
+
+**Live-verification mechanics, a real environment discovery:** the running shared Docker `eami-ui` container only bind-mounts `./eami-ui/src` (`docker-compose.yml`) — `tailwind.config.ts`/`index.html` are baked into the image and don't hot-reload. Rather than rebuild/restart the shared container, used a disposable host-local `npx vite --port 5174` process reading directly off disk, killed by PID once screenshots were captured — the shared `:5173` container was never touched.
+
+**A genuine permission gate, handled correctly, not routed around:** the auto-mode classifier blocked the Playwright `chromium.launch()` call ("Modify Shared Resources"). Founder asked exactly what command was blocked before deciding — given the literal command/script content, confirmed it as Playwright's own sandboxed, headless Chromium hitting only `localhost`, architecturally unrelated to the B1/B-036 incident (an elevated shell controlling a real, already-open system browser process) — then explicitly approved. No workaround was attempted in between.
+
+24 real before/after screenshots captured (12 pages, the founder-approved expanded set), 4 representative pairs visually inspected and confirmed correct. `dev@example.com`'s password was reset to a throwaway value for login purposes (same disclosed B-146/B-190 convention), founder-notified before use. Full detail in `BACKLOG.md`'s new B-199 entry and `BUILT.md`'s `eami-ui` section.
+
 ## Active decision thread (2026-09-20) — B-198 logged: the 3 `DESIGN_SYSTEM.md` discrepancies from the prior session's verification pass, not fixed yet; BACKLOG.md status export confirmed complete; design canvas confirmed still design-only, no build briefs minted
 Founder follow-up on the 2026-09-19 `DESIGN_SYSTEM.md` adoption session, no code changes. Two things done: (1) produced a full `BACKLOG.md` export grouped by status (110 DONE, 17 EPICs logged/investigation-not-started, 5 small explicit-QUEUED, 32 unannotated-original-QUEUED — 2 of which, B-007/B-008, are actually BLOCKED per the file's own separate `## BLOCKED` section — 7 logged-not-fixed small bugs, 3 investigation-complete-no-build-brief, 1 special-case closeout (B-195), 175 items total) and confirmed the prior session's specific items are all correctly logged: B-191/B-192 (AI Apps fix / scroll fix) DONE 2026-09-19, B-172/B-173 DONE 2026-09-15, B-190 DONE 2026-09-16, B-196/B-197 (CMDB/Workspaces epics) logged, investigation not started. (2) Confirmed via direct grep of `BACKLOG.md` for "DESIGN_SYSTEM"/"Layer1"–"Layer5"/etc. — **zero matches** — the 6-artboard design canvas work stands entirely as design-only; no page-by-page build brief has been minted from it yet.
 
@@ -1809,6 +1820,26 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-20 (later) by Claude Code — B-199 DONE: tailwind.config.ts
+repainted to DESIGN_SYSTEM.md's palette (REPLACE, confirmed founder
+decision, not an extension). colors.brand (7-step OKLCH ramp from
+#3B5BDB, fixes a real pre-existing brand-800 no-op bug), colors.status
+(exact doc hexes), new colors.ink, new fontFamily (IBM Plex, cascades
+via Preflight), new boxShadow l1/l2/l3 (shipped, confirmed inert -- zero
+components reference them). index.html gained a Google Fonts link
+(founder-approved addition beyond the literal file list). Zero
+component files touched. Real tsc/vite build clean. Live Playwright
+verification performed via a disposable host-local vite process (NOT
+the shared Docker container, which doesn't bind-mount these 2 files --
+a real env discovery mid-task) -- 24 before/after screenshots, 4 pairs
+visually confirmed correct. Real finding, disclosed not hidden: the
+Sidebar's <img>-based logo cannot repaint at all; LoginPage's separate
+text-based wordmark does. A genuine permission gate (Playwright launch,
+classifier-blocked) was handled by asking what exactly was blocked
+before approving, not routed around. Full detail in BACKLOG.md's B-199
+entry and BUILT.md's eami-ui section. Counter now stands at B-200.
+Previous entry, preserved below:
+
 2026-09-20 by Claude Code — B-198 logged (the 3 `DESIGN_SYSTEM.md`
 discrepancies from the prior session, not fixed yet, Low priority);
 full BACKLOG.md status export produced and confirmed complete (175
