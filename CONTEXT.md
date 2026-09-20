@@ -1373,6 +1373,21 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-20, latest) — B-200: Admin Agent Detail (collapsible nav rail + real relationship graph) built, closing the original "things don't have connections, looks too simple" complaint that started the whole design-canvas arc — mandatory Part A investigation, founder plan approval, mandatory reviewer+security passes, all completed and applied before shipping
+Founder-issued task brief, full kickoff→Part A→plan→approval→build sequence followed exactly as instructed, no step skipped.
+
+**Part A investigation findings (approved as-is by the founder, no changes requested):** Tool ("dispatches through") — real, derivable directly from `audit_log` filtered by `agent_id`. Endpoint ("linked to") — real, via B-164's `endpoints.gateway_agent_id`, but sparse (only 2 real linked endpoints existed in the dev DB). Workflow ("appears in") — real, and simpler than the brief assumed: `workflow_runs.agent_id` is a direct FK, no need to chain through B-093's `audit_log.workflow_run_id`. **Policy ("governed by") — the brief's own flagged "hardest" case turned out genuinely simple once traced:** `audit_log.policy_id` is populated from the evaluator's own matched-rule pointer uniformly across allowed/denied/escalated (confirmed by reading `eami-gateway/cmd/gateway/dispatcher.go`), so "policies that actually applied to a real decision for this agent" is a direct join, with an honest NULL for pure default-allow traffic. Search/notifications — confirmed neither exists as real functionality anywhere (`Topbar.tsx`'s bell already decorative, no search endpoint at all) — recommended and built as explicitly-disabled chrome, not silently implied working. Sidebar — confirmed `sidebarOpen` already existed as a binary show/hide toggle; recommended reusing it unchanged for a real icon-only collapsed rail instead, with the toggle moved into the sidebar itself (canvas's own placement) rather than `Topbar.tsx`'s hamburger, which isn't rendered on 9 of 14 pages.
+
+**A real physical constraint, not a preference, settled the biggest open design question:** the relationship graph's real width (~1300px, matching the canvas's own SVG) cannot fit `SlideOverPanel`'s fixed 480px drawer — this alone forced the Agent Detail view to be a new route, not a panel, confirmed and approved as part of the plan before building.
+
+**Real one-to-many branching, the actual payoff, live-proven with genuinely real data, not staged:** `b059-live-agent`'s real "dispatches through" junction fans out to 3 distinct real tools from real `audit_log` history — the exact capability the canvas demonstrated and the founder's original complaint was about. **Confirmed honestly, exactly as the founder asked going into the build: no single real agent in the dev DB demonstrates all 4 relationship types at once.** Rather than force or fake one, two real agents were used and disclosed separately — `b059-live-agent` for 3 of 4 (Tool/Policy/Workflow) and `bhargav-demo-endpoint` for the 4th (Endpoint, this machine's own real B-191/192-era linked endpoint). A throwaway real agent was created via the real API solely to prove the honest empty-connections state, then deleted immediately — zero artifacts left behind.
+
+**Mandatory reviewer + security passes, both run, both real findings surfaced and fixed, not rubber-stamped:** the founder specifically flagged org isolation as needing serious treatment, being the first new org-scoped query surface in the whole design-canvas arc — the mandatory real-Postgres test seeded two orgs with **identical** tool/policy/workflow names specifically to catch a dropped-org-filter bug that unique names would hide, and confirmed clean isolation under that adversarial case, both in the response body and via a direct cross-org agent-ID request (clean 404). Security review: no HIGH/MEDIUM findings. Code review: 5 real findings (a hardcoded-to-green status pill regardless of real status; an infinite spinner on a connections-fetch error; a tool-detail panel skipping its own loading state; an enabled-but-dead "More actions" button; 4 backend queries running sequentially instead of concurrently) — all fixed in this same session, not deferred.
+
+**A real, disclosed operational hiccup during live verification:** B-070's real login rate limiter fired mid-testing from repeated script logins against the same throwaway account — correctly working rate-limiting, not a bug — worked around by injecting an already-valid session into `localStorage` for the remaining screenshots.
+
+No shared infrastructure touched: verification ran via disposable host-local `eami-api`(:8091)/`eami-ui`(:5175) instances, killed by PID afterward; the real Docker stack's continuous uptime was confirmed unaffected throughout. Full detail in `BACKLOG.md`'s new B-200 entry and `BUILT.md`'s `eami-api`/`eami-ui` sections. Counter now stands at B-201.
+
 ## Active decision thread (2026-09-20, later) — B-199: `tailwind.config.ts` repainted to `DESIGN_SYSTEM.md`'s palette, confirmed founder decision (REPLACE not reconcile), live-verified via Playwright against a disposable local server
 Founder-issued task brief, explicit kickoff-then-approval gate followed: confirmed understanding + full impact list + plan presented first, two genuinely blocking decisions asked via question (index.html font-link inclusion; screenshot scope expansion), both answered "Recommended" before any file was touched.
 
@@ -1820,6 +1835,29 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-20 (latest) by Claude Code — B-200 DONE: Admin Agent Detail
+built -- collapsible nav rail + real relationship graph, the direct
+answer to the original "things don't have connections, looks too
+simple" complaint. Mandatory Part A investigation done and approved
+first (Policy relationship resolved as simpler than expected -- direct
+audit_log.policy_id join, real not fabricated; search/notifications
+confirmed non-functional everywhere, built as disclosed chrome).
+New route /gateway/agents/:id (forced by a real ~1300px graph-width vs.
+480px SlideOverPanel constraint, not preference), new backend query
+surface (GET .../connections, 4 queries, run concurrently via errgroup
+after a code-review fix), real one-to-many branching live-proven on
+b059-live-agent's 3 real tools. Mandatory reviewer+security passes both
+run: security clean, code review found and fixed 5 real issues
+(hardcoded status pill, infinite error spinner, missing loading state,
+dead button, sequential queries). Mandatory org-isolation test used
+deliberately identical names across 2 orgs to catch a dropped-filter
+bug -- passed. Honestly disclosed: no single real agent has all 4
+relationship types, so 2 real agents were used and shown separately,
+not forced into one. Zero shared infrastructure touched (disposable
+local instances only, confirmed via continuous Docker uptime). Full
+detail in BACKLOG.md's B-200 entry and BUILT.md's eami-api/eami-ui
+sections. Counter now stands at B-201. Previous entry, preserved below:
+
 2026-09-20 (later) by Claude Code — B-199 DONE: tailwind.config.ts
 repainted to DESIGN_SYSTEM.md's palette (REPLACE, confirmed founder
 decision, not an extension). colors.brand (7-step OKLCH ramp from

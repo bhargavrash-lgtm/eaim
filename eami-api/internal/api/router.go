@@ -296,6 +296,7 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/v1/gateway/agents", s.ListAgents)
 			r.Get("/v1/gateway/agents/{agentId}", s.GetAgent)
 			r.Get("/v1/gateway/agents/{agentId}/config", s.GetAgentConfig)
+			r.Get("/v1/gateway/agents/{agentId}/connections", s.GetAgentConnections)
 			r.Get("/v1/gateway/policies", s.ListPolicies)
 			r.Get("/v1/gateway/policies/{policyId}", s.GetPolicy)
 			r.Get("/v1/gateway/tools", s.ListTools)

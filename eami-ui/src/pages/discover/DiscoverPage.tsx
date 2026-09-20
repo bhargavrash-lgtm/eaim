@@ -112,7 +112,11 @@ function LinkedAgentControl({ endpoint }: { endpoint: Endpoint }) {
 
 // ── Slide-out drawer ─────────────────────────────────────────────────────────
 
-function EndpointDrawer({ endpointId, onClose }: { endpointId: string; onClose: () => void }) {
+// Exported for reuse by AgentDetailPage's relationship graph (B-200) --
+// the Endpoint node click reuses this real, self-contained drawer
+// directly (fetches its own data via endpointId, no dependency on
+// DiscoverPage's own local state) rather than duplicating it.
+export function EndpointDrawer({ endpointId, onClose }: { endpointId: string; onClose: () => void }) {
   const { data: endpoint, isLoading } = useEndpoint(endpointId)
   const report: EndpointReport | undefined = endpoint?.latest_report
 

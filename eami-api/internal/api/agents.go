@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/eami/api/internal/store"
 )
@@ -298,6 +299,161 @@ func (s *Server) DeleteAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── Agent connections (B-200) ───────────────────────────────────────────────────
+//
+// The real, scoped relationship graph on the new Agent Detail page
+// (DESIGN_SYSTEM.md §7.1) -- Focused Mode only, this one agent's own
+// connections. Single-path (s.queries directly, no storeIface fallback):
+// mirrors GetAgentConfig/UpdateAgent's already-established simpler
+// convention for handlers added since the real-Postgres-only testing
+// standard (CLAUDE.md), not the older ListAgents/GetAgent/CreateAgent/
+// DeleteAgent dual-path -- there is no handler-level mock test for this
+// route, only real-Postgres integration tests (agent_connections_pg_test.go).
+
+// AgentToolConnectionResp is one tool this agent has real dispatch history
+// through. ToolID is null when the connector has since been renamed or
+// deleted -- the frontend must not offer to open its detail panel in that
+// case (see store.AgentToolConnection's own doc comment).
+type AgentToolConnectionResp struct {
+	ToolID         *string `json:"tool_id"`
+	ToolName       string  `json:"tool_name"`
+	CallCount24h   int64   `json:"call_count_24h"`
+	CallCountTotal int64   `json:"call_count_total"`
+	LastDispatchAt string  `json:"last_dispatch_at"`
+	// IsActive marks the single highest-volume-in-the-last-24h tool as the
+	// "active/highest-signal" connection DESIGN_SYSTEM.md §7.1 calls for.
+	// false on every tool when nothing dispatched in the last 24h -- never
+	// fabricated recency on an agent that's gone quiet.
+	IsActive bool `json:"is_active"`
+}
+
+type AgentPolicyConnectionResp struct {
+	PolicyID string `json:"policy_id"`
+	Name     string `json:"name"`
+	Action   string `json:"action"`
+}
+
+type AgentWorkflowConnectionResp struct {
+	WorkflowID string `json:"workflow_id"`
+	Name       string `json:"name"`
+}
+
+type AgentEndpointConnectionResp struct {
+	EndpointID string `json:"endpoint_id"`
+	Hostname   string `json:"hostname"`
+}
+
+type AgentConnectionsResp struct {
+	Tools     []AgentToolConnectionResp     `json:"tools"`
+	Policies  []AgentPolicyConnectionResp   `json:"policies"`
+	Workflows []AgentWorkflowConnectionResp `json:"workflows"`
+	Endpoint  *AgentEndpointConnectionResp  `json:"endpoint"`
+}
+
+// GetAgentConnections handles GET /v1/gateway/agents/{agentId}/connections
+// Auth: admin/operator/viewer JWT (same read group as GetAgent).
+func (s *Server) GetAgentConnections(w http.ResponseWriter, r *http.Request) {
+	uc := claimsFromContext(r)
+	id, err := parseUUIDParam(r, "agentId")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid agentId")
+		return
+	}
+	// Verify the agent exists and belongs to this org first -- a request
+	// for a nonexistent or foreign-org agent gets a clean 404, not a
+	// confusing empty-connections 200 that looks identical to "this real
+	// agent genuinely has no connections yet."
+	if _, err := s.queries.GetAgent(r.Context(), id, uc.OrgID); err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "agent not found")
+		return
+	}
+
+	// Code-review finding: these 4 queries are fully independent of each
+	// other's results (unlike e.g. GetAgent above them, which must resolve
+	// first to authorize the request at all) -- run concurrently via
+	// errgroup rather than paying the sum of 4 round-trip latencies on a
+	// page-load path. pgxpool is safe for concurrent use from multiple
+	// goroutines by design (that's its whole purpose), so no new locking
+	// concern here.
+	var tools []store.AgentToolConnection
+	var policies []store.AgentPolicyConnection
+	var workflows []store.AgentWorkflowConnection
+	var endpoint *store.AgentEndpointConnection
+	g, gctx := errgroup.WithContext(r.Context())
+	g.Go(func() (err error) {
+		tools, err = s.queries.ListAgentToolConnections(gctx, uc.OrgID, id)
+		return err
+	})
+	g.Go(func() (err error) {
+		policies, err = s.queries.ListAgentPolicyConnections(gctx, uc.OrgID, id)
+		return err
+	})
+	g.Go(func() (err error) {
+		workflows, err = s.queries.ListAgentWorkflowConnections(gctx, uc.OrgID, id)
+		return err
+	})
+	g.Go(func() error {
+		e, err := s.queries.GetAgentEndpointConnection(gctx, uc.OrgID, id)
+		if err != nil && err != pgx.ErrNoRows {
+			return err
+		}
+		endpoint = e
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	// isActive: the single highest call_count_24h tool, only if that count
+	// is > 0 (ListAgentToolConnections is already ordered by
+	// call_count_total DESC, not call_count_24h -- find the real max
+	// explicitly rather than assuming row order).
+	activeIdx := -1
+	for i, t := range tools {
+		if t.CallCount24h > 0 && (activeIdx == -1 || t.CallCount24h > tools[activeIdx].CallCount24h) {
+			activeIdx = i
+		}
+	}
+
+	resp := AgentConnectionsResp{
+		Tools:     make([]AgentToolConnectionResp, 0, len(tools)),
+		Policies:  make([]AgentPolicyConnectionResp, 0, len(policies)),
+		Workflows: make([]AgentWorkflowConnectionResp, 0, len(workflows)),
+	}
+	for i, t := range tools {
+		var toolID *string
+		if t.ToolID != nil {
+			s := t.ToolID.String()
+			toolID = &s
+		}
+		resp.Tools = append(resp.Tools, AgentToolConnectionResp{
+			ToolID:         toolID,
+			ToolName:       t.ToolName,
+			CallCount24h:   t.CallCount24h,
+			CallCountTotal: t.CallCountTotal,
+			LastDispatchAt: t.LastDispatchAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+			IsActive:       i == activeIdx,
+		})
+	}
+	for _, p := range policies {
+		resp.Policies = append(resp.Policies, AgentPolicyConnectionResp{
+			PolicyID: p.PolicyID.String(), Name: p.Name, Action: p.Action,
+		})
+	}
+	for _, wf := range workflows {
+		resp.Workflows = append(resp.Workflows, AgentWorkflowConnectionResp{
+			WorkflowID: wf.WorkflowID.String(), Name: wf.Name,
+		})
+	}
+	if endpoint != nil {
+		resp.Endpoint = &AgentEndpointConnectionResp{
+			EndpointID: endpoint.EndpointID.String(), Hostname: endpoint.Hostname,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ── converters ────────────────────────────────────────────────────────────────

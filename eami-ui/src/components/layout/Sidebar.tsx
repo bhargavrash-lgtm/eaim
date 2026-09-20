@@ -1,22 +1,73 @@
 import { NavLink } from 'react-router-dom'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { NAV_ITEMS, NAV_GROUPS } from './Navigation'
 import { useUIStore } from '@/stores/uiStore'
 import { usePendingApprovalCount } from '@/hooks/useApprovals'
 import { Logo } from './Logo'
 
+// B-200: real collapsible nav rail (DESIGN_SYSTEM.md §6/Layer 2). Reuses
+// the EXISTING sidebarOpen/toggleSidebar wiring (useUIStore) unchanged --
+// no new state. Before this brief, sidebarOpen=false rendered nothing at
+// all (the sidebar fully disappeared); it now renders a real icon-only
+// collapsed rail instead, the Material pattern the canvas actually shows.
+// The toggle lives here, next to the logo, matching the canvas's own
+// placement -- not in Topbar.tsx's hamburger, which isn't even rendered
+// on 9 of 14 pages (including this brief's own AgentsPage/AgentDetailPage).
+// Deliberately NOT persisted (matches sidebarOpen's existing non-persisted
+// convention) -- see BACKLOG.md's B-200 entry for why that's a considered
+// choice, not an oversight.
 export function Sidebar() {
   const sidebarOpen = useUIStore((s) => s.sidebarOpen)
+  const toggleSidebar = useUIStore((s) => s.toggleSidebar)
   const pendingApprovals = usePendingApprovalCount()
 
-  if (!sidebarOpen) return null
+  if (!sidebarOpen) {
+    return (
+      <aside className="flex h-full w-[72px] flex-col items-center border-r border-gray-200 bg-white py-3">
+        <button
+          onClick={toggleSidebar}
+          aria-label="Expand navigation"
+          className="mb-4 flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-ink-faint hover:bg-gray-50"
+        >
+          <ChevronRight className="h-3.5 w-3.5" />
+        </button>
+        <nav className="flex flex-1 flex-col items-center gap-1.5 overflow-y-auto">
+          {NAV_ITEMS.map((item) => (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              title={item.label}
+              className={({ isActive }) =>
+                `relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg transition-colors ${
+                  isActive ? 'bg-brand-600 text-white' : 'text-gray-500 hover:bg-gray-100'
+                }`
+              }
+            >
+              <item.icon className="h-[18px] w-[18px]" />
+              {item.badgeKey === 'pendingApprovals' && pendingApprovals > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-red-500" />
+              )}
+            </NavLink>
+          ))}
+        </nav>
+      </aside>
+    )
+  }
 
   return (
     <aside className="flex h-full w-60 flex-col border-r border-gray-200 bg-white">
       {/* Logo -- sourced entirely from branding/config.ts; the wordmark
           image already carries the product name, so no separate name
           text is rendered alongside it here (see BUILT.md). */}
-      <div className="flex h-14 items-center border-b border-gray-200 px-4">
+      <div className="flex h-14 items-center justify-between border-b border-gray-200 px-4">
         <Logo variant="full" className="h-6 w-auto" />
+        <button
+          onClick={toggleSidebar}
+          aria-label="Collapse navigation"
+          className="flex h-[26px] w-[26px] items-center justify-center rounded-md border border-gray-200 text-ink-faint hover:bg-gray-50"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       {/* Nav groups */}

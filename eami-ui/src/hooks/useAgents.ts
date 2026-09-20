@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/api/client'
+import { api, apiFetch } from '@/api/client'
 import type { components } from '@/api/schema'
 
 export type Agent = components['schemas']['Agent']
@@ -15,6 +15,62 @@ export function useAgents() {
       return data
     },
     staleTime: 30_000,
+  })
+}
+
+// useAgent (B-200): the existing GET /v1/gateway/agents/{agentId} single-
+// fetch route (already real, already documented -- eami-api/internal/api/
+// agents.go's GetAgent -- just never had a hook, since every page until
+// now only ever needed the already-fetched list). Powers the new Agent
+// Detail page's own load, independent of AgentsPage's list cache.
+export function useAgent(id: string | null) {
+  return useQuery({
+    queryKey: ['agents', id],
+    queryFn: async () => {
+      const { data, error } = await api.GET('/v1/gateway/agents/{agentId}', {
+        params: { path: { agentId: id! } },
+      })
+      if (error) throw error
+      return data
+    },
+    enabled: id != null,
+  })
+}
+
+// ── Agent connections (B-200) ────────────────────────────────────────────────
+//
+// The real, scoped relationship graph's data source (DESIGN_SYSTEM.md
+// §7.1) -- GET /v1/gateway/agents/{agentId}/connections. Not in
+// api/openapi.yaml yet (Architect-EAMI-owned, matching B-038/B-045's
+// established precedent of shipping undocumented via apiFetch), so this
+// uses the documented escape hatch, not the generated typed client, and
+// every type here is hand-declared to match the real handler response
+// shape exactly (eami-api/internal/api/agents.go's AgentConnectionsResp).
+
+export type AgentToolConnection = {
+  tool_id: string | null
+  tool_name: string
+  call_count_24h: number
+  call_count_total: number
+  last_dispatch_at: string
+  is_active: boolean
+}
+export type AgentPolicyConnection = { policy_id: string; name: string; action: string }
+export type AgentWorkflowConnection = { workflow_id: string; name: string }
+export type AgentEndpointConnection = { endpoint_id: string; hostname: string }
+
+export type AgentConnections = {
+  tools: AgentToolConnection[]
+  policies: AgentPolicyConnection[]
+  workflows: AgentWorkflowConnection[]
+  endpoint: AgentEndpointConnection | null
+}
+
+export function useAgentConnections(id: string | null) {
+  return useQuery({
+    queryKey: ['agent-connections', id],
+    enabled: id != null,
+    queryFn: () => apiFetch<AgentConnections>(`/v1/gateway/agents/${id}/connections`),
   })
 }
 

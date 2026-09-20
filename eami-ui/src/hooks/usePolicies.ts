@@ -18,6 +18,24 @@ export function usePolicies() {
   })
 }
 
+// usePolicy (B-200): the existing GET /v1/gateway/policies/{policyId}
+// single-fetch route (already real, already documented -- just never had
+// a hook, since PoliciesPage only ever needed the already-fetched list).
+// Powers PolicyDetailPanel, the relationship graph's Policy node click.
+export function usePolicy(id: string | null) {
+  return useQuery({
+    queryKey: ['policies', id],
+    queryFn: async () => {
+      const { data, error } = await api.GET('/v1/gateway/policies/{policyId}', {
+        params: { path: { policyId: id! } },
+      })
+      if (error) throw error
+      return data
+    },
+    enabled: id != null,
+  })
+}
+
 export function useCreatePolicy() {
   const qc = useQueryClient()
   return useMutation({

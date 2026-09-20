@@ -1,7 +1,7 @@
 // AgentsPage.tsx — Gateway / Agents with inline Config panel
 // Owned by FE-Gateway
 import { useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -299,6 +299,7 @@ function AddAgentPanel({ onClose }: { onClose: () => void }) {
 
 export function AgentsPage() {
   const { data, isLoading, error } = useAgents()
+  const navigate = useNavigate()
   // Deep-linking/highlighting by ID (B-092): ?highlight=<agent id> lands
   // on and highlights that row via DataTable's getRowId/highlightRowId.
   const [searchParams] = useSearchParams()
@@ -407,7 +408,12 @@ export function AgentsPage() {
         <DataTable
           columns={agentColumns}
           data={agents}
-          onRowClick={setConfigAgent}
+          // B-200: row click now navigates to the real Agent Detail page
+          // (relationship graph, real connections) -- intentional, not a
+          // regression. The "Configure" button in the Actions column
+          // (below, e.stopPropagation()'d) is untouched and still opens
+          // the scan-config ConfigPanel exactly as before.
+          onRowClick={(agent) => navigate(`/gateway/agents/${agent.id}`)}
           pageSize={1000}
           getRowId={(agent) => agent.id}
           highlightRowId={highlightId}
