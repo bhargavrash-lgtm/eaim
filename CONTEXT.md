@@ -1373,6 +1373,21 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-21) — B-201 Phase 2, Batch 2 built: the 5 Topbar-using pages migrated, Topbar.tsx deleted, the Discover/Paste Detection redundant-header bug actually resolved, and a real self-correction made before building rather than compounding an earlier mistake
+Founder approved Batch 2 exactly as scoped in the prior plan, including "Dashboard's double-padding fix." Before touching any code, re-read `DashboardPage.tsx`'s real source directly (rather than trusting the earlier plan's own claim) and found that claim was **wrong** — Dashboard's `<Topbar>` was never nested inside a padded wrapper, unlike Memory's real bug. Disclosed this immediately, before building anything, rather than fabricating a fix to match the approved plan or silently skipping the correction.
+
+**Migrated Dashboard, Settings, FinOps directly** (no padding fix needed, per the correction). FinOps's real `DateRangePicker` action relocated into `AppTopBar`'s `action` slot, confirmed still functional. Settings needed no `PageHeader` at all — no subtitle, no action ever existed there.
+
+**Discover and Paste Detection's real, previously-flagged stacked-header redundancy (two full header bars, confirmed by screenshot during the original Part A audit) is now actually resolved**, not just described. Collapsed to one `AppTopBar` breadcrumb + one `PageHeader` subtitle per page. The two pages needed different resolutions, decided case by case rather than applying one rule blindly: Discover's two original subtitles said roughly the same thing, so the more specific one was kept and the redundant one dropped; Paste Detection's two subtitles carried genuinely different real information (a static description vs. a live count), so both were preserved by concatenating them into one line instead of arbitrarily choosing one.
+
+**`Topbar.tsx` deleted** — zero remaining references confirmed via grep first, `tsc`/`vite build` re-run clean immediately after the deletion specifically, not assumed safe from the pre-deletion build alone.
+
+**A real, pre-existing bug found and correctly NOT fixed:** `SettingsPage.tsx`'s `OrgTab` throws real React `forwardRef` console warnings on its `Input`/`Select` components. Confirmed via `git diff` that this batch's own edit touched only 2 unrelated lines in that file, so this is pre-existing, not a regression — logged as new **B-202** rather than either silently ignored or scope-crept into a fix during a top-bar retrofit batch.
+
+**Verified:** real `tsc`/`vite build` clean (twice — before and after the `Topbar.tsx` deletion). Live Playwright verification against the real shared stack: all 5 pages screenshotted, each with exactly one real `<h1>`, `UserMenu` present, chrome present. Genuine session-clearing re-proof repeated on FinOps specifically (to also confirm its relocated `DateRangePicker` survived the migration intact) — same rigor as every prior batch.
+
+Batches 3-4 (Agents + button color; `WorkflowCanvasPage` + `PageHeader.tsx` cleanup) not yet started. Full detail in `BACKLOG.md`'s updated B-201 entry and new B-202.
+
 ## Active decision thread (2026-09-20, newest of all) — B-201 Phase 2, Batch 1 built: the shared AppTopBar component + the 8 PageHeader-only pages migrated, AgentDetailPage's own duplicate top bar eliminated, real decisions surfaced and resolved along the way rather than assumed
 Founder approved the full Phase 2 plan (Option B two-layer header, `Topbar.tsx` deletion once superseded, `WorkflowCanvasPage` included, Dashboard's double-padding folded in with Memory's), then approved proceeding batch by batch, starting with Batch 1.
 
@@ -1881,6 +1896,23 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-21 by Claude Code — B-201 Phase 2 Batch 2 DONE: 5 Topbar-using
+pages migrated (Dashboard/Settings/FinOps direct; Discover/Paste
+Detection's real stacked-header redundancy actually resolved, case-by-
+case -- Discover dropped a redundant subtitle, Paste Detection
+concatenated two genuinely distinct ones). Topbar.tsx deleted, zero
+remaining references confirmed first. A real self-correction made
+BEFORE building: Batch 1's own claim that "Dashboard has the same
+double-padding bug as Memory" was wrong -- re-read the real source
+before touching it, found nothing to fix, disclosed immediately rather
+than fabricating a fix or silently skipping it. New B-202 logged (a
+real, pre-existing SettingsPage forwardRef console warning, confirmed
+unrelated to this batch via git diff, correctly not fixed here).
+Live-verified: all 5 pages screenshotted, one real h1 each, genuine
+session-clearing re-proven on FinOps (also confirming its relocated
+DateRangePicker action survived). Batches 3-4 not started. Full detail
+in BACKLOG.md's updated B-201 entry. Previous entry, preserved below:
+
 2026-09-20 (newest of all) by Claude Code — B-201 Phase 2 Batch 1 DONE:
 new components/layout/AppTopBar.tsx (extracted verbatim from Agent
 Detail's own B-200 implementation), 8 PageHeader-only pages migrated

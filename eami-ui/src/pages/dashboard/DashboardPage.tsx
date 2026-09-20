@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
-import { Topbar } from '@/components/layout/Topbar'
+import { AppTopBar } from '@/components/layout/AppTopBar'
+import { PageHeader } from '@/components/common/PageHeader'
 import { MetricCard } from '@/components/common/MetricCard'
 import { RiskPill } from '@/components/common/RiskPill'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
@@ -70,7 +71,8 @@ export function DashboardPage() {
 
   return (
     <div>
-      <Topbar title="Dashboard" subtitle={today} />
+      <AppTopBar breadcrumb={[{ label: 'Dashboard' }]} />
+      <PageHeader subtitle={today} />
       <div className="p-6 space-y-6">
 
         {/* KPI row */}

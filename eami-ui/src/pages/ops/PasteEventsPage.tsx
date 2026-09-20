@@ -7,7 +7,7 @@ import { useMemo, useState } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
-import { Topbar } from '@/components/layout/Topbar'
+import { AppTopBar } from '@/components/layout/AppTopBar'
 import { PageHeader } from '@/components/common/PageHeader'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -160,11 +160,15 @@ export function PasteEventsPage() {
 
   return (
     <div>
-      <Topbar title="Paste Detection" subtitle="Shadow AI activity -- captured pastes into known AI tools" />
+      {/* B-201 Phase 2, Batch 2: collapses the same real stacked-header
+          redundancy DiscoverPage.tsx had. Unlike Discover, both subtitle
+          strings here carry genuinely distinct real information (a static
+          page description vs. a live, data-driven count) -- concatenated
+          into one line rather than arbitrarily dropping either. */}
+      <AppTopBar breadcrumb={[{ label: 'Paste Detection' }]} />
       <div className="p-6 space-y-6">
         <PageHeader
-          title="Captured Paste Events"
-          subtitle={total > 0 ? `${total.toLocaleString()} events in range` : undefined}
+          subtitle={'Shadow AI activity -- captured pastes into known AI tools' + (total > 0 ? ` · ${total.toLocaleString()} events in range` : '')}
         />
 
         {/* Filter bar */}

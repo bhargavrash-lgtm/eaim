@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Copy, Check, Eye, EyeOff } from 'lucide-react'
-import { Topbar } from '@/components/layout/Topbar'
+import { AppTopBar } from '@/components/layout/AppTopBar'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
@@ -984,7 +984,7 @@ export function SettingsPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <Topbar title="Settings" />
+      <AppTopBar breadcrumb={[{ label: 'Settings' }]} />
 
       {/* Tab bar */}
       <div className="border-b border-gray-200 bg-white px-6">

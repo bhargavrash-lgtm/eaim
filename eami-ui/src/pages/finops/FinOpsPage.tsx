@@ -4,7 +4,8 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
-import { Topbar } from '@/components/layout/Topbar'
+import { AppTopBar } from '@/components/layout/AppTopBar'
+import { PageHeader } from '@/components/common/PageHeader'
 import { MetricCard } from '@/components/common/MetricCard'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -251,10 +252,9 @@ export function FinOpsPage() {
 
   return (
     <div>
-      <Topbar
-        title="FinOps"
-        subtitle="Token spend and ROI"
-        actions={
+      <AppTopBar
+        breadcrumb={[{ label: 'FinOps' }]}
+        action={
           <DateRangePicker
             from={from}
             to={to}
@@ -262,6 +262,7 @@ export function FinOpsPage() {
           />
         }
       />
+      <PageHeader subtitle="Token spend and ROI" />
       <div className="p-6 space-y-6">
 
         {/* B-112: unrecognized-model warning -- total_cost_usd below is a

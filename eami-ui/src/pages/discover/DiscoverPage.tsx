@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Topbar } from '@/components/layout/Topbar'
+import { AppTopBar } from '@/components/layout/AppTopBar'
 import { PageHeader } from '@/components/common/PageHeader'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -347,9 +347,20 @@ export function DiscoverPage() {
 
   return (
     <div>
-      <Topbar title="Discover" subtitle="Endpoint AI asset inventory" />
+      {/* B-201 Phase 2, Batch 2: collapses the real, confirmed-redundant
+          stacked-header bug Part A found here -- Topbar's own "Discover /
+          Endpoint AI asset inventory" sat directly above PageHeader's own
+          "Endpoints / All discovered endpoints," two full title+subtitle
+          bars for one page. Resolved by keeping ONE breadcrumb (matching
+          the sidebar's own "Discover" label, consistent with every other
+          migrated page) and ONE subtitle -- "All discovered endpoints" was
+          kept since it's the more specific, content-relevant description
+          of what's actually in the table below; "Endpoint AI asset
+          inventory" was dropped as the more generic, now-redundant of the
+          two, not silently -- disclosed here and in BUILT.md. */}
+      <AppTopBar breadcrumb={[{ label: 'Discover' }]} />
       <div className="p-6">
-        <PageHeader title="Endpoints" subtitle="All discovered endpoints" />
+        <PageHeader subtitle="All discovered endpoints" />
 
         {/* Filter bar */}
         <div className="mt-4 flex flex-wrap items-center gap-3">
