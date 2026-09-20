@@ -5,7 +5,8 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ConfirmDialog, DataTable, SlideOverPanel, Button, UserMenu } from '@/components/common'
+import { ConfirmDialog, DataTable, SlideOverPanel, Button } from '@/components/common'
+import { AppTopBar } from '@/components/layout/AppTopBar'
 import type { Column } from '@/components/common'
 import {
   useAgents,
@@ -384,20 +385,28 @@ export function AgentsPage() {
   ]
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-lg font-semibold text-gray-900">Gateway Agents</h1>
-        <div className="flex items-center gap-3">
+    <div className="flex h-full flex-col">
+      {/* B-201 Phase 2, Batch 3: AgentsPage was the last hand-rolled
+          header in the app (no PageHeader/Topbar at all) -- migrated to
+          AppTopBar directly, no separate PageHeader needed since this
+          page never had a subtitle. The "+ Add agent" button's color is
+          also fixed here (a real, already-found defect, folded into this
+          same pass): it was hardcoded bg-indigo-600/hover:bg-indigo-700,
+          never migrated onto brand-* tokens, so B-199's repaint never
+          reached it -- now brand-600/brand-700, matching every other
+          real action button already migrated in Batches 1-2. */}
+      <AppTopBar
+        breadcrumb={[{ label: 'Gateway Agents' }]}
+        action={
           <button
             onClick={() => setShowAdd(true)}
-            className="flex items-center gap-1.5 bg-indigo-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-indigo-700"
+            className="flex items-center gap-1.5 bg-brand-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-brand-700"
           >
             + Add agent
           </button>
-          <UserMenu />
-        </div>
-      </div>
-
+        }
+      />
+      <div className="flex-1 overflow-auto p-6">
       {actionError && (
         <div className="mb-4 flex items-start gap-3 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800">
           <span className="flex-1">{actionError}</span>
@@ -422,6 +431,7 @@ export function AgentsPage() {
           highlightRowId={highlightId}
         />
       )}
+      </div>
 
       {/* Config slide-out panel -- backdrop now owned by SlideOverPanel itself */}
       {configAgent && (

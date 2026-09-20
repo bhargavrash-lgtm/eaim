@@ -1373,6 +1373,20 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-21, newest) — B-201 Phase 2, Batches 3+4 built: AgentsPage (last hand-rolled header) and WorkflowCanvasPage migrated to AppTopBar, PageHeader.tsx finalized, a stale-container false-negative caught and correctly resolved rather than either accepted or misdiagnosed as a new bug — B-201 epic now fully DONE, all 4 batches complete
+
+Founder approved Batch 3 (Agents, plus its hardcoded `bg-indigo-600` button color fix) and Batch 4 (WorkflowCanvasPage, real two-segment breadcrumb, existing Save-changes action wired into `AppTopBar`'s slot, `PageHeader.tsx`'s final cleanup) together, same verification standard as every prior batch.
+
+**AgentsPage** — the last page in the app with no `PageHeader`/`Topbar` at all — migrated directly to `AppTopBar` (single-segment breadcrumb), its "+ Add agent" button moved into the `action` slot and its color fixed from `bg-indigo-600`/`hover:bg-indigo-700` to `bg-brand-600`/`hover:bg-brand-700` in the same pass, per explicit instruction.
+
+**WorkflowCanvasPage** — real two-segment breadcrumb (`Workflows`, a real link, → the workflow's real name), existing "Save changes" button relocated into `AppTopBar`'s action slot unchanged. Outer wrapper deliberately kept as a plain `<div>`, not restructured to `flex-col h-full` like other pages, to protect the canvas's real, previously-hard-won `h-[75vh]`/grid CSS sizing dependency (Brief 1/B-145) — confirmed live afterward that the canvas still renders correctly. `PageHeader.tsx`'s `title` prop removed entirely (not just left optional) after a real grep across every call site confirmed `WorkflowCanvasPage` was genuinely the last caller still passing it.
+
+**A real live false-negative caught during this batch's own verification, investigated rather than accepted or misdiagnosed as a new regression:** checking the Batch 3 button-color fix against the real shared Docker stack's `eami-ui` container measured the wrong color (`rgb(0, 44, 88)`, not `brand-600`'s real `rgb(42, 68, 195)`). Traced to a known, already-disclosed limitation from B-199's own entry: `tailwind.config.ts` lives outside the compose file's `src`-only bind mount for `eami-ui`, so the shared container is still running a stale, pre-B-199-repaint config baked in at image-build time — confirmed precisely (`rgb(0, 44, 88)` decodes to `#002c58`, an exact match for `theme.generated.ts`'s old pre-repaint `brand.600`). Re-verified using B-199's own established workaround — a disposable local Vite dev server (`:5175`) pointed at the real shared `eami-api` (`:8081`), reading the current on-disk config directly — which measured the correct color. The shared container itself was never rebuilt or restarted; the disposable server was torn down immediately after use.
+
+**Verified:** real `tsc`/`vite build` clean (including after `PageHeader.tsx`'s cleanup). Live Playwright sweep against the real shared stack for both pages: exactly one real `<h1>` each, `UserMenu`/chrome present, zero console errors; WorkflowCanvasPage's breadcrumb, Save button, and canvas visibility all confirmed correct. Genuine session-clearing re-proof repeated on AgentsPage.
+
+**B-201 epic status: all 4 batches now DONE.** Every standalone authenticated page in the app shares one `AppTopBar` implementation; `Topbar.tsx` deleted; `PageHeader.tsx` finalized to its slimmed Option-B contract. Full detail in `BACKLOG.md`'s updated B-201 entry and `BUILT.md`'s `eami-ui` section.
+
 ## Active decision thread (2026-09-21) — B-201 Phase 2, Batch 2 built: the 5 Topbar-using pages migrated, Topbar.tsx deleted, the Discover/Paste Detection redundant-header bug actually resolved, and a real self-correction made before building rather than compounding an earlier mistake
 Founder approved Batch 2 exactly as scoped in the prior plan, including "Dashboard's double-padding fix." Before touching any code, re-read `DashboardPage.tsx`'s real source directly (rather than trusting the earlier plan's own claim) and found that claim was **wrong** — Dashboard's `<Topbar>` was never nested inside a padded wrapper, unlike Memory's real bug. Disclosed this immediately, before building anything, rather than fabricating a fix to match the approved plan or silently skipping the correction.
 
@@ -1896,6 +1910,26 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-21 (later) by Claude Code — B-201 Phase 2 Batches 3+4 DONE, epic
+fully complete (all 4 batches): AgentsPage (last hand-rolled header in
+the app) migrated to AppTopBar, hardcoded bg-indigo-600 button fixed to
+bg-brand-600. WorkflowCanvasPage migrated with a real two-segment
+breadcrumb (Workflows -> workflow name), Save-changes button relocated
+into AppTopBar's action slot, canvas's fragile h-[75vh]/grid CSS sizing
+dependency (Brief 1/B-145) deliberately left undisturbed. PageHeader.tsx's
+title prop removed entirely (confirmed via grep as truly dead after
+WorkflowCanvasPage's own migration). A real live false-negative caught
+and correctly diagnosed during verification, not accepted or misread as
+a new bug: the shared Docker stack's eami-ui container measured the
+wrong button color because it's running a stale pre-B-199 tailwind.config.ts
+(config lives outside the src-only bind mount, a known B-199 limitation)
+-- re-verified correct via B-199's own disposable-local-dev-server
+workaround; shared containers never rebuilt/restarted. Live-verified:
+both pages, one real h1 each, zero console errors, genuine session-
+clearing re-proof on AgentsPage. Full detail in BACKLOG.md's updated
+B-201 entry (now closed) and BUILT.md's eami-ui section. Previous entry,
+preserved below:
+
 2026-09-21 by Claude Code — B-201 Phase 2 Batch 2 DONE: 5 Topbar-using
 pages migrated (Dashboard/Settings/FinOps direct; Discover/Paste
 Detection's real stacked-header redundancy actually resolved, case-by-

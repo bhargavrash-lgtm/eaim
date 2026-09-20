@@ -42,6 +42,7 @@ import type { StepsConfiguration, ToolboxGroupConfiguration } from 'sequential-w
 import 'sequential-workflow-designer/css/designer.css'
 import 'sequential-workflow-designer/css/designer-light.css'
 import { PageHeader, LoadingSpinner, EmptyState, Button, useToast } from '@/components/common'
+import { AppTopBar } from '@/components/layout/AppTopBar'
 import { apiFetch } from '@/api/client'
 import { useWorkflow, useUpdateWorkflow, useSetWorkflowStepParams } from '@/hooks/useWorkflows'
 import { useTools } from '@/hooks/useTools'
@@ -318,15 +319,28 @@ export function WorkflowCanvasPage() {
 
   return (
     <div>
-      <PageHeader
-        title={workflow ? workflow.name : 'Workflow canvas'}
-        subtitle="Add, remove, reorder, and configure steps, then Save to persist the structure through the same endpoint the card editor uses."
-        actions={
+      {/* B-201 Phase 2, Batch 4: outer wrapper deliberately left as a
+          plain <div>, NOT restructured into flex-col/h-full the way
+          other migrated pages were -- this canvas's h-[75vh] grid below
+          has its own real, already-debugged sizing dependency (see that
+          block's own comment) on the surrounding chain having no
+          min-height:0; adding a flex context here risks reintroducing
+          exactly the class of layout bug Brief 1 already fought through.
+          AppTopBar/PageHeader simply stack flush at the top instead,
+          matching Dashboard/FinOps/Discover's identical plain-<div>
+          pattern from Batch 2. */}
+      <AppTopBar
+        breadcrumb={[
+          { label: 'Workflows', href: '/gateway/workflows' },
+          { label: workflow ? workflow.name : 'Workflow canvas' },
+        ]}
+        action={
           <Button onClick={handleSave} isLoading={saving} disabled={!definition}>
             Save changes
           </Button>
         }
       />
+      <PageHeader subtitle="Add, remove, reorder, and configure steps, then Save to persist the structure through the same endpoint the card editor uses." />
       {/* h-[75vh] + grid, not h-full/flex-1 + flex -- both required per
           Brief 1's own real, live-debugged finding (see BUILT.md's B-145
           entry): sequential-workflow-designer's shipped CSS depends
