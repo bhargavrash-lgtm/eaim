@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Search, ChevronDown, ChevronRight, CheckCircle, XCircle, AlertTriangle, Clock } from 'lucide-react'
-import { PageHeader, LoadingSpinner, EmptyState } from '@/components/common'
+import { PageHeader, LoadingSpinner, EmptyState, UserMenu } from '@/components/common'
 import { apiFetch } from '@/api/client'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -180,6 +180,7 @@ export function MemoryPage() {
       <PageHeader
         title="Memory"
         subtitle="Tool call episode library — every action taken by AI agents"
+        actions={<UserMenu />}
       />
 
       {/* Controls */}

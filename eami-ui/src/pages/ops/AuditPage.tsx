@@ -2,7 +2,7 @@
 // Owned by FE-Ops
 import { useState } from 'react'
 import { Search, Shield, ShieldOff, ShieldAlert } from 'lucide-react'
-import { PageHeader, LoadingSpinner, EmptyState } from '@/components/common'
+import { PageHeader, LoadingSpinner, EmptyState, UserMenu } from '@/components/common'
 import { DataTable } from '@/components/common/DataTable'
 import type { Column } from '@/components/common/DataTable'
 import { useAudit } from '@/hooks/useAudit'
@@ -172,6 +172,7 @@ export function AuditPage() {
       <PageHeader
         title="Audit Log"
         subtitle={'Immutable hash-chained record of all gateway decisions' + (total > 0 ? ' -- ' + total.toLocaleString() + ' events' : '')}
+        actions={<UserMenu />}
       />
 
       {/* Filter bar */}

@@ -7,6 +7,7 @@ import {
   ConfirmDialog,
   EmptyState,
   LoadingSpinner,
+  UserMenu,
 } from '@/components/common'
 import { useNodes, useDeleteNode } from '@/hooks/useNodes'
 import type { GatewayNode } from '@/hooks/useNodes'
@@ -169,13 +170,16 @@ export function NodesPage() {
         title="Gateway Nodes"
         subtitle="Nodes registered in gateway_nodes -- no gateway process registers itself automatically yet"
         actions={
-          <button
-            onClick={() => refetch()}
-            className={'flex items-center gap-1.5 border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50' + (isFetching ? ' opacity-50 cursor-wait' : '')}
-          >
-            <RefreshCw className={'h-4 w-4' + (isFetching ? ' animate-spin' : '')} />
-            Refresh
-          </button>
+          <>
+            <button
+              onClick={() => refetch()}
+              className={'flex items-center gap-1.5 border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50' + (isFetching ? ' opacity-50 cursor-wait' : '')}
+            >
+              <RefreshCw className={'h-4 w-4' + (isFetching ? ' animate-spin' : '')} />
+              Refresh
+            </button>
+            <UserMenu />
+          </>
         }
       />
 

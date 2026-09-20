@@ -9,6 +9,7 @@ import {
   LoadingSpinner,
   SlideOverPanel,
   Button,
+  UserMenu,
 } from '@/components/common'
 import { DataTable } from '@/components/common/DataTable'
 import type { Column } from '@/components/common/DataTable'
@@ -1001,11 +1002,14 @@ export function ToolsPage() {
         title="Tools"
         subtitle="MCP servers and API connections the gateway can route calls to"
         actions={
-          <button onClick={() => setShowAdd(true)}
-            className="flex items-center gap-1.5 bg-indigo-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-indigo-700">
-            <Plus className="h-4 w-4" />
-            Add tool
-          </button>
+          <>
+            <button onClick={() => setShowAdd(true)}
+              className="flex items-center gap-1.5 bg-indigo-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-indigo-700">
+              <Plus className="h-4 w-4" />
+              Add tool
+            </button>
+            <UserMenu />
+          </>
         }
       />
 

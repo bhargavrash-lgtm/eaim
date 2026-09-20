@@ -8,6 +8,7 @@ import {
   EmptyState,
   LoadingSpinner,
   RiskPill,
+  UserMenu,
 } from '@/components/common'
 import {
   useApprovals,
@@ -287,6 +288,7 @@ export default function ApprovalsPage() {
       <PageHeader
         title="Approvals"
         subtitle="Review and act on agent approval requests"
+        actions={<UserMenu />}
       />
 
       {/* Tab bar */}

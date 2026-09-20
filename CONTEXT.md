@@ -1373,6 +1373,17 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-20, newest still) — B-201 Phase 1 built: real logout mechanism added to 9 pages that genuinely had none, split from the larger top-bar retrofit at the founder's explicit request so the urgent functional gap didn't wait on the slower cosmetic work
+Founder-directed, two-phase plan: Part A investigation (audit + real measurements + a Topbar-vs-Agent-Detail recommendation) reported first, then a real, live-verified finding — 9 pages (Policies, Tools, Workflows, Nodes, Approvals, Alerts, Memory, Audit, Agents) had no logout mechanism at all, confirmed via grep against both the pages and `Sidebar.tsx` — split from the full retrofit into an urgent Phase 1, proposed separately, approved, then built.
+
+**Real measurements, not guessed, backing the audit:** `PageHeader` (11 pages) has zero of DESIGN_SYSTEM.md §6's required elements; `Topbar` (5 pages) has real logout but zero search UI and no breadcrumb. 8 `PageHeader` pages measured an identical 264px title offset; `MemoryPage` measured 288px, a real, traced 24px misalignment (a redundant `p-6` wrapper around `PageHeader`, which already has its own padding). `Discover`/`PasteEvents` stack `Topbar` directly above `PageHeader` — two visibly redundant header bars. `AgentsPage`'s own "+ Add agent" button is still hardcoded `bg-indigo-600`, never migrated to `brand-*` tokens. Recommendation given and approved: Agent Detail's own new top bar (B-200) becomes Phase 2's shared component, not an extended `Topbar.tsx` — reusing proven code rather than rebuilding the harder half of it again.
+
+**Phase 1 shipped:** new `components/common/UserMenu.tsx`, the real logout logic extracted unmodified from `Topbar.tsx`, added to all 9 pages via their existing header's `actions` slot — zero layout/padding changes to any page, exactly as scoped. Two small standalone fixes done now rather than deferred, per explicit instruction: Agent Detail's own title was a plain `<div>` (not a real heading — found by this same measurement pass), fixed to `<h1>`; `DESIGN_SYSTEM.md` §6 gained a real, documented third exception category (pre-authentication pages — Login, Setup Wizard), not a one-off decision.
+
+**Live-verified with genuine session-clearing proof, not just visual presence, learning directly from B-200's own deployment-gap lesson earlier the same day:** ran against the real shared stack, not a disposable instance. Confirmed real pre-logout session state, confirmed `localStorage`'s real persisted `isAuthenticated` flag flips to `false` post-logout, confirmed real redirect to `/login`, and confirmed re-navigating to the same protected route afterward correctly bounces back rather than rendering — proving the session is genuinely dead. Verified across all 3 real layout shapes (`flex flex-col h-full`, `space-y-6`, Agents' hand-rolled layout), plus a full 9-page visual sweep.
+
+Phase 2 (full top-bar + alignment unification across all 15 pre-existing pages + `WorkflowCanvasPage`, fixing the Memory double-padding bug and Agents' button color as part of the same pass) not yet started — its own future decision thread. Full detail in `BACKLOG.md`'s new B-201 entry and `BUILT.md`'s `eami-ui` section.
+
 ## Active decision thread (2026-09-20, newest) — CMDB epic (B-196) extended: Asset-perspective relationship graph, reusing B-200's RelationshipGraph.tsx mechanism directly, centered on a discovered endpoint instead of a governed agent
 Founder-directed epic extension, logged not built, no code changes. B-200 (built and live-verified same day) proved a real, scoped (Focused Mode) relationship-graph component — cubic-bezier one-to-many branching, click-a-node-opens-the-existing-`SlideOverPanel` — for a `gateway_agents` entity. This extension identifies the same component's real, natural next slice: center it on a discovered endpoint instead, with node types AI App / MCP Server / Local Model / Cloud Client replacing Tool/Policy/Workflow/Endpoint.
 
@@ -1855,6 +1866,27 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-20 (newest still) by Claude Code — B-201 Phase 1 DONE: real
+logout mechanism (new UserMenu.tsx, extracted from Topbar.tsx) added to
+9 pages that genuinely had none (Policies/Tools/Workflows/Nodes/
+Approvals/Alerts/Memory/Audit/Agents), confirmed by grep before
+building. Split from the full top-bar retrofit at the founder's request
+so this real functional gap shipped ahead of the slower Phase 2
+cosmetic work. Part A audit used real Playwright-measured pixel
+positions (264px/288px/296px across the 3 header patterns), not
+guesses, and recommended Agent Detail's own top bar (B-200) as Phase
+2's shared component over extending Topbar.tsx -- approved. Two small
+fixes done now, not deferred: Agent Detail's title changed from a
+plain <div> to a real <h1>; DESIGN_SYSTEM.md sec6 gained a real,
+documented third exception category for pre-authentication pages.
+Live-verified with genuine session-clearing proof (real localStorage
+isAuthenticated flip, real redirect, re-navigation to the same
+protected route correctly blocked) against the real shared stack, not
+a disposable instance -- directly applying B-200's own deployment-gap
+lesson from earlier the same day. Full detail in BACKLOG.md's new
+B-201 entry. Phase 2 not started. Counter now stands at B-202.
+Previous entry, preserved below:
+
 2026-09-20 (newest) by Claude Code — CMDB epic (B-196) extended, no
 code changes: Asset-perspective relationship graph, reusing B-200's
 RelationshipGraph.tsx mechanism directly (real cubic-bezier branching,

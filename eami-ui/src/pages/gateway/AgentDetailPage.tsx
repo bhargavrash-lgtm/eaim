@@ -209,7 +209,10 @@ export function AgentDetailPage() {
               <ShieldCheck className="h-5 w-5 text-brand-600" />
             </div>
             <div>
-              <div className="text-xl font-bold text-ink">{agent.name}</div>
+              {/* Real accessibility/consistency regression, found during
+                  the top-bar audit: was a plain <div>, not a real heading
+                  element -- every other page's title is a real <h1>. */}
+              <h1 className="text-xl font-bold text-ink">{agent.name}</h1>
               <div className="font-mono text-2xs text-ink-faint">{agent.model} · risk {agent.risk_tier}</div>
             </div>
           </div>

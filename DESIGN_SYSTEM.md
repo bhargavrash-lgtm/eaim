@@ -155,15 +155,25 @@ palette but never dropped:
   a page that doesn't need one)
 - Profile avatar
 
-**The two, and only two, exceptions**, both reasoned, neither silent:
+**The three, and only three, exceptions**, all reasoned, none silent:
 1. Pure style/reference artboards that were never meant to be a real page
    (a design-token style tile).
 2. A zoomed-in component study meant to be composed *into* another real
    page, not viewed standalone (the relationship-graph detail study).
+3. **Pre-authentication pages** (login, first-boot setup wizard). The top
+   bar's own required elements — profile avatar, notifications, a
+   breadcrumb into the app's own navigation — presuppose an authenticated
+   identity and an app shell that doesn't exist yet at this point in the
+   flow. Confirmed via the real B-201 top-bar audit: neither `LoginPage`
+   nor `SetupWizardPage` render inside `AppShell`/`Sidebar` at all, so
+   there is no context for a top bar to sit inside of, not just a reason
+   to omit one. Applies only to the pages a user sees *before* a real
+   session exists — never to an authenticated page that merely "feels
+   different," which does not qualify for this exception.
 
 If you are building a new standalone page and are tempted to skip the top
 bar "because this page feels different" — it doesn't qualify for an
-exception unless it matches one of the two above. Ask first.
+exception unless it matches one of the three above. Ask first.
 
 ---
 

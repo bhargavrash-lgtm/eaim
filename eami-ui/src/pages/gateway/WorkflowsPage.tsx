@@ -23,6 +23,7 @@ import {
   Card,
   SlideOverPanel,
   Button,
+  UserMenu,
 } from '@/components/common'
 import type { Column } from '@/components/common'
 import { apiFetch } from '@/api/client'
@@ -837,11 +838,14 @@ export function WorkflowsPage() {
         title="Workflows"
         subtitle="Ordered chains of connectors a call can route through (definition only -- not yet executed)"
         actions={
-          <button onClick={() => setShowAdd(true)}
-            className="flex items-center gap-1.5 bg-indigo-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-indigo-700">
-            <Plus className="h-4 w-4" />
-            Add workflow
-          </button>
+          <>
+            <button onClick={() => setShowAdd(true)}
+              className="flex items-center gap-1.5 bg-indigo-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-indigo-700">
+              <Plus className="h-4 w-4" />
+              Add workflow
+            </button>
+            <UserMenu />
+          </>
         }
       />
 

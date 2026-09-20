@@ -11,6 +11,7 @@ import {
   DataTable,
   SlideOverPanel,
   Button,
+  UserMenu,
 } from '@/components/common'
 import type { Column } from '@/components/common'
 import {
@@ -418,13 +419,16 @@ export function PoliciesPage() {
         title="Policies"
         subtitle="Ordered rule set evaluated per gateway call -- first match wins"
         actions={
-          <button
-            onClick={() => setPanel({ mode: 'create' })}
-            className="flex items-center gap-1.5 bg-indigo-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-indigo-700"
-          >
-            <Plus className="h-4 w-4" />
-            New policy
-          </button>
+          <>
+            <button
+              onClick={() => setPanel({ mode: 'create' })}
+              className="flex items-center gap-1.5 bg-indigo-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-indigo-700"
+            >
+              <Plus className="h-4 w-4" />
+              New policy
+            </button>
+            <UserMenu />
+          </>
         }
       />
 

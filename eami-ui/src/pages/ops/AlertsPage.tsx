@@ -11,6 +11,7 @@ import {
   EmptyState,
   LoadingSpinner,
   useToast,
+  UserMenu,
 } from '@/components/common'
 import {
   useAlerts,
@@ -575,14 +576,17 @@ export default function AlertsPage() {
         title="Alerts"
         subtitle="Monitor policy violations and anomalies across the gateway"
         actions={
-          tab === 'rules' ? (
-            <button
-              onClick={() => setRuleFormState({ open: true })}
-              className="px-4 py-2 rounded-md bg-indigo-600 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
-            >
-              New rule
-            </button>
-          ) : undefined
+          <>
+            {tab === 'rules' && (
+              <button
+                onClick={() => setRuleFormState({ open: true })}
+                className="px-4 py-2 rounded-md bg-indigo-600 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+              >
+                New rule
+              </button>
+            )}
+            <UserMenu />
+          </>
         }
       />
 

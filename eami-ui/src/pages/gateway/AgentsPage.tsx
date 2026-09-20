@@ -5,7 +5,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ConfirmDialog, DataTable, SlideOverPanel, Button } from '@/components/common'
+import { ConfirmDialog, DataTable, SlideOverPanel, Button, UserMenu } from '@/components/common'
 import type { Column } from '@/components/common'
 import {
   useAgents,
@@ -387,12 +387,15 @@ export function AgentsPage() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-lg font-semibold text-gray-900">Gateway Agents</h1>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="flex items-center gap-1.5 bg-indigo-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-indigo-700"
-        >
-          + Add agent
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowAdd(true)}
+            className="flex items-center gap-1.5 bg-indigo-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-indigo-700"
+          >
+            + Add agent
+          </button>
+          <UserMenu />
+        </div>
       </div>
 
       {actionError && (
