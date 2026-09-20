@@ -1373,6 +1373,11 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-20) — B-198 logged: the 3 `DESIGN_SYSTEM.md` discrepancies from the prior session's verification pass, not fixed yet; BACKLOG.md status export confirmed complete; design canvas confirmed still design-only, no build briefs minted
+Founder follow-up on the 2026-09-19 `DESIGN_SYSTEM.md` adoption session, no code changes. Two things done: (1) produced a full `BACKLOG.md` export grouped by status (110 DONE, 17 EPICs logged/investigation-not-started, 5 small explicit-QUEUED, 32 unannotated-original-QUEUED — 2 of which, B-007/B-008, are actually BLOCKED per the file's own separate `## BLOCKED` section — 7 logged-not-fixed small bugs, 3 investigation-complete-no-build-brief, 1 special-case closeout (B-195), 175 items total) and confirmed the prior session's specific items are all correctly logged: B-191/B-192 (AI Apps fix / scroll fix) DONE 2026-09-19, B-172/B-173 DONE 2026-09-15, B-190 DONE 2026-09-16, B-196/B-197 (CMDB/Workspaces epics) logged, investigation not started. (2) Confirmed via direct grep of `BACKLOG.md` for "DESIGN_SYSTEM"/"Layer1"–"Layer5"/etc. — **zero matches** — the 6-artboard design canvas work stands entirely as design-only; no page-by-page build brief has been minted from it yet.
+
+**B-198 minted:** the 3 real, small `DESIGN_SYSTEM.md` discrepancies found during its own 2026-09-19 verification pass (icon-chip `border-radius` formula off by roughly 5x, the "accent-colored border" claim not matching most real chips, the Chat Engine palette table missing several real hexes) are now a real, tracked backlog item — Low priority, not urgent, not blocking `DESIGN_SYSTEM.md`'s continued use as the mandatory pre-build reference. Counter now stands at B-199.
+
 ## Active decision thread (2026-09-19, newest still) — `DESIGN_SYSTEM.md` adopted as the mandatory pre-build UI reference, verified against its live design canvas, `tailwind.config.ts` reconciliation done (documentation only, no page built)
 Founder-directed documentation task, no page built, no `tailwind.config.ts` changes. `DESIGN_SYSTEM.md` (7-artboard live design canvas at `https://claude.ai/artifact/4j2DqNrWQbHRxTZD3KAJYf`, 6 real artboards + Layer 3's explicitly-marked zoomed component study) committed to the repo root. Every concrete pixel-specific value the doc claims (colors, the 3 elevation shadow levels, typography scale, top-bar composition, the relationship-graph SVG structure) was checked directly against the canvas's real `.dc.html` source, not trusted from prose.
 
@@ -1804,6 +1809,19 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-20 by Claude Code — B-198 logged (the 3 `DESIGN_SYSTEM.md`
+discrepancies from the prior session, not fixed yet, Low priority);
+full BACKLOG.md status export produced and confirmed complete (175
+items: 110 DONE / 17 epics logged-not-started / 5 explicit QUEUED / 32
+unannotated-original QUEUED incl. 2 actually BLOCKED / 7 logged-not-
+fixed / 3 investigation-complete-no-brief / 1 special closeout); prior
+session's specific items (B-191/B-192, B-172/B-173, B-190, B-196/B-197)
+all confirmed correctly logged. Confirmed via direct grep that the
+design canvas's 6 artboards have NOT been translated into any
+page-by-page build brief yet -- design-only, as expected, nothing
+silently skipped. No code changes. Counter now stands at B-199.
+Previous entry, preserved below:
+
 2026-09-19 (newest still) by Claude Code — `DESIGN_SYSTEM.md` committed to
 the repo root as the mandatory pre-build UI reference (replacing the
 prior thinner Slice-1-era bullet in CLAUDE.md's Conventions section,
