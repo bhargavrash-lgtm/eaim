@@ -1373,6 +1373,15 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-20, newest) — CMDB epic (B-196) extended: Asset-perspective relationship graph, reusing B-200's RelationshipGraph.tsx mechanism directly, centered on a discovered endpoint instead of a governed agent
+Founder-directed epic extension, logged not built, no code changes. B-200 (built and live-verified same day) proved a real, scoped (Focused Mode) relationship-graph component — cubic-bezier one-to-many branching, click-a-node-opens-the-existing-`SlideOverPanel` — for a `gateway_agents` entity. This extension identifies the same component's real, natural next slice: center it on a discovered endpoint instead, with node types AI App / MCP Server / Local Model / Cloud Client replacing Tool/Policy/Workflow/Endpoint.
+
+**Real data already exists for this** — `ai_apps`, `mcp_servers`, `models`, `cloud_clients` are the same fields Discovery already collects and `DiscoverPage.tsx`'s `EndpointDrawer` already renders; `ai_apps`/`mcp_servers`/`local_models` specifically confirmed real, queryable, and populated live earlier tonight (B-164's audit, B-191's live `ai_app_count: 2` verification) — not a speculative claim.
+
+**Explicitly not assumed free:** no query/endpoint work scoped, and no confirmation yet that these per-endpoint list fields carry the right relationship/junction shape a graph's node/edge model needs (today they're flat lists, not necessarily structured for traversal) — real investigation for whoever picks this up, same discipline as every other epic-level entry in this backlog.
+
+Cross-references B-196's own CI taxonomy (AI workload category) and its "real, multi-hop CI relationships" required component directly — this extension is a concrete UI precedent for what that relationship traversal could look like once the CI data model itself exists, not a competing idea. Full detail in `BACKLOG.md`'s updated B-196 entry.
+
 ## Active decision thread (2026-09-20, latest still) — B-200 post-completion correction: a real deployment gap, found live by the founder minutes after the completion report, root-caused precisely and fixed same-session — the shared eami-api container had never actually been rebuilt with the new backend
 Founder-reported urgent live failure, directly contradicting the completion report just above: `b059-live-agent`'s real detail page showed "Failed to load connections" on the actual shared dev stack. Investigated exactly as instructed — reproduce first, get the real error, determine honestly whether it was a regression or a flawed original verification, fix the real root cause, re-verify live.
 
@@ -1846,6 +1855,18 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-20 (newest) by Claude Code — CMDB epic (B-196) extended, no
+code changes: Asset-perspective relationship graph, reusing B-200's
+RelationshipGraph.tsx mechanism directly (real cubic-bezier branching,
+click-node-opens-SlideOverPanel), centered on a discovered endpoint
+instead of a governed agent -- AI App/MCP Server/Local Model/Cloud
+Client node types. Real data already exists (ai_apps/mcp_servers/
+local_models confirmed real and populated tonight via B-164/B-191);
+explicitly not assumed free -- no query work scoped, no confirmation
+the existing per-endpoint list fields carry the right relationship
+shape for a graph. Logged, not investigated or built. Full detail in
+BACKLOG.md's updated B-196 entry. Previous entry, preserved below:
+
 2026-09-20 (latest still) by Claude Code — B-200 post-completion
 correction: founder hit a real live failure ("Failed to load
 connections" on b059-live-agent's real page) minutes after the
