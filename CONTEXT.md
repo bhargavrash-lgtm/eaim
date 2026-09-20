@@ -1373,6 +1373,17 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-20, latest still) — B-200 post-completion correction: a real deployment gap, found live by the founder minutes after the completion report, root-caused precisely and fixed same-session — the shared eami-api container had never actually been rebuilt with the new backend
+Founder-reported urgent live failure, directly contradicting the completion report just above: `b059-live-agent`'s real detail page showed "Failed to load connections" on the actual shared dev stack. Investigated exactly as instructed — reproduce first, get the real error, determine honestly whether it was a regression or a flawed original verification, fix the real root cause, re-verify live.
+
+**Real root cause, confirmed not guessed:** `docker inspect eaim-eami-api-1` showed the running container's image was last built 2026-09-10 — ten days before this brief. A direct request to the real container returned a bare Go-stdlib `404 page not found` for the new `/connections` route, proving conclusively it didn't exist in the running binary. This session's own live verification (the entry above) had deliberately tested the new backend against a **disposable, throwaway local `go run` instance** to avoid rebuilding shared infrastructure for a verification pass — the right call for verification, but the real fix was never subsequently deployed to the system the founder actually uses. `eami-ui`'s bind-mounted `src/` had genuinely hot-reloaded the new frontend correctly the whole time (confirmed via its own Vite logs) — only the backend half was stale, which is exactly why the symptom was a failed fetch, not a missing page.
+
+**Explicitly ruled out, not assumed:** not a regression in the `errgroup` concurrency change, not a race condition, not a dev-DB data change — re-confirmed by running the identical code for real against the rebuilt container and getting correct real data back.
+
+**Fixed with a real `docker compose build eami-api && docker compose up -d eami-api`** — genuine rebuild and restart of the shared container, a different and more consequential action than anything touched during this session's earlier disposable-instance verifications, done because it was the actual fix needed, not a verification convenience. Re-verified three ways against the real, now-updated shared stack: direct `curl` (404→401→200 with real data across the fix), a live Playwright screenshot of the real running page with the graph correctly rendered and no error text, and a sanity check of 3 unrelated real endpoints confirming no collateral damage from the rebuild. Founder separately asked to reload the same page themselves as the final, non-automated confirmation.
+
+**Standing process lesson, logged so it recurs less:** a disposable-instance verification proves the *code* is correct; it does not prove the *shared system* has been updated. Future backend-touching briefs need an explicit real-deployment step in their own completion report (or an explicit, disclosed statement that deployment was deferred) — verification and deployment are two different claims, and this session's completion report conflated them. Full incident detail in `BACKLOG.md`'s B-200 entry.
+
 ## Active decision thread (2026-09-20, latest) — B-200: Admin Agent Detail (collapsible nav rail + real relationship graph) built, closing the original "things don't have connections, looks too simple" complaint that started the whole design-canvas arc — mandatory Part A investigation, founder plan approval, mandatory reviewer+security passes, all completed and applied before shipping
 Founder-issued task brief, full kickoff→Part A→plan→approval→build sequence followed exactly as instructed, no step skipped.
 
@@ -1835,6 +1846,25 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-20 (latest still) by Claude Code — B-200 post-completion
+correction: founder hit a real live failure ("Failed to load
+connections" on b059-live-agent's real page) minutes after the
+completion report. Root cause confirmed, not guessed: the shared
+eami-api container's image was last built 2026-09-10 -- this
+session's own live verification had deliberately tested against a
+disposable local instance to avoid rebuilding shared infra, but the
+real fix was never subsequently deployed to the actual running
+system. Not a regression, not an errgroup race, not a data change --
+re-confirmed by running the identical code for real. Fixed with a
+genuine docker compose build+up of the real eami-api container,
+re-verified 3 ways against the real shared stack (curl, live
+Playwright screenshot, 3-endpoint regression sanity check), founder
+asked to independently reload and confirm. Process lesson logged:
+disposable-instance verification proves the code, not that the
+shared system was deployed -- future backend briefs need an explicit
+real-deployment step in their completion report. Full detail in
+BACKLOG.md's B-200 entry. Previous entry, preserved below:
+
 2026-09-20 (latest) by Claude Code — B-200 DONE: Admin Agent Detail
 built -- collapsible nav rail + real relationship graph, the direct
 answer to the original "things don't have connections, looks too
