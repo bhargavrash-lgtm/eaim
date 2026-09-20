@@ -1373,6 +1373,21 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
+## Active decision thread (2026-09-20, newest of all) — B-201 Phase 2, Batch 1 built: the shared AppTopBar component + the 8 PageHeader-only pages migrated, AgentDetailPage's own duplicate top bar eliminated, real decisions surfaced and resolved along the way rather than assumed
+Founder approved the full Phase 2 plan (Option B two-layer header, `Topbar.tsx` deletion once superseded, `WorkflowCanvasPage` included, Dashboard's double-padding folded in with Memory's), then approved proceeding batch by batch, starting with Batch 1.
+
+**New `components/layout/AppTopBar.tsx`**, extracted verbatim from `AgentDetailPage.tsx`'s own original B-200 implementation rather than rebuilt. A single-segment breadcrumb covers every flat list page with no separate title prop needed; a multi-segment one (parent link + current page) covers Agent Detail's own case unchanged.
+
+**Two real bugs caught and fixed before they shipped, not after, both found by careful reasoning rather than assumption:** (1) the breadcrumb's current segment needed to be a real `<h1>`, not a `<span>` — otherwise every migrated page would lose its heading element, the identical accessibility regression Phase 1 had just fixed on Agent Detail specifically. Caught before `AppTopBar` was used anywhere. (2) Adding that `<h1>` to the top bar meant `AgentDetailPage.tsx`'s own body-level agent-name heading (itself just fixed to `<h1>` in Phase 1) would create two `<h1>` elements on one page — corrected by demoting it to `<h2>`, the actually-correct HTML outline (one page `<h1>`, a subordinate `<h2>` for the same content), not a duplicate. Both caught by direct reasoning about the shared component's effects on an already-shipped page, before running any check, then confirmed live afterward (`h1Count: 1` measured on every single migrated page, not assumed).
+
+**`AgentDetailPage.tsx`'s own original inline top bar was deleted entirely, replaced with `<AppTopBar>`** — the point of extracting a shared component is one implementation, not the original copy left sitting beside the new one. `PageHeader.tsx`'s `title` prop made optional (not yet removed) specifically so `WorkflowCanvasPage` (Batch 4, untouched) keeps working safely until its own turn — an incremental-safety detail, not an oversight.
+
+**A real, if small, mid-build bug caught by the compiler, not missed:** a stray leftover `/>` from `AlertsPage`'s original `PageHeader` close survived one of the batch edits; `tsc` caught it immediately on the very next check, fixed before moving on.
+
+**Verified:** real `tsc`/`vite build` clean. Live Playwright verification against the real shared stack — all 8 migrated pages + Agent Detail screenshotted, each confirmed with exactly one real `<h1>`, `UserMenu` present, search/bell chrome present, zero console errors; `AlertsPage`'s Rules-tab conditional action confirmed still correctly conditional. Genuine session-clearing re-proof repeated on a migrated page (Policies) — same rigor as Phase 1 — confirming `AppTopBar`'s relocated `UserMenu` still actually logs out, not just renders.
+
+Batches 2-4 (Topbar-pages + Dashboard's double-padding + `Topbar.tsx` deletion; Agents + its button color; `WorkflowCanvasPage` + `PageHeader.tsx`'s final cleanup) not yet started. Full detail in `BACKLOG.md`'s updated B-201 entry.
+
 ## Active decision thread (2026-09-20, newest still) — B-201 Phase 1 built: real logout mechanism added to 9 pages that genuinely had none, split from the larger top-bar retrofit at the founder's explicit request so the urgent functional gap didn't wait on the slower cosmetic work
 Founder-directed, two-phase plan: Part A investigation (audit + real measurements + a Topbar-vs-Agent-Detail recommendation) reported first, then a real, live-verified finding — 9 pages (Policies, Tools, Workflows, Nodes, Approvals, Alerts, Memory, Audit, Agents) had no logout mechanism at all, confirmed via grep against both the pages and `Sidebar.tsx` — split from the full retrofit into an urgent Phase 1, proposed separately, approved, then built.
 
@@ -1866,6 +1881,25 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-20 (newest of all) by Claude Code — B-201 Phase 2 Batch 1 DONE:
+new components/layout/AppTopBar.tsx (extracted verbatim from Agent
+Detail's own B-200 implementation), 8 PageHeader-only pages migrated
+(Option B: AppTopBar + slimmed PageHeader, subtitles preserved),
+AgentDetailPage's own duplicate inline top bar deleted. Two real bugs
+caught and fixed before shipping, not after: the breadcrumb's current
+segment needed a real h1 (else every migrated page loses its heading,
+the same regression Phase 1 just fixed once); adding that h1 meant
+AgentDetailPage's own body-level h1 needed demoting to h2 to avoid two
+h1s on one page (correct HTML outline, not a duplicate) -- both
+reasoned through before running any check, confirmed live after
+(h1Count:1 measured on every page, not assumed). One stray leftover
+JSX tag caught by tsc mid-build, fixed immediately. Live Playwright
+verification: all 9 pages screenshotted, zero console errors, genuine
+session-clearing re-proven on a migrated page (Policies) to confirm
+AppTopBar's relocated UserMenu still actually logs out. Batches 2-4
+not started. Full detail in BACKLOG.md's updated B-201 entry. Previous
+entry, preserved below:
+
 2026-09-20 (newest still) by Claude Code — B-201 Phase 1 DONE: real
 logout mechanism (new UserMenu.tsx, extracted from Topbar.tsx) added to
 9 pages that genuinely had none (Policies/Tools/Workflows/Nodes/

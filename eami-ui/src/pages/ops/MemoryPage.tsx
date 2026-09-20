@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Search, ChevronDown, ChevronRight, CheckCircle, XCircle, AlertTriangle, Clock } from 'lucide-react'
-import { PageHeader, LoadingSpinner, EmptyState, UserMenu } from '@/components/common'
+import { PageHeader, LoadingSpinner, EmptyState } from '@/components/common'
+import { AppTopBar } from '@/components/layout/AppTopBar'
 import { apiFetch } from '@/api/client'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -176,13 +177,18 @@ export function MemoryPage() {
   const total = isSearching ? episodes.length : (listQuery.data?.meta.total ?? 0)
 
   return (
-    <div className="p-6 space-y-4">
-      <PageHeader
-        title="Memory"
-        subtitle="Tool call episode library — every action taken by AI agents"
-        actions={<UserMenu />}
-      />
+    <div className="flex flex-col h-full">
+      {/* B-201 Phase 2: this outer wrapper was the real source of the
+          double-padding bug (Part A audit's own finding) -- PageHeader's
+          own px-6/py-4 was nested inside a second p-6 here, offsetting
+          this page's title 24px further right than every other
+          PageHeader page. AppTopBar/PageHeader now sit flush at the top,
+          matching every other migrated page; the p-6 that was here moved
+          onto the body-content wrapper below, where it belongs. */}
+      <AppTopBar breadcrumb={[{ label: 'Memory' }]} />
+      <PageHeader subtitle="Tool call episode library — every action taken by AI agents" />
 
+      <div className="flex-1 overflow-auto p-6 space-y-4">
       {/* Controls */}
       <div className="flex flex-col sm:flex-row gap-3">
         {/* Search */}
@@ -262,6 +268,7 @@ export function MemoryPage() {
           )}
         </>
       )}
+      </div>
     </div>
   )
 }

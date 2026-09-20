@@ -11,8 +11,8 @@ import {
   EmptyState,
   LoadingSpinner,
   useToast,
-  UserMenu,
 } from '@/components/common'
+import { AppTopBar } from '@/components/layout/AppTopBar'
 import {
   useAlerts,
   useAlertRules,
@@ -572,23 +572,20 @@ export default function AlertsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Alerts"
-        subtitle="Monitor policy violations and anomalies across the gateway"
-        actions={
-          <>
-            {tab === 'rules' && (
-              <button
-                onClick={() => setRuleFormState({ open: true })}
-                className="px-4 py-2 rounded-md bg-indigo-600 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
-              >
-                New rule
-              </button>
-            )}
-            <UserMenu />
-          </>
+      <AppTopBar
+        breadcrumb={[{ label: 'Alerts' }]}
+        action={
+          tab === 'rules' ? (
+            <button
+              onClick={() => setRuleFormState({ open: true })}
+              className="px-4 py-2 rounded-md bg-indigo-600 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+            >
+              New rule
+            </button>
+          ) : undefined
         }
       />
+      <PageHeader subtitle="Monitor policy violations and anomalies across the gateway" />
 
       {/* Tab bar */}
       <div className="border-b border-gray-200">

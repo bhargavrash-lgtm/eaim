@@ -8,8 +8,8 @@ import {
   EmptyState,
   LoadingSpinner,
   RiskPill,
-  UserMenu,
 } from '@/components/common'
+import { AppTopBar } from '@/components/layout/AppTopBar'
 import {
   useApprovals,
   useDecideApproval,
@@ -285,11 +285,8 @@ export default function ApprovalsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Approvals"
-        subtitle="Review and act on agent approval requests"
-        actions={<UserMenu />}
-      />
+      <AppTopBar breadcrumb={[{ label: 'Approvals' }]} />
+      <PageHeader subtitle="Review and act on agent approval requests" />
 
       {/* Tab bar */}
       <div className="border-b border-gray-200">

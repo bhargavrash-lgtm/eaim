@@ -23,8 +23,8 @@ import {
   Card,
   SlideOverPanel,
   Button,
-  UserMenu,
 } from '@/components/common'
+import { AppTopBar } from '@/components/layout/AppTopBar'
 import type { Column } from '@/components/common'
 import { apiFetch } from '@/api/client'
 import {
@@ -834,19 +834,18 @@ export function WorkflowsPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <PageHeader
-        title="Workflows"
-        subtitle="Ordered chains of connectors a call can route through (definition only -- not yet executed)"
-        actions={
-          <>
-            <button onClick={() => setShowAdd(true)}
-              className="flex items-center gap-1.5 bg-indigo-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-indigo-700">
-              <Plus className="h-4 w-4" />
-              Add workflow
-            </button>
-            <UserMenu />
-          </>
+      <AppTopBar
+        breadcrumb={[{ label: 'Workflows' }]}
+        action={
+          <button onClick={() => setShowAdd(true)}
+            className="flex items-center gap-1.5 bg-indigo-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-indigo-700">
+            <Plus className="h-4 w-4" />
+            Add workflow
+          </button>
         }
+      />
+      <PageHeader
+        subtitle="Ordered chains of connectors a call can route through (definition only -- not yet executed)"
       />
 
       <div className="flex-1 overflow-auto p-6">

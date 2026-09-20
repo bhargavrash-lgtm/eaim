@@ -9,8 +9,8 @@ import {
   LoadingSpinner,
   SlideOverPanel,
   Button,
-  UserMenu,
 } from '@/components/common'
+import { AppTopBar } from '@/components/layout/AppTopBar'
 import { DataTable } from '@/components/common/DataTable'
 import type { Column } from '@/components/common/DataTable'
 import {
@@ -998,20 +998,17 @@ export function ToolsPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <PageHeader
-        title="Tools"
-        subtitle="MCP servers and API connections the gateway can route calls to"
-        actions={
-          <>
-            <button onClick={() => setShowAdd(true)}
-              className="flex items-center gap-1.5 bg-indigo-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-indigo-700">
-              <Plus className="h-4 w-4" />
-              Add tool
-            </button>
-            <UserMenu />
-          </>
+      <AppTopBar
+        breadcrumb={[{ label: 'Tools' }]}
+        action={
+          <button onClick={() => setShowAdd(true)}
+            className="flex items-center gap-1.5 bg-indigo-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-indigo-700">
+            <Plus className="h-4 w-4" />
+            Add tool
+          </button>
         }
       />
+      <PageHeader subtitle="MCP servers and API connections the gateway can route calls to" />
 
       <div className="flex-1 overflow-auto p-6">
         <DataTable

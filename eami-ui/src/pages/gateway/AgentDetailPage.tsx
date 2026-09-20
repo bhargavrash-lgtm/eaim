@@ -7,15 +7,15 @@
 // Tool/Workflow/Endpoint connections (Focused Mode only, never an
 // org-wide graph).
 import { useState } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
-import { Bell, Search, LogOut, MoreVertical, ShieldCheck, Wrench, Workflow as WorkflowIcon } from 'lucide-react'
+import { useParams } from 'react-router-dom'
+import { MoreVertical, ShieldCheck, Wrench, Workflow as WorkflowIcon } from 'lucide-react'
 import { SlideOverPanel, LoadingSpinner, EmptyState, StatusPill } from '@/components/common'
+import { AppTopBar } from '@/components/layout/AppTopBar'
 import { EndpointDrawer } from '@/pages/discover/DiscoverPage'
 import { useAgent, useAgentConnections } from '@/hooks/useAgents'
 import { usePolicy } from '@/hooks/usePolicies'
 import { useWorkflow } from '@/hooks/useWorkflows'
 import { useTools } from '@/hooks/useTools'
-import { useAuthStore } from '@/stores/authStore'
 import { RelationshipGraph, type SelectedGraphNode } from './RelationshipGraph'
 
 // ── Read-only detail panels ──────────────────────────────────────────────────
@@ -128,61 +128,23 @@ function Field({ label, value }: { label: string; value: string }) {
 }
 
 // ── Top bar ───────────────────────────────────────────────────────────────────
-// DESIGN_SYSTEM.md §6's Top App Bar. Search + notifications are real UI
-// concepts in the design, but neither has real backend functionality
-// anywhere in this codebase today (Part A investigation confirmed:
-// Topbar.tsx's own bell is already a decorative no-op, and no search
-// endpoint of any kind exists) -- rendered here as explicitly-disabled
-// visual chrome, not silently implied as working. Logout/profile IS real,
-// reused from the same useAuthStore Topbar.tsx already uses.
-function AgentDetailTopBar({ agentName }: { agentName: string }) {
-  const { user, logout } = useAuthStore()
-  const navigate = useNavigate()
-  return (
-    <header className="flex h-[60px] items-center justify-between border-b border-gray-200 bg-white px-8 shadow-l2">
-      <div className="flex items-center gap-2.5 text-sm text-ink-faint">
-        <Link to="/gateway/agents" className="font-medium text-ink-faint hover:text-ink">Agents</Link>
-        <span>/</span>
-        <span className="font-semibold text-ink">{agentName}</span>
-      </div>
-      <div className="flex items-center gap-3.5">
-        <div
-          className="flex items-center gap-2 rounded-lg bg-gray-100 px-3 py-1.5 text-gray-400"
-          title="Global search — not built yet (chrome only, not wired to a real search endpoint)"
-        >
-          <Search className="h-[15px] w-[15px]" />
-          <span className="text-xs">Search…</span>
-        </div>
-        <button
-          className="cursor-not-allowed rounded-lg p-2 text-gray-400"
-          title="Notifications — not built yet (chrome only, no real feed exists)"
-          disabled
-        >
-          <Bell className="h-[19px] w-[19px]" />
-        </button>
-        {/* Code-review finding: was enabled with no onClick, indistinguishable
-            from a real button -- no overflow-menu actions (suspend/edit/
-            delete from this page) were in this brief's scope, so it's
-            disabled chrome, matching Search/Bell's own established
-            pattern above, not silently broken. */}
-        <button
-          className="cursor-not-allowed rounded-lg border border-gray-200 p-2 text-gray-300"
-          title="More actions — not built yet"
-          disabled
-        >
-          <MoreVertical className="h-4 w-4" />
-        </button>
-        <button
-          onClick={() => { logout(); navigate('/login') }}
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-50 text-xs font-bold text-brand-600 hover:bg-brand-100"
-          title={user?.email ? `Log out (${user.email})` : 'Log out'}
-        >
-          <LogOut className="h-4 w-4" />
-        </button>
-      </div>
-    </header>
-  )
-}
+// B-201 Phase 2: now reuses the shared AppTopBar (components/layout/) --
+// this file's own inline top bar (the original B-200 implementation) was
+// extracted into that shared component verbatim, then deleted here, to
+// avoid two copies of the identical code existing side by side. The
+// disabled "More actions" chrome (code-review finding from B-200: no
+// overflow-menu actions are in scope for this page) is preserved exactly
+// as before, passed as AppTopBar's action prop -- same visual behavior,
+// no silent change.
+const agentDetailMoreActions = (
+  <button
+    className="cursor-not-allowed rounded-lg border border-gray-200 p-2 text-gray-300"
+    title="More actions — not built yet"
+    disabled
+  >
+    <MoreVertical className="h-4 w-4" />
+  </button>
+)
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
@@ -201,7 +163,10 @@ export function AgentDetailPage() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <AgentDetailTopBar agentName={agent.name} />
+      <AppTopBar
+        breadcrumb={[{ label: 'Agents', href: '/gateway/agents' }, { label: agent.name }]}
+        action={agentDetailMoreActions}
+      />
       <div className="flex-1 overflow-y-auto px-10 py-8">
         <div className="mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3.5">
@@ -209,10 +174,11 @@ export function AgentDetailPage() {
               <ShieldCheck className="h-5 w-5 text-brand-600" />
             </div>
             <div>
-              {/* Real accessibility/consistency regression, found during
-                  the top-bar audit: was a plain <div>, not a real heading
-                  element -- every other page's title is a real <h1>. */}
-              <h1 className="text-xl font-bold text-ink">{agent.name}</h1>
+              {/* h2, not h1 (Phase 2 revision): AppTopBar's breadcrumb now
+                  provides this page's real <h1> above -- this is a
+                  subordinate section heading for the same name, correct
+                  HTML outline (one h1, nested h2s), not a duplicate h1. */}
+              <h2 className="text-xl font-bold text-ink">{agent.name}</h2>
               <div className="font-mono text-2xs text-ink-faint">{agent.model} · risk {agent.risk_tier}</div>
             </div>
           </div>

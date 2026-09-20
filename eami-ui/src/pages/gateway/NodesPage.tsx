@@ -7,8 +7,8 @@ import {
   ConfirmDialog,
   EmptyState,
   LoadingSpinner,
-  UserMenu,
 } from '@/components/common'
+import { AppTopBar } from '@/components/layout/AppTopBar'
 import { useNodes, useDeleteNode } from '@/hooks/useNodes'
 import type { GatewayNode } from '@/hooks/useNodes'
 
@@ -166,22 +166,19 @@ export function NodesPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <PageHeader
-        title="Gateway Nodes"
-        subtitle="Nodes registered in gateway_nodes -- no gateway process registers itself automatically yet"
-        actions={
-          <>
-            <button
-              onClick={() => refetch()}
-              className={'flex items-center gap-1.5 border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50' + (isFetching ? ' opacity-50 cursor-wait' : '')}
-            >
-              <RefreshCw className={'h-4 w-4' + (isFetching ? ' animate-spin' : '')} />
-              Refresh
-            </button>
-            <UserMenu />
-          </>
+      <AppTopBar
+        breadcrumb={[{ label: 'Gateway Nodes' }]}
+        action={
+          <button
+            onClick={() => refetch()}
+            className={'flex items-center gap-1.5 border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50' + (isFetching ? ' opacity-50 cursor-wait' : '')}
+          >
+            <RefreshCw className={'h-4 w-4' + (isFetching ? ' animate-spin' : '')} />
+            Refresh
+          </button>
         }
       />
+      <PageHeader subtitle="Nodes registered in gateway_nodes -- no gateway process registers itself automatically yet" />
 
       <div className="flex-1 overflow-auto p-6 space-y-6">
         {nodes.length === 0 ? (
