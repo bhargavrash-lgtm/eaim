@@ -219,13 +219,23 @@ export function AgentDetailPage() {
           <Wrench className="h-3.5 w-3.5 text-ink-faint" />
           Agent Details
         </div>
+        {/* B-204: compact grouped label-value pattern, not edge-justified
+            justify-between -- this card spans the full ~1100px+ content
+            width, so justify-between pushed "Owner"/"Scope" to the far
+            left and their values to the far right, reading as extreme
+            rather than a scannable pair. A fixed-width label column
+            (w-20, enough for "Owner"/"Scope" without wrapping) + the
+            value directly beside it keeps the card full-width (matching
+            this page's own card language) while the actual content
+            reads as one compact, left-aligned group. This is now
+            DESIGN_SYSTEM.md's documented default label-value pattern. */}
         <div className="mt-3 flex flex-col gap-2">
-          <div className="flex items-center justify-between rounded-lg bg-white px-4.5 py-3.5 shadow-l1">
-            <span className="text-sm font-semibold text-ink">Owner</span>
+          <div className="flex items-center gap-3 rounded-lg bg-white px-4.5 py-3.5 shadow-l1">
+            <span className="w-20 flex-shrink-0 text-sm font-semibold text-ink">Owner</span>
             <span className="text-sm text-ink-faint">{agent.owner}</span>
           </div>
-          <div className="flex items-center justify-between rounded-lg bg-white px-4.5 py-3.5 shadow-l1">
-            <span className="text-sm font-semibold text-ink">Scope</span>
+          <div className="flex items-center gap-3 rounded-lg bg-white px-4.5 py-3.5 shadow-l1">
+            <span className="w-20 flex-shrink-0 text-sm font-semibold text-ink">Scope</span>
             <span className="max-w-md truncate text-sm text-ink-faint" title={agent.scope}>{agent.scope}</span>
           </div>
         </div>

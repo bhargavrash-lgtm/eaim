@@ -59,7 +59,16 @@ const TARGET_W = 280
 const TARGET_H = 72
 const ROW_H = 95
 const JUNCTION_GAP = 36
-const PAD = 40
+// B-204: 48, was 40 -- defensive headroom, not a reproduced-clip fix.
+// Live testing (4 real agents x 3 viewports) found the topmost node was
+// NOT actually clipping with the current code, so this isn't chasing a
+// reproduced bug -- it's closing a real structural risk class: a
+// computed-height-driven `overflow-hidden` container (below) fails
+// SILENTLY if the height formula is ever off by a few px in some future
+// junction/target-count edge case -- content just vanishes, no visible
+// error. Extra padding on both ends is cheap, real insurance against
+// that failure mode.
+const PAD = 48
 
 function bezierH(x1: number, y1: number, x2: number, y2: number): string {
   const midX = (x1 + x2) / 2

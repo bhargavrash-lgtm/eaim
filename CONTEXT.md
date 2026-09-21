@@ -1373,7 +1373,21 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
-## Active decision thread (2026-09-21, newest) — B-203 built: three real UI bugs found via direct screenshot review of the just-shipped B-201 retrofit, all root-caused live before any fix per explicit instruction, one wrong first measurement caught and redone rather than reported wrong
+## Active decision thread (2026-09-21, newest) — B-204 built: relationship graph headroom hardening (investigated thoroughly, could not reproduce the reported clip, applied a real defensive fix anyway per explicit instruction rather than chasing further) + Agent Details compact label-value pattern, both codified into a new DESIGN_SYSTEM.md §7.6
+
+Two more real defects found via direct screenshot review, same investigation-first discipline as B-203.
+
+**Graph clipping:** container sizing confirmed dynamic (computed from real node/junction counts). Live-tested the topmost node across 4 real agents x 3 viewport sizes (12 combinations, including `b059-live-agent` at 1440x900 — the exact case named in the acceptance criteria) using the current, already-B-203-fixed code — every one showed the first card/label at exactly the intended padding, never clipped. Reported this honestly rather than inventing a root cause for something I couldn't observe. Founder's call: stop chasing the unreproducible case, apply a real, grounded hardening regardless — `RelationshipGraph.tsx`'s `PAD` 40→48px, closing a genuine structural risk (a computed-height `overflow-hidden` container fails silently, no visible error, if its formula is ever off by a few px in a future edge case) rather than leaving a latent risk untouched just because today's data doesn't trigger it.
+
+**Agent Details label-value spread:** confirmed real — `justify-between` inside a ~1100px+-wide card pushed Owner/Scope to the far edges. Fixed with a fixed-width label column (`w-20`) + `gap-3`, keeping the card full-width but the content compact and grouped.
+
+**Repeated-pattern check:** grepped all of `eami-ui/src` — this exact card-based spread pattern exists only in `AgentDetailPage.tsx`'s two rows; every other `justify-between` match is a legitimately different, correctly-untouched use (pagination, count+action headers). `DiscoverPage.tsx`'s `EndpointDrawer` has the same underlying mechanism in a narrower 480px panel where it's naturally less severe — founder asked this be documented as a known lower-risk instance rather than retrofitted this pass, so the compact pattern is the default for any *future* label-value UI too, not just a wide-container patch.
+
+**`DESIGN_SYSTEM.md` §7.6 "Layout & Alignment" added**, grounded in these real fixed values (not invented abstractly), the same way §4 Elevation came from real tested shadow values. Added as a new subsection under §7 (not a renumbered top-level section) specifically so the many existing `DESIGN_SYSTEM.md §6` code comments referencing the Top Bar section (in `AppTopBar.tsx`, `PageHeader.tsx`, `AgentDetailPage.tsx`, etc.) stay valid — a deliberate scope-conscious choice.
+
+**Verified:** real `tsc`/`vite build` clean. Live Playwright verification against the real shared stack, both fixes confirmed with real pixel measurements and screenshots. Regression spot-check (Agents, Policies, Alerts) clean — B-203's fixes confirmed undisturbed. Full detail in `BACKLOG.md`'s new B-204 entry and `BUILT.md`'s `eami-ui` section.
+
+## Active decision thread (2026-09-21, older) — B-203 built: three real UI bugs found via direct screenshot review of the just-shipped B-201 retrofit, all root-caused live before any fix per explicit instruction, one wrong first measurement caught and redone rather than reported wrong
 
 Founder found 3 real defects via direct screenshots of the live app, post-B-201: a mismatched double horizontal line under the logo/breadcrumb (every page), a broken collapsed sidebar rail (unwanted horizontal scroll, icons not centered), and two spacing issues (relationship graph edge-label crowding, Alerts page excessive vertical gap). Investigation-first brief — reported all 4 root causes and a recommended fix before touching any code; approval given only after.
 
@@ -1926,6 +1940,22 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-21 (very latest) by Claude Code — B-204 DONE: relationship graph
+PAD hardened 40->48px (a real, grounded defensive fix, applied after
+thorough live investigation found the reported clip NOT reproducible
+with the current code across 4 agents x 3 viewports -- reported honestly,
+founder approved hardening anyway rather than chasing further), Agent
+Details' Owner/Scope rows changed from edge-justified justify-between to
+a compact fixed-width-label + gap-3 grouped pattern, confirmed as the
+only real instance of that spread bug via a full grep (EndpointDrawer's
+similar-but-narrower pattern documented, not retrofitted, per explicit
+instruction). New DESIGN_SYSTEM.md §7.6 "Layout & Alignment" added,
+grounded in these real fixed values, placed as a §7 subsection (not a
+renumbered top-level section) to avoid invalidating existing §6 Top Bar
+code-comment references elsewhere in the codebase. Live-verified, zero
+regression to B-203's fixes. Full detail in BACKLOG.md's new B-204 entry
+and BUILT.md's eami-ui section. Previous entry, preserved below:
+
 2026-09-21 (latest) by Claude Code — B-203 DONE: 3 real UI bugs found via
 direct screenshot review of B-201, fixed after live root-cause investigation
 for each (Sidebar/AppTopBar border-height mismatch reconciled in both

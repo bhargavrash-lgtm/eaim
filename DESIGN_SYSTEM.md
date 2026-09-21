@@ -242,6 +242,66 @@ across all workspaces is an account-wide-admin-only affordance. Render a
 single-workspace user's context as a fixed label, not an interactive
 dropdown.
 
+### 7.6 Layout & Alignment
+Extracted from two real, live-screenshot-confirmed bugs on Agent Detail
+(B-204) — grounded in the actual values just fixed, the same way §4's
+shadow values came from real, tested elevation work, not invented in the
+abstract.
+
+**(a) Label-value pairs: compact and grouped, never edge-justified across
+a wide container.** Agent Detail's Owner/Scope rows used
+`flex items-center justify-between` inside a full-width (~1100px+) card —
+that stretches a short label to the far left and its value to the far
+right of the row, reading as an awkward extreme rather than a scannable
+pair. The confirmed fix: keep the card full-width (it should still match
+the page's own card language), but change the *internal* alignment to a
+fixed-width label column immediately followed by its value:
+
+```html
+<div class="flex items-center gap-3 rounded-lg bg-white px-4.5 py-3.5 shadow-l1">
+  <span class="w-20 flex-shrink-0 text-sm font-semibold text-ink">Owner</span>
+  <span class="text-sm text-ink-faint">{value}</span>
+</div>
+```
+
+`w-20` (enough for a short label like "Owner"/"Scope" without wrapping) +
+`gap-3` (12px) keeps every row's value starting at the same x-position
+regardless of label length, and keeps the whole pair grouped on the left
+rather than stretched to the row's full width. **This is the default for
+any future label-value UI, not only a retrofit for already-wide
+containers.** `DiscoverPage.tsx`'s `EndpointDrawer` has a structurally
+identical `justify-between` name+metadata pattern (its `<li>` rows,
+e.g. MCP servers/AI apps/local models), but inside a narrow 480px
+`SlideOverPanel` — the same edge-justification mechanism is present, it's
+just naturally far less visually extreme at that width, which is why it
+wasn't flagged as broken. Don't use container width as a reason to skip
+this pattern on a new panel: build label-value rows compact from the
+start, so the next person doesn't have to rediscover this the way this
+session did.
+
+**(b) Dynamic-content containers must size to their real content — with
+real headroom, not a bare-minimum fit.** The relationship graph
+(§7.1)'s container height is computed from real node/junction counts
+(`PAD`/`ROW_H`/`JUNCTION_GAP`), not fixed — the right mechanism, since a
+fixed height can't know in advance how many real connections an agent
+has. But it was paired with `overflow: hidden` and a tight `PAD` (40px),
+which is a silent-failure combination: if the sizing formula is ever off
+by a few px in some future edge case (a new junction type, an unusual
+target count), content clips with **no visible error and no scroll
+affordance** — it just vanishes. Confirmed fix, applied without waiting
+for a live-reproduced clip: `PAD` increased to 48px, real headroom on
+both ends of the computed height, cheap insurance against that failure
+class. **The rule going forward:** a dynamic-content container that
+computes its own size from real data may use `overflow: hidden` for
+corner-radius masking (as this one does, `rounded-xl`), but its sizing
+formula must include deliberate extra padding beyond the tightest
+mathematically-sufficient fit — never size to the exact pixel boundary of
+the content it's measuring. If a future container's content can vary
+enough that even generous padding might not be enough, prefer a real
+scroll affordance (`overflow-y-auto` with a definite max-height) over
+`overflow: hidden` with a fixed/computed height — silent clipping is
+always the worse failure mode of the two.
+
 ---
 
 ## 8. Anti-Patterns — Explicitly Rejected, Do Not Reintroduce
