@@ -1373,7 +1373,27 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
-## Active decision thread (2026-09-21, newest) — B-206 built: Agent Details rebuilt as a real metadata grid pattern, built to a confirmed live canvas mockup visited directly (not described), superseding B-204's per-field-card layout; a real stale-container false negative caught during verification and correctly resolved via the established B-199 workaround, not mistaken for an actual defect
+## Active decision thread (2026-09-21, newest) — B-207 built: Groups + Workspaces first real increment (schema, workspace-scoped policy-inheritance mechanism, RBAC junction table), the first build brief out of this session's own B-196/B-197 investigation — mandatory reviewer + security passes both ran and both found real, shipped-design-changing issues, all fixed and re-verified live before this shipped
+
+Same severity class as B-128/B-141 (cross-tenant policy/identity leaks), so this session's own investigation report's proposal was built exactly as designed, then put through real adversarial review rather than assumed correct because the design reasoning looked sound on paper.
+
+**Schema:** `groups`/`group_memberships` (the general many-to-many primitive, B-196's need), `workspaces` (one-to-one with a `groups` row — every Workspace IS-A Group, the investigation's own resolution), `workspace_memberships` (real RBAC, deliberately not on the JWT — resolved fresh per request instead, so a membership change takes effect immediately and the already-twice-hardened Claims struct never needs to change). Nullable `workspace_id` on `gateway_agents`/`endpoints`/`policies`, NULL = org-wide.
+
+**The ordering mechanism:** a composite sort key — `(workspace_id IS NULL) DESC, priority ASC` — applied in both the SQL query and the Go evaluator's comparator, so a global rule always sorts ahead of a workspace-scoped one regardless of raw priority number. The mandatory adversarial test (explicitly required as a blocking acceptance criterion, not an implementation detail) was verified to actually catch the regression it claims to: the comparator was temporarily reverted, the test confirmed to fail with a clear message, then the fix restored — an executed proof.
+
+**A real, blocking gap found by the mandatory code-review pass:** exhaustively traced every real `ActionContext` construction site and found the workflow-triggered dispatch path (`internal/workflow/http.go`/`executor.go`) never received `WorkspaceID` at all — the entire feature would have silently never applied to a workflow run, only to direct MCP calls. Fixed, with 2 new real-Postgres tests proving both the real dispatch and its separate audit-facing preview now agree.
+
+**A real HIGH-severity finding from the mandatory security pass, changing the shipped schema design:** the first version used `ON DELETE SET NULL` for `policies.workspace_id`. Since an empty `WorkspaceID` is the evaluator's own "global, evaluated first" signal, deleting a workspace would have silently *promoted* every policy scoped to it — including a legitimate permissive exception authored for that one workspace — into an org-wide floor policy, outranking real `deny`/`escalate` rules for the whole org, with no one intending an org-wide change. Fixed to `ON DELETE CASCADE` for policies specifically (agents/endpoints correctly keep `SET NULL` — losing membership is benign in a way losing a policy's scope isn't). A MEDIUM finding (no schema-level constraint tying a row's `workspace_id` to its own `org_id` — the same class of gap behind B-128/B-141) closed with a database trigger. A LOW finding (down-migration ordering could abort a real rollback) fixed by reordering. All three re-verified live: the already-applied flawed migration was rolled back and the corrected version reapplied against the real dev Postgres (safe, not yet shipped beyond this session) — a real transaction proved a deleted workspace's policy is gone, not orphaned; a real cross-org insert attempt confirmed rejected. Both now have permanent regression tests, not just a one-off manual proof.
+
+**Note on process:** the security-review sub-task hit a rate limit mid-run, but had already delivered its full findings before failing — treated as a genuine, complete report (not discarded for the failure status), each finding independently re-verified against the actual code/schema before being acted on, exactly the same "confirm, don't just trust a single source" discipline this session has applied throughout.
+
+**Verified:** real `go build`/`go vet`/`go test ./...` clean across `eami-policy` and the full `eami-gateway` module (real Postgres), re-run after every fix including the post-security-review schema correction; `eami-api` confirmed still building. Zero leaked throwaway test databases.
+
+**Explicitly out of scope, disclosed:** no CRUD API endpoints yet (schema + mechanism only); `audit_log`/`token_usage`'s own workspace_id denormalization; endpoint/other-CI-type group membership (B-196's own broader work).
+
+Full detail in `BACKLOG.md`'s new B-207 entry and `BUILT.md`'s `eami-gateway`/`eami-policy` sections.
+
+## Active decision thread (2026-09-21, older) — B-206 built: Agent Details rebuilt as a real metadata grid pattern, built to a confirmed live canvas mockup visited directly (not described), superseding B-204's per-field-card layout; a real stale-container false negative caught during verification and correctly resolved via the established B-199 workaround, not mistaken for an actual defect
 
 Founder pointed to a specific live canvas mockup (`Layer6-MetadataGrid.dc.html`, "Layer 6 — Metadata Grid Pattern") and asked for Agent Details to be rebuilt to it exactly, replacing B-204's per-field-card layout, which solved alignment but not wasted screen space (one full-width card per field).
 
@@ -1974,6 +1994,29 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-21 (newest of all) by Claude Code — B-207 DONE: Groups +
+Workspaces first real increment (schema migration 000021, workspace-
+scoped policy-inheritance mechanism in eami-policy/eami-gateway, RBAC
+junction table), the first build brief out of this session's own
+B-196/B-197 investigation. Mandatory reviewer + security passes both
+ran and both found real, shipped-design-changing issues, all fixed and
+re-verified live: the code-review pass found workflow-triggered
+dispatches never received WorkspaceID at all (the whole feature would
+have silently never applied to a workflow run); the security pass found
+policies.workspace_id's original ON DELETE SET NULL would have silently
+promoted a deleted workspace's own policies (including permissive
+exceptions) into org-wide floor policies, plus a missing cross-table
+org_id/workspace_id consistency check (same class as B-128/B-141) and a
+down-migration ordering bug. All three schema issues were fixed by
+rolling back and reapplying the corrected migration against the real
+dev Postgres (safe -- not yet shipped beyond this session). The mandated
+adversarial test (global-always-before-workspace-regardless-of-priority)
+was confirmed to actually fail without the fix, not just pass by
+construction. Full test suite (go build/vet/test) clean across
+eami-policy and eami-gateway (real Postgres), eami-api confirmed
+unaffected. Full detail in BACKLOG.md's new B-207 entry and BUILT.md's
+eami-gateway/eami-policy sections. Previous entry, preserved below:
+
 2026-09-21 (truly latest) by Claude Code — B-206 DONE: Agent Details
 rebuilt as a real metadata grid pattern (one card, CSS grid, grid-cols-2
 for today's real 2-field Owner/Scope case rather than the mockup's

@@ -171,6 +171,7 @@ func (e *Executor) runStep(ctx context.Context, template mcp.ActionContext, orgI
 	// Never used to skip or alter dispatch()'s own enforcement below.
 	pc := policy.ActionContext{
 		OrgID:       template.OrgID,
+		WorkspaceID: template.WorkspaceID,
 		AgentName:   template.AgentName,
 		ToolName:    conn.name,
 		ActionType:  step.Action,

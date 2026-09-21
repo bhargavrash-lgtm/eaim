@@ -88,6 +88,7 @@ func (h *HTTPHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 		AgentUUID:   agentRec.ID,
 		AgentName:   agentName,
 		OrgID:       agentRec.OrgID,
+		WorkspaceID: agentRec.WorkspaceID,
 		AgentScope:  agentRec.Scope,
 		Environment: env,
 		ReceivedAt:  time.Now().UTC(),

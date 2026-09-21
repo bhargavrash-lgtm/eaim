@@ -78,6 +78,23 @@ func matchesRule(ac ActionContext, r Rule) bool {
 		return false
 	}
 
+	// --- WorkspaceID (B-207) ---
+	// A workspace-scoped rule (r.WorkspaceID != "") requires the dispatch
+	// to genuinely be IN that exact workspace. Unlike OrgID's empty-is-
+	// wildcard convention (a test-literal-only convenience, since real
+	// org_id is never empty), an empty ac.WorkspaceID is a real, common
+	// production value (most agents belong to no workspace) and must
+	// NEVER be treated as matching a workspace-scoped rule -- there is
+	// nothing to add a restriction on top of for an agent that isn't
+	// organizationally part of that workspace to begin with. A global
+	// rule (r.WorkspaceID == "") matches a dispatch from any workspace,
+	// or none -- the org floor applies everywhere within the org.
+	// Checked second, immediately after OrgID -- same "cheapest checks
+	// first, unconditionally" discipline that check already established.
+	if r.WorkspaceID != "" && r.WorkspaceID != ac.WorkspaceID {
+		return false
+	}
+
 	c := r.Conditions
 
 	// --- AgentNamePattern (glob) ---

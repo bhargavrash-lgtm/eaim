@@ -29,6 +29,13 @@ type AgentRecord struct {
 	Scope    string
 	RiskTier string // "low" | "medium" | "high"
 	Status   string // "active" | "suspended" | "revoked"
+	// WorkspaceID (B-207) is gateway_agents.workspace_id, empty when the
+	// agent belongs to no workspace (a real, common value -- not an
+	// error state). Server-resolved here, the same trust boundary as
+	// every other field on this record -- never accept a workspace_id
+	// from client input for policy purposes (mirrors OrgID's own
+	// established discipline).
+	WorkspaceID string
 }
 
 // ErrAgentNotFound is returned when the agent name is unknown.
@@ -103,13 +110,13 @@ func (r *Registry) Invalidate(name string) {
 
 func (r *Registry) queryByName(ctx context.Context, name string) (*AgentRecord, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id::text, org_id::text, name, scope, risk_tier, status
+		SELECT id::text, org_id::text, name, scope, risk_tier, status, COALESCE(workspace_id::text, '')
 		FROM gateway_agents
 		WHERE name = $1
 		LIMIT 1
 	`, name)
 	var rec AgentRecord
-	if err := row.Scan(&rec.ID, &rec.OrgID, &rec.Name, &rec.Scope, &rec.RiskTier, &rec.Status); err != nil {
+	if err := row.Scan(&rec.ID, &rec.OrgID, &rec.Name, &rec.Scope, &rec.RiskTier, &rec.Status, &rec.WorkspaceID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("%w: %s", ErrAgentNotFound, name)
 		}
@@ -151,13 +158,13 @@ func (r *Registry) queryByName(ctx context.Context, name string) (*AgentRecord, 
 // needs a correct result on every call, not a 30s-stale one.
 func (r *Registry) LookupByNameAndOrg(ctx context.Context, name, orgID string) (*AgentRecord, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id::text, org_id::text, name, scope, risk_tier, status
+		SELECT id::text, org_id::text, name, scope, risk_tier, status, COALESCE(workspace_id::text, '')
 		FROM gateway_agents
 		WHERE name = $1 AND org_id = $2
 		LIMIT 1
 	`, name, orgID)
 	var rec AgentRecord
-	if err := row.Scan(&rec.ID, &rec.OrgID, &rec.Name, &rec.Scope, &rec.RiskTier, &rec.Status); err != nil {
+	if err := row.Scan(&rec.ID, &rec.OrgID, &rec.Name, &rec.Scope, &rec.RiskTier, &rec.Status, &rec.WorkspaceID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("%w: %s", ErrAgentNotFound, name)
 		}

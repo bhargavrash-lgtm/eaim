@@ -20,6 +20,18 @@ type ActionContext struct {
 	// scope which rules can match (B-128).
 	OrgID string
 
+	// WorkspaceID (B-207) is the dispatching agent's real workspace, if
+	// any -- resolved server-side from registry.AgentRecord.WorkspaceID
+	// (itself sourced from gateway_agents.workspace_id), the same
+	// server-resolved-never-client-input discipline OrgID's own comment
+	// above already documents. Empty is a genuine, common, real value
+	// (most agents belong to no workspace, matching the org-wide-default
+	// design), NOT a wildcard -- an empty ActionContext.WorkspaceID can
+	// never match a workspace-scoped Rule (see matchesRule), unlike
+	// OrgID's empty-is-wildcard convention which exists only for
+	// hand-built test Rule literals and never applies to real DB data.
+	WorkspaceID string
+
 	AgentID    string
 	AgentName  string
 	// Scope is the canonical declared task scope (preferred over AgentScope).
@@ -111,6 +123,15 @@ type Rule struct {
 	// NOT NULL); empty is treated as a wildcard only to keep hand-built
 	// Rule literals in existing tests working unchanged.
 	OrgID      string
+	// WorkspaceID (B-207) is the workspace this rule is scoped to, if
+	// any. Empty = a global/org-floor rule -- matches a dispatch from
+	// any workspace within the same org (or no workspace at all), the
+	// real mechanism realizing B-197's "workspace policies can only ADD
+	// restrictions, never override or loosen the org floor" requirement:
+	// see evaluator.go's NewEvaluator sort and structural.go's
+	// matchesRule for the two places this field's ordering/matching
+	// semantics are actually enforced -- this field alone does nothing.
+	WorkspaceID string
 	Name       string
 	Priority   int        // lower number = higher priority (1 is highest)
 	Conditions Conditions

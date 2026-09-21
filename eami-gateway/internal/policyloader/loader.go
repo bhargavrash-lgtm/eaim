@@ -118,9 +118,17 @@ func (l *Loader) Listen(ctx context.Context) {
 
 // queryRules fetches all active policies with their conditions from Postgres.
 func (l *Loader) queryRules(ctx context.Context) ([]policy.Rule, error) {
+	// B-207: workspace_id selected + ORDER BY updated to the same
+	// composite scheme evaluator.go's NewEvaluator comparator enforces
+	// (global/NULL-workspace rows first, regardless of raw priority).
+	// This SQL ordering is NOT itself load-bearing -- NewEvaluator
+	// unconditionally re-sorts whatever it receives using its own
+	// comparator -- but is kept consistent with it so a future reader
+	// isn't misled by mismatched ordering hints between the query and
+	// the evaluator.
 	const q = `
 		SELECT
-			p.id, p.org_id, p.name, p.priority, p.action, p.alert,
+			p.id, p.org_id, p.workspace_id, p.name, p.priority, p.action, p.alert,
 			pc.agent_name_pattern,
 			pc.tool_names,
 			pc.action_types,
@@ -132,7 +140,7 @@ func (l *Loader) queryRules(ctx context.Context) ([]policy.Rule, error) {
 		FROM policies p
 		LEFT JOIN policy_conditions pc ON pc.policy_id = p.id
 		WHERE p.status = 'active'
-		ORDER BY p.priority ASC, p.id ASC`
+		ORDER BY (p.workspace_id IS NULL) DESC, p.priority ASC, p.id ASC`
 
 	rows, err := l.pool.Query(ctx, q)
 	if err != nil {
@@ -146,6 +154,7 @@ func (l *Loader) queryRules(ctx context.Context) ([]policy.Rule, error) {
 	for rows.Next() {
 		var (
 			id, orgID, name, action string
+			workspaceID             *string
 			priority                int
 			alert                   bool
 			agentPattern            *string
@@ -158,7 +167,7 @@ func (l *Loader) queryRules(ctx context.Context) ([]policy.Rule, error) {
 			toolServerIDs           []string
 		)
 		if err := rows.Scan(
-			&id, &orgID, &name, &priority, &action, &alert,
+			&id, &orgID, &workspaceID, &name, &priority, &action, &alert,
 			&agentPattern, &toolNames, &actionTypes, &environments,
 			&recordCountGT, &semanticRule, &scopeDrift, &toolServerIDs,
 		); err != nil {
@@ -193,14 +202,19 @@ func (l *Loader) queryRules(ctx context.Context) ([]policy.Rule, error) {
 			cond.ToolServerIDs = toolServerIDs
 		}
 
+		workspaceIDStr := ""
+		if workspaceID != nil {
+			workspaceIDStr = *workspaceID
+		}
 		rules = append(rules, policy.Rule{
-			ID:         id,
-			OrgID:      orgID,
-			Name:       name,
-			Priority:   priority,
-			Conditions: cond,
-			Action:     action,
-			Alert:      alert,
+			ID:          id,
+			OrgID:       orgID,
+			WorkspaceID: workspaceIDStr,
+			Name:        name,
+			Priority:    priority,
+			Conditions:  cond,
+			Action:      action,
+			Alert:       alert,
 		})
 	}
 	return rules, rows.Err()

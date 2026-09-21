@@ -81,9 +81,35 @@ func NewEvaluator(rules []Rule, opts ...Option) Evaluator {
 	}
 
 	// Copy and sort so the caller's slice is not mutated.
+	//
+	// B-207: composite sort key, NOT priority alone. Global/org-floor
+	// rules (WorkspaceID == "") ALWAYS sort before every workspace-scoped
+	// rule, regardless of either one's raw Priority number -- this is
+	// the entire mechanism that guarantees a workspace policy can never
+	// outrank (and therefore never override or loosen) the org floor.
+	// Only within the same group (both global, or both scoped to the
+	// same/different workspaces) does Priority act as the tiebreak.
+	//
+	// This comparator is the load-bearing half of the mechanism -- the
+	// SQL ORDER BY in policyloader.queryRules() also sorts this way for
+	// consistency/readability, but it is NOT what determines the final
+	// evaluation order: NewEvaluator unconditionally re-sorts whatever
+	// slice it's given, using ONLY this comparator, regardless of what
+	// order the caller already had it in. A comparator that reverted to
+	// comparing Priority alone would silently discard the SQL ordering
+	// and reintroduce the exact "workspace policy outranks the floor"
+	// failure this mechanism exists to prevent -- see
+	// TestNewEvaluator_GlobalAlwaysBeforeWorkspace_RegardlessOfInputOrder
+	// in workspace_test.go, which exists specifically to catch that
+	// regression and must never be weakened or removed.
 	sorted := make([]Rule, len(rules))
 	copy(sorted, rules)
 	sort.Slice(sorted, func(i, j int) bool {
+		iGlobal := sorted[i].WorkspaceID == ""
+		jGlobal := sorted[j].WorkspaceID == ""
+		if iGlobal != jGlobal {
+			return iGlobal // global rows sort first, regardless of Priority
+		}
 		return sorted[i].Priority < sorted[j].Priority
 	})
 

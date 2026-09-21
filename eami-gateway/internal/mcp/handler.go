@@ -36,11 +36,17 @@ import (
 // ActionContext is the normalised representation of a tool_call.
 type ActionContext struct {
 	// From JWT + registry lookup
-	AgentID    string // JWT sub  (e.g. "agent:claude-support-01")
-	AgentUUID  string // gateway_agents.id UUID
-	AgentName  string // short name (JWT sub without "agent:" prefix)
-	OrgID      string // gateway_agents.org_id UUID
-	AgentScope string // declared scope (for scope-drift evaluation)
+	AgentID   string // JWT sub  (e.g. "agent:claude-support-01")
+	AgentUUID string // gateway_agents.id UUID
+	AgentName string // short name (JWT sub without "agent:" prefix)
+	OrgID     string // gateway_agents.org_id UUID
+	// WorkspaceID (B-207) is gateway_agents.workspace_id via
+	// registry.AgentRecord, empty when the agent belongs to no
+	// workspace -- a real, common value, not an error state. Same
+	// server-resolved-from-registry, never-client-input trust boundary
+	// as OrgID immediately above.
+	WorkspaceID string
+	AgentScope  string // declared scope (for scope-drift evaluation)
 
 	// From tool_call params
 	Tool       string
@@ -67,6 +73,7 @@ type ActionContext struct {
 func (a ActionContext) ToPolicyContext() policy.ActionContext {
 	return policy.ActionContext{
 		OrgID:       a.OrgID,
+		WorkspaceID: a.WorkspaceID,
 		AgentName:   a.AgentName,
 		ToolName:    a.Tool,
 		ActionType:  a.Action,
@@ -397,17 +404,19 @@ func buildActionContext(sess *Session, params toolCallParams, r *http.Request) A
 	if env == "" {
 		env = "unknown"
 	}
-	orgID, agentUUID, agentScope := "", "", ""
+	orgID, agentUUID, agentScope, workspaceID := "", "", "", ""
 	if sess.Agent != nil {
 		orgID = sess.Agent.OrgID
 		agentUUID = sess.Agent.ID
 		agentScope = sess.Agent.Scope
+		workspaceID = sess.Agent.WorkspaceID
 	}
 	return ActionContext{
 		AgentID:     sess.Claims.Subject,
 		AgentUUID:   agentUUID,
 		AgentName:   agentName,
 		OrgID:       orgID,
+		WorkspaceID: workspaceID,
 		AgentScope:  agentScope,
 		Tool:        tool,
 		Action:      action,
