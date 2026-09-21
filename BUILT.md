@@ -1301,6 +1301,20 @@ Breadcrumb: `Workflows` (real `<Link>` to `/gateway/workflows`) -> the workflow'
 
 **Files touched:** `pages/gateway/RelationshipGraph.tsx`. **Dependencies:** B-200 (original graph), B-203 (label-offset constant, unchanged), B-204 (height-cap reasoning this directly extends).
 
+**B-206 (2026-09-21): Agent Details rebuilt as a real metadata grid pattern, matching a confirmed live canvas mockup exactly, superseding B-204's per-field-card layout.**
+
+**Mockup visited directly, not described:** listed the design canvas's files, read `project/Layer6-MetadataGrid.dc.html`'s real source for exact values -- card `10px` radius, L1 elevation (exactly this codebase's existing `shadow-l1` token) + a `1px solid rgba(228,231,240,0.55)` border, `22px`/`26px` padding, grid at `20px` row-gap/`28px` column-gap, each cell a `10.5px/600/0.4px-tracking/#8890AD` all-caps label above a `13px/600/#1A2140` value (identifier-style values in IBM Plex Mono). `#8890AD`/`#1A2140` confirmed exact matches for this codebase's existing `ink-faint`/`ink` tokens.
+
+**Column-count decision, reported and approved before building: `grid-cols-2`, not the mockup's illustrative `repeat(3, 1fr)`.** The mockup shows 6 fields to prove the pattern scales; only Owner/Scope are real fields on this page today (Model/Risk/Status already shown elsewhere, in the identity header, not duplicated here) -- 3 columns with 2 real cells would leave a visually empty trailing slot, exactly the failure the brief warned against.
+
+**Token-discipline deviations, proposed and approved, not silent:** label uses the existing `text-2xs` token (10px) rather than the mockup's literal 10.5px, per CLAUDE.md's hard micro-text-token rule. Value originally proposed as an exact `text-[13px]`; founder's one adjustment during approval -- use the existing `text-sm` token (14px) instead, the 1px difference judged visually negligible against introducing a new one-off value into a pattern meant to be reused elsewhere. `rounded-[10px]` reuses this same file's own pre-existing icon-chip precedent. `gap-y-5`/`gap-x-7` are exact standard Tailwind tokens for the mockup's 20px/28px gaps.
+
+**A real, live-caught false negative during verification, resolved via the established B-199 workaround:** the shared Docker stack's stale, pre-repaint `tailwind.config.ts` (same already-documented limitation as B-199/B-201) made the first live check show `boxShadow: none`, pure-black text instead of `ink-faint`/`ink`, and system monospace instead of IBM Plex Mono -- every custom `theme.extend` token failing to resolve. Re-verified via the same disposable-local-dev-server pattern (`npx vite --port 5175` against the real shared `eami-api`): every computed style then matched exactly. Standard Tailwind utilities not depending on `theme.extend` were correct in both passes.
+
+**Verified:** real `npx tsc --noEmit`/`npx vite build`, clean. Live Playwright verification against the disposable-server pass (the accurate one): grid structure, computed colors, fonts, shadow, padding, radius, gaps all confirmed matching the mockup's real spec. Real screenshot comparison against a faithful static HTML reproduction of the mockup's own source (the `.dc.html` file itself needs the artifact runtime and can't render standalone) -- visually matching: card style, typography, color, 2-column alignment, real Owner/Scope data. **Regression spot-check:** one real `<h1>`, zero console errors, the relationship graph and B-205's pan/zoom (Reset view, drag-to-pan) both re-confirmed fully functional; Agents/Policies re-checked clean.
+
+**Files touched:** `pages/gateway/AgentDetailPage.tsx` (Agent Details section only), `DESIGN_SYSTEM.md` (§7.6(a) rewritten to document the metadata grid as the new standing default; §7.6(b) untouched). **Dependencies:** B-204 (superseded pattern), B-205 (pan/zoom, re-confirmed undisturbed), the live design canvas (source of truth for the mockup).
+
 ---
 
 ## appliance

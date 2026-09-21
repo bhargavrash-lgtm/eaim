@@ -243,41 +243,64 @@ single-workspace user's context as a fixed label, not an interactive
 dropdown.
 
 ### 7.6 Layout & Alignment
-Extracted from two real, live-screenshot-confirmed bugs on Agent Detail
-(B-204) — grounded in the actual values just fixed, the same way §4's
-shadow values came from real, tested elevation work, not invented in the
-abstract.
+Extracted from real, live-screenshot-confirmed work on Agent Detail
+(B-204, B-206) — grounded in the actual values built and verified, the
+same way §4's shadow values came from real, tested elevation work, not
+invented in the abstract.
 
-**(a) Label-value pairs: compact and grouped, never edge-justified across
-a wide container.** Agent Detail's Owner/Scope rows used
-`flex items-center justify-between` inside a full-width (~1100px+) card —
-that stretches a short label to the far left and its value to the far
-right of the row, reading as an awkward extreme rather than a scannable
-pair. The confirmed fix: keep the card full-width (it should still match
-the page's own card language), but change the *internal* alignment to a
-fixed-width label column immediately followed by its value:
+**(a) Label-value pairs: one dense metadata-grid card, not one card per
+field — the standing default, superseding an earlier, narrower fix.**
+B-204's own first fix (a fixed-width label column inside a
+`justify-between` row) solved the alignment problem for 2 fields but
+still meant one full-width card per field — a real, disclosed
+wasted-space problem the moment a 3rd/4th field is added. **B-206
+replaced it with a real CSS grid pattern**, confirmed against a live
+canvas mockup (`Layer6-MetadataGrid.dc.html`) before building, matching
+an established convention (GitHub repo sidebars, Linear issue detail
+panels): one card, a fixed-column grid, each cell a small all-caps muted
+label stacked above its value.
 
 ```html
-<div class="flex items-center gap-3 rounded-lg bg-white px-4.5 py-3.5 shadow-l1">
-  <span class="w-20 flex-shrink-0 text-sm font-semibold text-ink">Owner</span>
-  <span class="text-sm text-ink-faint">{value}</span>
+<div class="grid grid-cols-2 gap-y-5 gap-x-7 rounded-[10px] border border-[rgba(228,231,240,0.55)] bg-white px-[26px] py-[22px] shadow-l1">
+  <div class="flex flex-col gap-[3px]">
+    <span class="text-2xs font-semibold tracking-wider text-ink-faint">OWNER</span>
+    <span class="font-mono text-sm font-semibold text-ink">{value}</span>
+  </div>
+  <!-- one cell per field, same shape -->
 </div>
 ```
 
-`w-20` (enough for a short label like "Owner"/"Scope" without wrapping) +
-`gap-3` (12px) keeps every row's value starting at the same x-position
-regardless of label length, and keeps the whole pair grouped on the left
-rather than stretched to the row's full width. **This is the default for
-any future label-value UI, not only a retrofit for already-wide
-containers.** `DiscoverPage.tsx`'s `EndpointDrawer` has a structurally
-identical `justify-between` name+metadata pattern (its `<li>` rows,
-e.g. MCP servers/AI apps/local models), but inside a narrow 480px
-`SlideOverPanel` — the same edge-justification mechanism is present, it's
-just naturally far less visually extreme at that width, which is why it
-wasn't flagged as broken. Don't use container width as a reason to skip
-this pattern on a new panel: build label-value rows compact from the
-start, so the next person doesn't have to rediscover this the way this
-session did.
+**Column count is a real, per-instance judgment call, not a fixed rule:**
+the mockup itself shows `grid-cols-3` populated with 6 illustrative
+fields to prove the pattern scales; Agent Detail's real 2-field case
+(Owner/Scope, today) uses `grid-cols-2` instead — 3 columns with 2 real
+cells would leave one visually empty trailing slot, the exact failure
+this pattern exists to avoid. Pick the column count that fills cleanly
+for the real field count at hand; re-evaluate it if real fields are
+added later (2 fields comfortably fits 3 into `grid-cols-3` too, once a
+3rd real field exists).
+`gap-y-5`/`gap-x-7` are exact standard Tailwind tokens (20px/28px), not
+arbitrary values — reach for the standard scale before an arbitrary
+bracket value even when matching a specific mockup pixel spec.
+Identifier-style values (an owner ID, a scope string) use `font-mono`;
+human-readable values (a date, a plain status word) don't — match the
+value's own nature, not a blanket rule either way.
+**Token discipline over literal mockup pixels where a close token
+already exists:** the mockup's own sketch used 10.5px labels/13px
+values; shipped as `text-2xs` (10px, the existing micro-text token —
+CLAUDE.md's hard rule for anything under `text-xs`, non-negotiable) and
+`text-sm` (14px, the nearest existing scale step) respectively — both
+disclosed, both judged visually negligible, neither introduces a new
+one-off value into a pattern explicitly meant to be reused elsewhere.
+**This is the standing default for any future label-value UI on this
+page or others, not only a retrofit for already-wide containers** —
+`DiscoverPage.tsx`'s `EndpointDrawer` has a structurally similar
+`justify-between` name+metadata pattern (its `<li>` rows, e.g. MCP
+servers/AI apps/local models) inside a narrow 480px `SlideOverPanel`; it
+wasn't retrofitted to this grid (the edge-justification mechanism there
+is naturally far less visually extreme at that width, not urgent), but a
+future rebuild of that panel should reach for this grid pattern too,
+not the older per-row `justify-between` approach.
 
 **(b) Dynamic-content containers must size to their real content — with
 real headroom, not a bare-minimum fit.** The relationship graph

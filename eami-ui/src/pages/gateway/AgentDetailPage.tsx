@@ -219,24 +219,36 @@ export function AgentDetailPage() {
           <Wrench className="h-3.5 w-3.5 text-ink-faint" />
           Agent Details
         </div>
-        {/* B-204: compact grouped label-value pattern, not edge-justified
-            justify-between -- this card spans the full ~1100px+ content
-            width, so justify-between pushed "Owner"/"Scope" to the far
-            left and their values to the far right, reading as extreme
-            rather than a scannable pair. A fixed-width label column
-            (w-20, enough for "Owner"/"Scope" without wrapping) + the
-            value directly beside it keeps the card full-width (matching
-            this page's own card language) while the actual content
-            reads as one compact, left-aligned group. This is now
-            DESIGN_SYSTEM.md's documented default label-value pattern. */}
-        <div className="mt-3 flex flex-col gap-2">
-          <div className="flex items-center gap-3 rounded-lg bg-white px-4.5 py-3.5 shadow-l1">
-            <span className="w-20 flex-shrink-0 text-sm font-semibold text-ink">Owner</span>
-            <span className="text-sm text-ink-faint">{agent.owner}</span>
+        {/* B-206: metadata grid pattern, replacing B-204's per-field
+            card stack entirely -- built to the live canvas mockup
+            (Layer6-MetadataGrid.dc.html) exactly: one dense card, real
+            CSS grid, not several sparse justify-between cards. Solves
+            alignment (a grid column locks every label to the same
+            x-position automatically) and wasted space (one card, not N)
+            in the same structural change, rather than the earlier
+            per-field fix's narrower alignment-only scope.
+            2 columns, not the mockup's illustrative repeat(3, 1fr): the
+            mockup shows 6 fields to prove the pattern scales, but only
+            Owner/Scope are real fields on this page today -- 3 columns
+            with 2 real cells would leave one visually empty trailing
+            slot, exactly the failure mode the mockup itself warns
+            against. gap-y-5/gap-x-7 are exact standard Tailwind tokens
+            for the mockup's 20px/28px gaps, not arbitrary values.
+            rounded-[10px] matches the mockup's radius and this same
+            file's own icon-chip precedent above. Label uses the
+            existing text-2xs token (10px) rather than the mockup's
+            literal 10.5px, per CLAUDE.md's hard micro-text-token rule;
+            value uses the existing text-sm token (14px) rather than the
+            mockup's literal 13px, a 1px difference judged visually
+            negligible against reusing an existing scale step. */}
+        <div className="mt-3 grid grid-cols-2 gap-y-5 gap-x-7 rounded-[10px] border border-[rgba(228,231,240,0.55)] bg-white px-[26px] py-[22px] shadow-l1">
+          <div className="flex flex-col gap-[3px]">
+            <span className="text-2xs font-semibold tracking-wider text-ink-faint">OWNER</span>
+            <span className="font-mono text-sm font-semibold text-ink">{agent.owner}</span>
           </div>
-          <div className="flex items-center gap-3 rounded-lg bg-white px-4.5 py-3.5 shadow-l1">
-            <span className="w-20 flex-shrink-0 text-sm font-semibold text-ink">Scope</span>
-            <span className="max-w-md truncate text-sm text-ink-faint" title={agent.scope}>{agent.scope}</span>
+          <div className="flex flex-col gap-[3px]">
+            <span className="text-2xs font-semibold tracking-wider text-ink-faint">SCOPE</span>
+            <span className="truncate font-mono text-sm font-semibold text-ink" title={agent.scope}>{agent.scope}</span>
           </div>
         </div>
       </div>

@@ -1373,7 +1373,23 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
-## Active decision thread (2026-09-21, newest) — B-205 built: relationship graph pan/zoom, with a real, explicitly-engineered click-vs-drag disambiguation that never touches the existing node-click wiring, plus a real regression (label wrapping) caught and fixed during this brief's own live verification before it shipped
+## Active decision thread (2026-09-21, newest) — B-206 built: Agent Details rebuilt as a real metadata grid pattern, built to a confirmed live canvas mockup visited directly (not described), superseding B-204's per-field-card layout; a real stale-container false negative caught during verification and correctly resolved via the established B-199 workaround, not mistaken for an actual defect
+
+Founder pointed to a specific live canvas mockup (`Layer6-MetadataGrid.dc.html`, "Layer 6 — Metadata Grid Pattern") and asked for Agent Details to be rebuilt to it exactly, replacing B-204's per-field-card layout, which solved alignment but not wasted screen space (one full-width card per field).
+
+**Mockup visited directly, its real source read, not a prose description worked from:** listed the design canvas's files, read the artboard's actual HTML/inline-CSS values — a single card, 10px radius, exactly this codebase's existing `shadow-l1` elevation token plus a real border, 22px/26px padding, a CSS grid at 20px row-gap/28px column-gap, each cell an all-caps muted label stacked above its value. `#8890AD`/`#1A2140` confirmed exact matches for the existing `ink-faint`/`ink` color tokens — real values, not re-derived from scratch.
+
+**Column-count decision, reported and approved before building: `grid-cols-2`, not the mockup's illustrative 3-column layout.** The mockup shows 6 fields to prove the pattern scales; only Owner/Scope are real fields today — 3 columns with 2 real cells would leave a visually empty trailing slot, the exact failure the brief itself warned against.
+
+**Two token-discipline deviations from the mockup's literal pixel values, both explicitly proposed and disclosed, one adjusted by the founder during approval:** the label uses the existing `text-2xs` token (10px vs. the mockup's 10.5px) — non-negotiable, per CLAUDE.md's hard micro-text rule. The value was proposed as an exact-match arbitrary `text-[13px]`; founder's one change — use the existing `text-sm` token (14px) instead, judging the 1px difference visually negligible against introducing a new one-off value into a pattern meant to be reused elsewhere.
+
+**A real false negative during live verification, correctly diagnosed rather than mistaken for an actual defect:** the shared Docker stack's `eami-ui` container still runs a stale, pre-repaint `tailwind.config.ts` (the same already-documented B-199/B-201 limitation) — the first live check showed no box-shadow, plain black text instead of the real `ink`/`ink-faint` colors, and system monospace instead of IBM Plex Mono, since every custom `theme.extend` token failed to resolve against the stale config. Re-verified correctly via the same disposable-local-dev-server workaround already established for this exact class of problem — every computed style then matched the mockup's real intent exactly.
+
+**Verified:** real `tsc`/`vite build` clean. Live Playwright verification (via the disposable server, the accurate pass) confirmed grid structure, computed colors, fonts, shadow, spacing all match. Real screenshot comparison against a faithful static reproduction of the mockup's own source (the `.dc.html` artboard itself needs the artifact runtime and can't render standalone) — visually matching, real Owner/Scope data rendered correctly. Regression spot-check: the relationship graph and B-205's pan/zoom both re-confirmed fully functional and visually undisturbed on the same page.
+
+Full detail in `BACKLOG.md`'s new B-206 entry and `BUILT.md`'s `eami-ui` section.
+
+## Active decision thread (2026-09-21, older) — B-205 built: relationship graph pan/zoom, with a real, explicitly-engineered click-vs-drag disambiguation that never touches the existing node-click wiring, plus a real regression (label wrapping) caught and fixed during this brief's own live verification before it shipped
 
 Investigation-first brief: interaction mechanism, click/drag disambiguation, zoom bounds, and touch scope all reported and approved before any code was touched.
 
@@ -1958,6 +1974,27 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-21 (truly latest) by Claude Code — B-206 DONE: Agent Details
+rebuilt as a real metadata grid pattern (one card, CSS grid, grid-cols-2
+for today's real 2-field Owner/Scope case rather than the mockup's
+illustrative 3-column layout), built to a specific live canvas mockup
+(Layer6-MetadataGrid.dc.html) visited and read directly before any code
+was written -- superseding B-204's per-field-card layout entirely, per
+DESIGN_SYSTEM.md's updated §7.6(a). Two disclosed token-discipline
+deviations from the mockup's literal pixel values (text-2xs over 10.5px,
+text-sm over 13px per the founder's own approval adjustment), both
+judged visually negligible in favor of reusing existing scale tokens. A
+real false negative during live verification -- the shared Docker
+stack's already-documented stale tailwind.config.ts (B-199/B-201) made
+custom color/shadow/font tokens fail to resolve -- was correctly
+diagnosed (not mistaken for an actual defect) and re-verified via the
+same disposable-local-dev-server workaround already established for
+this exact problem class. Real screenshot comparison against a faithful
+static reproduction of the mockup confirmed a visual match; the
+relationship graph and B-205's pan/zoom both re-confirmed undisturbed.
+Full detail in BACKLOG.md's new B-206 entry and BUILT.md's eami-ui
+section. Previous entry, preserved below:
+
 2026-09-21 (absolute latest) by Claude Code — B-205 DONE: real pan/zoom
 added to the relationship graph (0.5x-2.5x zoom-to-cursor via Ctrl/Cmd+
 wheel, click-drag to pan, a Maximize-icon reset-view control, plain
