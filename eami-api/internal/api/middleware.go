@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/eami/api/internal/license"
 )
@@ -121,6 +123,76 @@ func (s *Server) requireRole(allowed ...string) func(http.Handler) http.Handler 
 			if !set[uc.Role] {
 				writeError(w, http.StatusForbidden, "forbidden",
 					"your role ("+uc.Role+") does not have access to this resource")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// requireWorkspaceRole (B-197 increment 3) returns a middleware that
+// resolves a workspace_id from the named route param and requires either
+// a real org-level "admin" (B-197's "Admin/IT sees the aggregated
+// rollup" rule) OR a fresh, per-request workspace_memberships lookup
+// finding a role >= minRole for THIS specific workspace, THIS specific
+// user. minRole is "workspace_member" (any real membership row) or
+// "workspace_admin" (that exact role only).
+//
+// Deliberately not a static config like requireRole -- workspace_id is
+// only known per-request, from the route, and the user's role in it can
+// change between requests (workspace roles are resolved fresh, never
+// carried on the JWT -- B-197's investigation, Part A.2: this is what
+// makes a membership change take effect immediately rather than waiting
+// for the bearer's existing token to expire, and keeps the already-
+// twice-hardened Claims struct, B-128/B-141, untouched).
+//
+// Every route this guards has {paramName} as a required path segment
+// (chi guarantees it's present if the route matched at all) -- there is
+// no "no workspace_id" case here to treat as a wildcard/pass, unlike
+// policies.workspace_id being a genuinely nullable COLUMN (B-207) that
+// means "global." An unparseable param is a real 400, and a workspace_id
+// with no matching membership row (including one belonging to a
+// different org than the caller's own token-asserted org) fails closed
+// with 403 -- never trusted, never a silent pass.
+func (s *Server) requireWorkspaceRole(paramName, minRole string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			uc := claimsFromContext(r)
+			workspaceID, err := uuid.Parse(chi.URLParam(r, paramName))
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "bad_request", "invalid "+paramName)
+				return
+			}
+
+			// Org-level admin always passes -- the org's own administrative
+			// ceiling, same as requireRole("admin") everywhere else.
+			if uc.Role == "admin" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			var role string
+			err = s.queries.DB().QueryRow(r.Context(), `
+				SELECT wm.role FROM workspace_memberships wm
+				JOIN workspaces w ON w.id = wm.workspace_id
+				WHERE wm.user_id = $1 AND wm.workspace_id = $2 AND w.org_id = $3
+			`,
+				pgtype.UUID{Bytes: uc.UserID, Valid: true},
+				pgtype.UUID{Bytes: workspaceID, Valid: true},
+				pgtype.UUID{Bytes: uc.OrgID, Valid: true},
+			).Scan(&role)
+			if err != nil {
+				// No row -- including a real workspace_id that simply
+				// belongs to a different org than the caller's own token --
+				// fails closed. Never distinguishes "workspace doesn't
+				// exist" from "you're not a member" in the response (both
+				// as 403, matching GetPolicy's own cross-org "not_found"
+				// non-disclosure precedent for the equivalent case).
+				writeError(w, http.StatusForbidden, "forbidden", "you do not have access to this workspace")
+				return
+			}
+			if minRole == "workspace_admin" && role != "workspace_admin" {
+				writeError(w, http.StatusForbidden, "forbidden", "workspace_admin role required")
 				return
 			}
 			next.ServeHTTP(w, r)

@@ -216,6 +216,30 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/v1/users/invite", s.InviteUser)
 			r.Put("/v1/users/{userId}/role", s.UpdateUserRole)
 			r.Delete("/v1/users/{userId}", s.DeleteUser)
+			// Workspaces (B-197 increment 3): create/delete are org-wide
+			// structural changes, admin-only, same tier as every other
+			// org-wide write on this line -- not workspace-scoped (there's
+			// no workspace to be "admin of" yet at create time, and delete
+			// is irreversible/cascading, not a workspace_admin's call).
+			r.Post("/v1/workspaces", s.CreateWorkspace)
+			r.Delete("/v1/workspaces/{workspaceId}", s.DeleteWorkspace)
+		})
+
+		// ── Workspaces: workspace-scoped RBAC (B-197 increment 3) ─────────────
+		// requireWorkspaceRole, NOT requireRole -- a per-request, per-resource
+		// check (org-admin OR a fresh workspace_memberships lookup for THIS
+		// specific workspace), never a static role tier. See middleware.go's
+		// own doc comment for the full design.
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireWorkspaceRole("workspaceId", "workspace_admin"))
+			r.Patch("/v1/workspaces/{workspaceId}", s.UpdateWorkspace)
+			r.Post("/v1/workspaces/{workspaceId}/members", s.AddWorkspaceMember)
+			r.Patch("/v1/workspaces/{workspaceId}/members/{userId}", s.UpdateWorkspaceMemberRole)
+			r.Delete("/v1/workspaces/{workspaceId}/members/{userId}", s.RemoveWorkspaceMember)
+		})
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireWorkspaceRole("workspaceId", "workspace_member"))
+			r.Get("/v1/workspaces/{workspaceId}/members", s.ListWorkspaceMembers)
 		})
 
 		// ── Platform-admin only: model_pricing writes (B-113 fix, B-157
@@ -296,6 +320,11 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/v1/gateway/agents", s.ListAgents)
 			r.Get("/v1/gateway/agents/{agentId}", s.GetAgent)
 			r.Get("/v1/gateway/agents/{agentId}/config", s.GetAgentConfig)
+			// Workspaces (B-197 increment 3): names/existence are
+			// organizational metadata, not the scoped data domains B-197
+			// restricts to real members -- same read tier as agents/policies.
+			r.Get("/v1/workspaces", s.ListWorkspaces)
+			r.Get("/v1/workspaces/{workspaceId}", s.GetWorkspace)
 			r.Get("/v1/gateway/agents/{agentId}/connections", s.GetAgentConnections)
 			r.Get("/v1/gateway/policies", s.ListPolicies)
 			r.Get("/v1/gateway/policies/{policyId}", s.GetPolicy)
@@ -361,6 +390,10 @@ func (s *Server) Handler() http.Handler {
 			r.Use(s.viewerReadOnly)
 			r.Get("/v1/approvals", s.ListApprovals)
 			r.Get("/v1/approvals/{approvalId}", s.GetApproval)
+			// Workspaces (B-197 increment 3): self-scoped by the caller's
+			// own JWT sub claim (uc.UserID) -- can only ever return their
+			// own real rows, so any authenticated role may call it.
+			r.Get("/v1/workspaces/mine", s.MyWorkspaceMemberships)
 		})
 	})
 

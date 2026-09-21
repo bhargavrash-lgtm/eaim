@@ -1373,7 +1373,21 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
-## Active decision thread (2026-09-21, newest) — B-207 built: Groups + Workspaces first real increment (schema, workspace-scoped policy-inheritance mechanism, RBAC junction table), the first build brief out of this session's own B-196/B-197 investigation — mandatory reviewer + security passes both ran and both found real, shipped-design-changing issues, all fixed and re-verified live before this shipped
+## Active decision thread (2026-09-21, newest) — B-208 built: Workspace CRUD API + real requireWorkspaceRole RBAC middleware, B-197 increment 3 — the actual enforcement mechanism the investigation designed and B-207 built the schema half of. A founder instruction was deliberately NOT implemented literally because doing so would have introduced a real fail-open hole; both mandatory review passes ran, both clean, both still drove real fixes; live-verified against the real shared container after rebuilding it, applying the B-200 deployment-gap lesson rather than repeating it
+
+**A disclosed deviation from an explicit approval instruction, not a silent override:** the founder's approval message said the new middleware should treat a "NULL workspace_id" as always-passing, drawing an analogy to B-207's own global-floor policy semantic. Investigated before building rather than implemented literally: every route this middleware guards has `{workspaceId}` as a *required* route param (unlike `policies.workspace_id`, a genuinely nullable *column* representing "no workspace assigned"), so there is no "global"/no-workspace case for this specific middleware to represent — treating an absent/unparseable workspace_id as "pass" would have been a real fail-open security hole, directly contradicting the brief's own "fail closed" requirement. Flagged explicitly before writing any code; the founder did not object; proceeded with the fail-closed design instead. This is the same "disclose, don't silently drop or silently comply with something dangerous" discipline this session has applied consistently all along.
+
+**Real convention tracing surfaced one build-plan-changing fact:** `sqlc.yaml` generates `store.Queries` from `schema.sql`, frozen since B-051, predating B-207's new tables entirely. Rather than force an out-of-scope decision about un-freezing it, found and reused an already-established escape hatch already in the codebase (`store.Queries.DB()`, already used by `tools.go`/`finops.go`/the alerting engine for exactly this "no sqlc wrapper exists" situation) — every new query in `workspaces.go` is raw and parameterized through this same path, no sqlc regeneration.
+
+**5 mandatory adversarial tests, all real-Postgres, all passing:** no-membership-row fails closed even with a sufficient org role; a workspace_admin of one workspace cannot manage a different one; a cross-org workspace_id is rejected via both the admin-bypass-then-handler-scoping path and the non-admin membership-lookup path (mirrors B-141's own test shape exactly); the "account-wide admin" pattern (B-197 Part A.3) works with zero new code, confirmed via `/mine`; and the founder's own explicit addition — `AddWorkspaceMember`'s cross-org guard, the *only* real enforcement since `workspace_memberships` has no `org_id` column of its own — proven directly with a positive control ruling out a false pass.
+
+**Both mandatory review passes ran and came back clean, but still drove two real fixes:** code review found most handlers skipped the `s.queries` nil-check `CreateWorkspace` itself already had — fixed consistently via a shared helper. Security review found zero HIGH/MEDIUM findings (independently re-derived the cross-org query's correctness by hand, confirmed no other write path into `workspace_memberships` exists) but flagged a real product gap as a non-security note: `CreateWorkspace` never granted the creator membership, leaving a brand-new workspace with zero admins — fixed in the same transaction, with its own new test.
+
+**Live verification applied the B-200 deployment-gap lesson deliberately, not just cited it:** `eami-api` is compiled Go with no dev-mode hot-reload (unlike `eami-ui`'s Vite bind-mount) — confirmed the shared container was still running the pre-B-208 binary before assuming otherwise, rebuilt the real image, restarted the real container, confirmed the real migrate service's bookkeeping, then ran a genuine end-to-end smoke test (login, create, list, `/mine`, members, delete) against the actual live service on its real port — not a disposable instance, not a mock.
+
+Full detail in `BACKLOG.md`'s new B-208 entry and `BUILT.md`'s `eami-api` section.
+
+## Active decision thread (2026-09-21, older) — B-207 built: Groups + Workspaces first real increment (schema, workspace-scoped policy-inheritance mechanism, RBAC junction table), the first build brief out of this session's own B-196/B-197 investigation — mandatory reviewer + security passes both ran and both found real, shipped-design-changing issues, all fixed and re-verified live before this shipped
 
 Same severity class as B-128/B-141 (cross-tenant policy/identity leaks), so this session's own investigation report's proposal was built exactly as designed, then put through real adversarial review rather than assumed correct because the design reasoning looked sound on paper.
 
@@ -1994,6 +2008,31 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-21 (absolute newest) by Claude Code — B-208 DONE: Workspace CRUD
+API + real requireWorkspaceRole RBAC middleware in eami-api (B-197
+increment 3), the actual enforcement mechanism the investigation
+designed and B-207 built the schema half of. A founder approval
+instruction ("NULL workspace_id always passes") was deliberately NOT
+implemented literally -- flagged before building that this middleware's
+routes all require a real workspace_id (no "global" case exists here the
+way it does for policies.workspace_id's nullable column), so implementing
+it as asked would have been a real fail-open hole; proceeded fail-closed
+instead, disclosed rather than silently overridden or silently complied
+with. Reused an already-established sqlc-escape-hatch pattern
+(Queries.DB()) rather than forcing an out-of-scope decision about the
+frozen schema.sql. All 5 mandatory adversarial tests (no-membership-row,
+cross-workspace-admin, cross-org workspace_id x2 paths, account-wide-
+admin-zero-new-code, and the founder's own added AddWorkspaceMember
+cross-org test) pass against real Postgres. Both mandatory review passes
+ran clean but still drove 2 real fixes: a nil-check consistency gap, and
+a real product gap (workspace creator wasn't auto-granted membership).
+Live-verified against the real shared eami-api container after
+rebuilding it (compiled Go has no dev hot-reload, unlike eami-ui) --
+applied the B-200 deployment-gap lesson deliberately rather than
+repeating it, with a genuine end-to-end smoke test against the live
+service. Full detail in BACKLOG.md's new B-208 entry and BUILT.md's
+eami-api section. Previous entry, preserved below:
+
 2026-09-21 (newest of all) by Claude Code — B-207 DONE: Groups +
 Workspaces first real increment (schema migration 000021, workspace-
 scoped policy-inheritance mechanism in eami-policy/eami-gateway, RBAC
