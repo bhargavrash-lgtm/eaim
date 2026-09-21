@@ -140,6 +140,14 @@ type PolicyResp struct {
 	CreatedBy   *string              `json:"created_by,omitempty"`
 	CreatedAt   time.Time            `json:"created_at"`
 	UpdatedAt   time.Time            `json:"updated_at"`
+	// WorkspaceID (B-197 increment 4) is set only by the new workspace-
+	// scoped handlers (workspace_policies.go) -- nil/omitted for every
+	// existing org-wide handler in policies.go, which never populates it.
+	// Nil means "org-wide floor policy" when returned from
+	// ListWorkspacePolicies (which deliberately includes both a
+	// workspace's own rows AND the org floor, matching DESIGN_SYSTEM.md
+	// §7.3's visibility model) -- distinct from "field not applicable."
+	WorkspaceID *string `json:"workspace_id,omitempty"`
 }
 
 type PolicyConditionsReq struct {

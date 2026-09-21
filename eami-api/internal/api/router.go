@@ -142,10 +142,11 @@ func (s *Server) Router() http.Handler { return s.Handler() }
 // Handler builds and returns the Chi router with all routes registered.
 //
 // Role matrix:
-//   admin    -- all routes
-//   operator -- all except /v1/settings/* and /v1/users/*
-//   approver -- ONLY /v1/approvals/*
-//   viewer   -- GET requests only
+//
+//	admin    -- all routes
+//	operator -- all except /v1/settings/* and /v1/users/*
+//	approver -- ONLY /v1/approvals/*
+//	viewer   -- GET requests only
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
 	// This global middleware deliberately stays conservative even after
@@ -236,10 +237,23 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/v1/workspaces/{workspaceId}/members", s.AddWorkspaceMember)
 			r.Patch("/v1/workspaces/{workspaceId}/members/{userId}", s.UpdateWorkspaceMemberRole)
 			r.Delete("/v1/workspaces/{workspaceId}/members/{userId}", s.RemoveWorkspaceMember)
+			// Workspace-scoped policies (B-197 increment 4): write access
+			// requires workspace_admin, same tier as membership writes
+			// above -- workspace_id is always server-resolved from this
+			// route's own {workspaceId} param (workspace_policies.go),
+			// never from the request body.
+			r.Post("/v1/workspaces/{workspaceId}/policies", s.CreateWorkspacePolicy)
+			r.Patch("/v1/workspaces/{workspaceId}/policies/{policyId}", s.UpdateWorkspacePolicy)
+			r.Delete("/v1/workspaces/{workspaceId}/policies/{policyId}", s.DeleteWorkspacePolicy)
 		})
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireWorkspaceRole("workspaceId", "workspace_member"))
 			r.Get("/v1/workspaces/{workspaceId}/members", s.ListWorkspaceMembers)
+			// Any real member (or org-admin) may read -- includes both
+			// this workspace's own policies and the org-wide floor
+			// (read-only for the floor ones via this route; the floor
+			// is only ever writable via /v1/gateway/policies).
+			r.Get("/v1/workspaces/{workspaceId}/policies", s.ListWorkspacePolicies)
 		})
 
 		// ── Platform-admin only: model_pricing writes (B-113 fix, B-157

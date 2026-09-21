@@ -1373,7 +1373,19 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
-## Active decision thread (2026-09-21, newest) — B-208 built: Workspace CRUD API + real requireWorkspaceRole RBAC middleware, B-197 increment 3 — the actual enforcement mechanism the investigation designed and B-207 built the schema half of. A founder instruction was deliberately NOT implemented literally because doing so would have introduced a real fail-open hole; both mandatory review passes ran, both clean, both still drove real fixes; live-verified against the real shared container after rebuilding it, applying the B-200 deployment-gap lesson rather than repeating it
+## Active decision thread (2026-09-21, newest) — B-209 built: workspace-scoped policy creation API, B-197 increment 4, closing B-208's own explicitly disclosed gap — treated, per the task brief's own framing, as the epic's highest-risk mechanism (the real, live attack surface B-197's Part B investigation was about). Both mandatory review passes ran, both clean; live-verified against the real shared container after rebuilding it
+
+**The brief's own CRITICAL flagged item — the workspace_id server-resolution trace — resolved as a structural, not disciplinary, guarantee:** `PolicyCreateRequest`/`PolicyUpdateRequest` (`types.go`) have no `workspace_id` JSON field at all, so a malicious body (including an explicit `"workspace_id": null` or a real other-workspace UUID) has nothing to bind to — Go's `encoding/json` silently drops unknown fields. Every new handler resolves `workspace_id` exclusively from the route's `{workspaceId}` param, the same one `requireWorkspaceRole` already validated. Proven live, not just unit-tested: a real HTTP POST with a smuggled body `workspace_id` was confirmed via direct `psql` to have zero effect on the written row.
+
+**Same sqlc/`schema.sql`-frozen finding as B-208, applied a second time:** the existing org-wide `policies.go` CRUD is sqlc-generated with no `WorkspaceID` field anywhere in its types — new handlers (`workspace_policies.go`) are entirely new functions via the established `Queries.DB()` escape hatch, not modifications to the existing ones, which remain untouched. `UpdateWorkspacePolicy`/`DeleteWorkspacePolicy` filter by `id + org_id + workspace_id` (not just `id + org_id`, unlike the pre-existing handlers) — a policy belonging to a different workspace or the org floor 404s instead of being silently modifiable.
+
+**Mandatory code-review pass (fork) found the production code correct as written and instead closed a real test-coverage gap:** added `TestCreateWorkspacePolicy_RealDB_DuplicatePriority_Returns409`, proving Part A #4's design decision (different workspace/floor scopes can safely reuse priority numbers; a genuine same-scope collision correctly 409s against the real `DEFERRABLE` constraint) actually holds, not just reasoned about. Security review: zero HIGH/MEDIUM findings across SQL injection, workspace_id provenance, IDOR, and response-leakage checks.
+
+**Live verification, same B-200-lesson discipline as B-208:** rebuilt the real `eami-api` image, restarted the real container, then — against the live service's real port 8081, not a disposable instance — ran the full mandatory-adversarial-case shape end to end with real seeded users/JWTs: `workspace_member` create/update/delete all real 403; `workspace_admin` create with a smuggled body `workspace_id` real 201, DB-confirmed the row carries the route param, never the smuggled value; list correctly shows both the workspace's own policy and the org floor (floor row's `workspace_id` correctly omitted). All fixtures removed afterward, confirmed 0 remaining.
+
+Full detail in `BACKLOG.md`'s new B-209 entry and `BUILT.md`'s `eami-api` section.
+
+## Active decision thread (2026-09-21, older) — B-208 built: Workspace CRUD API + real requireWorkspaceRole RBAC middleware, B-197 increment 3 — the actual enforcement mechanism the investigation designed and B-207 built the schema half of. A founder instruction was deliberately NOT implemented literally because doing so would have introduced a real fail-open hole; both mandatory review passes ran, both clean, both still drove real fixes; live-verified against the real shared container after rebuilding it, applying the B-200 deployment-gap lesson rather than repeating it
 
 **A disclosed deviation from an explicit approval instruction, not a silent override:** the founder's approval message said the new middleware should treat a "NULL workspace_id" as always-passing, drawing an analogy to B-207's own global-floor policy semantic. Investigated before building rather than implemented literally: every route this middleware guards has `{workspaceId}` as a *required* route param (unlike `policies.workspace_id`, a genuinely nullable *column* representing "no workspace assigned"), so there is no "global"/no-workspace case for this specific middleware to represent — treating an absent/unparseable workspace_id as "pass" would have been a real fail-open security hole, directly contradicting the brief's own "fail closed" requirement. Flagged explicitly before writing any code; the founder did not object; proceeded with the fail-closed design instead. This is the same "disclose, don't silently drop or silently comply with something dangerous" discipline this session has applied consistently all along.
 
@@ -2008,7 +2020,34 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
-2026-09-21 (absolute newest) by Claude Code — B-208 DONE: Workspace CRUD
+2026-09-21 (absolute newest) by Claude Code — B-209 DONE: workspace-
+scoped policy creation API in eami-api (B-197 increment 4), closing
+B-208's own explicitly disclosed gap -- treated as the epic's own
+highest-risk mechanism per the task brief's own framing. The brief's own
+CRITICAL flagged item (the workspace_id server-resolution trace) resolved
+as a structural guarantee: PolicyCreateRequest/PolicyUpdateRequest have
+no workspace_id JSON field at all, so a smuggled body value (including an
+explicit null) has nothing to bind to -- every new handler resolves
+workspace_id exclusively from the route's {workspaceId} param. New
+handlers (workspace_policies.go) via the same Queries.DB() escape hatch
+B-208 established, since the existing org-wide policies.go CRUD is
+sqlc-generated with no WorkspaceID field anywhere; Update/Delete filter
+by id+org_id+workspace_id (not just id+org_id) so a policy belonging to a
+different workspace or the org floor 404s instead of being silently
+modifiable. All 4 mandatory adversarial cases pass against real Postgres,
+including a genuine end-to-end dispatch test using the REAL eami-policy
+evaluator (not a DB query) proving a policy created via the new HTTP
+endpoint correctly ranks below the org floor. Mandatory code-review pass
+(fork) found the production code correct and instead added a missing
+test (duplicate-priority 409 case); security review found zero HIGH/
+MEDIUM findings. Live-verified against the real rebuilt/restarted shared
+eami-api container on its real port -- real seeded users/JWTs, a
+body-smuggled workspace_id confirmed via direct psql to have zero effect
+on the written row, all 4 adversarial cases re-confirmed live end to end.
+Full detail in BACKLOG.md's new B-209 entry and BUILT.md's eami-api
+section. Previous entry, preserved below:
+
+2026-09-21 (newest still) by Claude Code — B-208 DONE: Workspace CRUD
 API + real requireWorkspaceRole RBAC middleware in eami-api (B-197
 increment 3), the actual enforcement mechanism the investigation
 designed and B-207 built the schema half of. A founder approval

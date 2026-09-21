@@ -829,6 +829,23 @@ New `POST /v1/gateway/openapi/discover` (`openapi_discover.go`, same `requireRol
 
 ---
 
+**New interfaces -- B-209 (2026-09-21), workspace-scoped policy creation API, B-197 increment 4, mandatory reviewer + security passes both ran, both clean.** Closes B-208's own explicitly disclosed gap. Same severity class as B-057/B-128/B-141/B-207/B-208 -- treated, per the task brief's own framing, as the epic's own highest-risk mechanism: the real, live attack surface B-197's Part B investigation was about.
+
+**Part A investigation, same shape as B-208's own sqlc/`schema.sql` finding:** the existing `policies.go` CRUD (`CreatePolicy`/`UpdatePolicy`/`DeletePolicy`) is entirely sqlc-generated from frozen `schema.sql` (B-051), so `store.CreatePolicyParams`/`UpdatePolicyParams`/`PolicyRow` structurally have no `WorkspaceID` field -- new handlers had to be new functions via `Queries.DB()` (`workspaces.go`'s own precedent), not modifications to the existing ones, which remain untouched.
+
+**CRITICAL finding -- the workspace_id server-resolution trace, the brief's own flagged item:** `PolicyCreateRequest`/`PolicyUpdateRequest` (`types.go`) have no `workspace_id` JSON field at all -- `encoding/json` silently drops unknown fields on decode, so a malicious body has nothing to bind to. A structural, type-level guarantee, not handler discipline. Every new handler resolves `workspace_id` exclusively from `parseUUIDParam(r, "workspaceId")`.
+
+**New file `internal/api/workspace_policies.go`:** `CreateWorkspacePolicy` (POST `/v1/workspaces/{workspaceId}/policies`), `UpdateWorkspacePolicy`/`DeleteWorkspacePolicy` (PATCH/DELETE `.../policies/{policyId}`, filtered by `id + org_id + workspace_id` -- not just `id + org_id` the way the pre-existing org-wide handlers are, so a policy belonging to a different workspace or the org floor 404s instead of being silently modifiable), `ListWorkspacePolicies` (GET, union of the workspace's own policies and the org-wide floor, ordered by B-207's own composite sort key). Routes added into B-208's own existing `requireWorkspaceRole` groups in `router.go`, not new groups. `PolicyResp` gained an additive `WorkspaceID *string` (omitempty) field.
+
+**8 real-Postgres tests (`workspace_policies_pg_test.go`), all 4 mandatory adversarial cases plus CRUD lifecycle, wrong-workspace 404, duplicate-priority 409:** smuggled body `workspace_id` (both a real other-workspace UUID and explicit `null`) ignored, DB-confirmed; `workspace_admin` of A rejected creating under B's route; **the mandatory real-evaluator dispatch test** -- a policy created via the real new HTTP endpoint fed into the actual `github.com/eami/policy` evaluator (`NewEvaluator`/`Evaluate`, dependency-free stdlib-only library, free to import directly) alongside a real org floor, proven to rank correctly below it -- exercises this handler's own INSERT end to end, not a re-confirmation of `policyloader`'s already-passing isolated test; `workspace_member` 403'd on write, 200 on read. Mandatory code-review pass (fork) found the production code correct and instead added a missing test for the duplicate-priority 409 case. Security review: zero HIGH/MEDIUM findings.
+
+**Verified:** real `go build`/`go vet`/`go test ./...` clean across the whole module (re-run after the review-added test). **Live-verified against the real rebuilt/restarted shared stack** (B-200 lesson applied): `docker compose build eami-api` + `up -d`, clean startup, no errors/panics. A real throwaway org/admin/member seeded directly in Postgres, both logged in via real `POST /v1/auth/login`; against the live container's real port 8081: `workspace_member` create -> real 403; `workspace_admin` create with a smuggled body `workspace_id` -> real 201, DB-confirmed the row's actual `workspace_id` is the route param; `workspace_member` list -> real 200, correctly showing both the workspace's own policy and the org floor (floor row's `workspace_id` correctly omitted); `workspace_member` update -> real 403; `workspace_admin` update/delete -> real 200/204, DB-confirmed. All fixtures removed afterward, confirmed 0 remaining via direct `psql`.
+
+**Known limitations:** none new.
+**Dependencies:** B-197 (investigation), B-207 (schema + composite sort-key mechanism), B-208 (`requireWorkspaceRole`, `requireQueries`/`Queries.DB()` pattern), B-200 (deployment-gap lesson).
+
+---
+
 ## eami-ui
 **Purpose:** React SPA — Dashboard, Discover, Gateway (Agents/Policies/Tools/Nodes), Approvals, FinOps, Memory, Paste Detection, Audit, Alerts, Settings.
 **Status:** STABLE (all 14 pages are real implementations, 105–707 lines each; no bare placeholders remain).
