@@ -217,7 +217,11 @@ export function RelationshipGraph({
         <div key={junction.key}>
           <div
             className={`absolute rounded-full bg-white px-2 py-0.5 text-2xs font-semibold ${junction.isActive ? 'text-brand-600' : 'text-ink-faint'}`}
-            style={{ left: JUNCTION_X - 60, top: junctionY - 26 }}
+            // B-203: -34, was -26 -- a live-measured, real-screenshot-confirmed
+            // crowding on multi-target junctions (e.g. "dispatches through"
+            // fanning to 3 targets), where the old offset left only ~6px of
+            // clearance above the converging bezier curves.
+            style={{ left: JUNCTION_X - 60, top: junctionY - 34 }}
           >
             {junction.label}
           </div>

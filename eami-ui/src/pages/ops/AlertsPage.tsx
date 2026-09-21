@@ -571,7 +571,18 @@ export default function AlertsPage() {
   ]
 
   return (
-    <div className="space-y-6">
+    // B-203: was `space-y-6` on this outer div -- a real, live-measured
+    // 24px margin at every one of 3 sibling seams (AppTopBar->PageHeader,
+    // PageHeader->tab bar, tab bar->content), stacking on top of each
+    // element's own internal padding, since this page's B-201 migration
+    // relocated the breadcrumb/action into AppTopBar but never reconciled
+    // the pre-existing space-y-6 wrapper to the flush pattern every other
+    // migrated page uses. Restructured to that same established pattern:
+    // AppTopBar/PageHeader sit flush, content gets its own single p-6
+    // wrapper (matching PoliciesPage.tsx et al.); the one real, worth-
+    // keeping gap (tab bar -> content) is now an explicit mb-6 instead of
+    // an implicit space-y-6 side effect.
+    <div className="flex h-full flex-col">
       <AppTopBar
         breadcrumb={[{ label: 'Alerts' }]}
         action={
@@ -587,33 +598,35 @@ export default function AlertsPage() {
       />
       <PageHeader subtitle="Monitor policy violations and anomalies across the gateway" />
 
-      {/* Tab bar */}
-      <div className="border-b border-gray-200">
-        <nav className="-mb-px flex gap-6">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
-                tab === t.id
-                  ? 'border-indigo-600 text-indigo-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
-      </div>
+      <div className="flex-1 overflow-auto p-6">
+        {/* Tab bar */}
+        <div className="border-b border-gray-200 mb-6">
+          <nav className="-mb-px flex gap-6">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+                  tab === t.id
+                    ? 'border-indigo-600 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
+        </div>
 
-      {tab === 'alerts' ? (
-        <ActiveAlertsTab />
-      ) : (
-        <AlertRulesTab
-          formState={ruleFormState}
-          setFormState={setRuleFormState}
-        />
-      )}
+        {tab === 'alerts' ? (
+          <ActiveAlertsTab />
+        ) : (
+          <AlertRulesTab
+            formState={ruleFormState}
+            setFormState={setRuleFormState}
+          />
+        )}
+      </div>
     </div>
   )
 }

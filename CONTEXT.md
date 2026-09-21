@@ -1373,7 +1373,23 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
-## Active decision thread (2026-09-21, newest) — B-201 Phase 2, Batches 3+4 built: AgentsPage (last hand-rolled header) and WorkflowCanvasPage migrated to AppTopBar, PageHeader.tsx finalized, a stale-container false-negative caught and correctly resolved rather than either accepted or misdiagnosed as a new bug — B-201 epic now fully DONE, all 4 batches complete
+## Active decision thread (2026-09-21, newest) — B-203 built: three real UI bugs found via direct screenshot review of the just-shipped B-201 retrofit, all root-caused live before any fix per explicit instruction, one wrong first measurement caught and redone rather than reported wrong
+
+Founder found 3 real defects via direct screenshots of the live app, post-B-201: a mismatched double horizontal line under the logo/breadcrumb (every page), a broken collapsed sidebar rail (unwanted horizontal scroll, icons not centered), and two spacing issues (relationship graph edge-label crowding, Alerts page excessive vertical gap). Investigation-first brief — reported all 4 root causes and a recommended fix before touching any code; approval given only after.
+
+**Bug 1:** `Sidebar` and each page's `AppTopBar` are flex siblings sharing one seam in `AppShell.tsx`. Live-measured: Sidebar's expanded header (56px) vs `AppTopBar` (60px) — a real 4px border mismatch, not a guess. Fixed by reconciling heights rather than trying to make one component own a border spanning two separate DOM subtrees. Founder additionally asked for the collapsed-rail state to match too (it had no header/border at all before) — added, so both states now align identically. Verified: mismatch is exactly 0px in both states, on 5 different pages.
+
+**Bug 2:** two distinct causes, only one was a real bug. The pending-approvals badge dot pokes 2px past its icon's box; `nav` only set `overflow-y-auto`, and CSS spec forces `overflow-x` to implicitly compute to `auto` too whenever `overflow-y` isn't `visible` — that 2px overhang was enough to make a horizontal scrollbar eligible to render. Fixed with an explicit `overflow-x-hidden`. The claimed vertical-clipping (Settings icon) was investigated at a genuinely short viewport and found to be **already working correctly** — left alone rather than "fixed" with an unneeded change, disclosed as investigated-and-working rather than silently skipped.
+
+**Bug 3a:** relationship graph's edge label (`junctionY - 26`) left only ~6px of real clearance above converging bezier curves on the densest junction (confirmed live on `b059-live-agent`'s real "dispatches through" case). Changed to `junctionY - 34` — one constant, confirmed moved exactly 8px live.
+
+**Sparse-connection graph empty space:** investigated, found real but minor (175px container vs a 152px floor for the one real 1-connection case), explicitly deferred by founder instruction rather than built — logged in `BACKLOG.md` as a known, small, deferred item.
+
+**Bug 3b:** a real self-caught mistake before it shipped — the first Alerts measurement accidentally hit the wildcard fallback route (`/ops/alerts` isn't registered; the real path is `/alerts`), caught and redone correctly rather than reported wrong. Real cause: `AlertsPage.tsx`'s outer wrapper was still the pre-B-201 `<div className="space-y-6">`, adding a real 24px margin at 3 separate seams that B-201's migration never reconciled to the flush pattern every other page uses. Restructured to that established pattern; post-fix DOM structure confirmed numerically identical to `PoliciesPage.tsx`'s own measurement. Tab-switch interaction re-verified live and still fully functional.
+
+**Verified:** real `tsc`/`vite build` clean. Live Playwright verification against the real shared stack (none of these 4 fixes touch `tailwind.config.ts`, so B-199's stale-container limitation didn't apply). All 4 fixes confirmed via real pixel measurements. Regression spot-check across 5 other already-migrated pages (`Sidebar.tsx`/`AppTopBar.tsx` are shared everywhere) — zero regressions, `WorkflowCanvasPage`'s fragile canvas layout specifically re-confirmed undisturbed. Full detail in `BACKLOG.md`'s new B-203 entry and `BUILT.md`'s `eami-ui` section.
+
+## Active decision thread (2026-09-21, older) — B-201 Phase 2, Batches 3+4 built: AgentsPage (last hand-rolled header) and WorkflowCanvasPage migrated to AppTopBar, PageHeader.tsx finalized, a stale-container false-negative caught and correctly resolved rather than either accepted or misdiagnosed as a new bug — B-201 epic now fully DONE, all 4 batches complete
 
 Founder approved Batch 3 (Agents, plus its hardcoded `bg-indigo-600` button color fix) and Batch 4 (WorkflowCanvasPage, real two-segment breadcrumb, existing Save-changes action wired into `AppTopBar`'s slot, `PageHeader.tsx`'s final cleanup) together, same verification standard as every prior batch.
 
@@ -1910,6 +1926,21 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-21 (latest) by Claude Code — B-203 DONE: 3 real UI bugs found via
+direct screenshot review of B-201, fixed after live root-cause investigation
+for each (Sidebar/AppTopBar border-height mismatch reconciled in both
+sidebar states, `nav`'s stray overflow-x scrollbar removed via
+overflow-x-hidden, relationship graph edge-label offset increased for
+real clearance, AlertsPage's leftover pre-retrofit space-y-6 wrapper
+restructured to the established flush pattern). One real self-caught
+mistake before it shipped: the first Alerts measurement hit a wildcard
+fallback route by accident, caught and redone correctly. Sparse-connection
+graph empty space investigated, confirmed minor, explicitly deferred per
+founder instruction, not built. Regression spot-check across 5 other
+already-migrated pages plus WorkflowCanvasPage's fragile canvas layout,
+all clean. Full detail in BACKLOG.md's new B-203 entry and BUILT.md's
+eami-ui section. Previous entry, preserved below:
+
 2026-09-21 (later) by Claude Code — B-201 Phase 2 Batches 3+4 DONE, epic
 fully complete (all 4 batches): AgentsPage (last hand-rolled header in
 the app) migrated to AppTopBar, hardcoded bg-indigo-600 button fixed to

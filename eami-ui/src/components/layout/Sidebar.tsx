@@ -23,15 +23,21 @@ export function Sidebar() {
 
   if (!sidebarOpen) {
     return (
-      <aside className="flex h-full w-[72px] flex-col items-center border-r border-gray-200 bg-white py-3">
-        <button
-          onClick={toggleSidebar}
-          aria-label="Expand navigation"
-          className="mb-4 flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-ink-faint hover:bg-gray-50"
-        >
-          <ChevronRight className="h-3.5 w-3.5" />
-        </button>
-        <nav className="flex flex-1 flex-col items-center gap-1.5 overflow-y-auto">
+      <aside className="flex h-full w-[72px] flex-col items-center border-r border-gray-200 bg-white">
+        {/* B-203: header height matches AppTopBar's h-[60px] exactly (see
+            the expanded branch's own header below) so the collapsed
+            rail's border-b lands on the same line as AppTopBar's border-b
+            regardless of sidebar state -- not just the expanded case. */}
+        <div className="flex h-[60px] w-full items-center justify-center border-b border-gray-200">
+          <button
+            onClick={toggleSidebar}
+            aria-label="Expand navigation"
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-ink-faint hover:bg-gray-50"
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <nav className="flex flex-1 flex-col items-center gap-1.5 overflow-y-auto overflow-x-hidden py-3">
           {NAV_ITEMS.map((item) => (
             <NavLink
               key={item.path}
@@ -58,8 +64,13 @@ export function Sidebar() {
     <aside className="flex h-full w-60 flex-col border-r border-gray-200 bg-white">
       {/* Logo -- sourced entirely from branding/config.ts; the wordmark
           image already carries the product name, so no separate name
-          text is rendered alongside it here (see BUILT.md). */}
-      <div className="flex h-14 items-center justify-between border-b border-gray-200 px-4">
+          text is rendered alongside it here (see BUILT.md).
+          B-203: height is h-[60px], matching AppTopBar's own h-[60px]
+          exactly (was h-14/56px -- a real, live-measured 4px mismatch
+          against AppTopBar's border-b, since Sidebar and AppTopBar are
+          independent flex siblings under AppShell.tsx sharing one visual
+          seam, not two nested elements that would auto-align). */}
+      <div className="flex h-[60px] items-center justify-between border-b border-gray-200 px-4">
         <Logo variant="full" className="h-6 w-auto" />
         <button
           onClick={toggleSidebar}
