@@ -1373,7 +1373,25 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
-## Active decision thread (2026-09-21, newest) — B-204 built: relationship graph headroom hardening (investigated thoroughly, could not reproduce the reported clip, applied a real defensive fix anyway per explicit instruction rather than chasing further) + Agent Details compact label-value pattern, both codified into a new DESIGN_SYSTEM.md §7.6
+## Active decision thread (2026-09-21, newest) — B-205 built: relationship graph pan/zoom, with a real, explicitly-engineered click-vs-drag disambiguation that never touches the existing node-click wiring, plus a real regression (label wrapping) caught and fixed during this brief's own live verification before it shipped
+
+Investigation-first brief: interaction mechanism, click/drag disambiguation, zoom bounds, and touch scope all reported and approved before any code was touched.
+
+**Mechanism:** a new inner transform layer wraps the SVG/nodes (previously direct children of the outer div), getting `translate(pan) scale(zoom)`; the outer div is now a fixed-size `overflow-hidden` viewport owning the pan/zoom handlers. **Disambiguation, container-level only, zero changes to any node's own `onClick`:** a 5px drag-distance threshold, tracked via window-level mousemove/mouseup added per-gesture from a container `onMouseDownCapture`; if crossed, the next click is cancelled via `onClickCapture`'s `e.stopPropagation()` in the capture phase, before it ever reaches the target button's bubble-phase `onClick`.
+
+**Zoom:** 0.5x-2.5x, zoom-to-cursor, Ctrl/Cmd+wheel only (via a real native, non-passive `wheel` listener — React's own delegated `onWheel` is passive, so `preventDefault()` there is a silent no-op, which would have let the browser's own native page-zoom fire uncontested). Plain wheel deliberately left alone so the page scrolls normally past the graph, matching Figma/Miro rather than scroll-jacking. Trackpad pinch/pan work for free through the same handler (browsers synthesize `ctrlKey` wheel events for pinch) — no separate touch code, consistent with this being a desktop-only admin product.
+
+**Height cap (700px) extends B-204's intent, doesn't reverse it:** B-204 hardened against *silent* clipping with no recovery; this cap is paired with a real recovery mechanism (pan/zoom + a reset-view button) and is set high enough (700px) that it never engages for any currently-real graph (confirmed range: 175-643px) — it only activates for the genuinely large graph this feature exists for.
+
+**A real regression caught and fixed during this brief's own live verification, not shipped:** the new transform-layer wrapper initially had no explicit width/height. Since every child inside it is itself `position: absolute`, none contributed to the wrapper's own shrink-to-fit auto-size, so its containing-block width collapsed toward 0 — the junction labels (the one child with no explicit width of its own) wrapped onto two lines as a result. Caught via a live screenshot during this session's own verification pass, not shipped and found later. Fixed by giving the wrapper explicit width/height matching the SVG's own `layout.width`/`layout.height`.
+
+**Verified with real proof, not assumed, for both halves of the acceptance criteria:** a genuine mousedown+immediate-mouseup on a real target node opened its `SlideOverPanel` with real rendered data; a genuine mousedown+drag(+80,+60)+mouseup starting on the SAME node did not open any panel and did pan the graph (`transform` measured before/after). Zoom bounds verified via real `ctrlKey:true` WheelEvent dispatches read back from the DOM, clamped at exactly 2.5 and exactly 0.5. Plain wheel confirmed to leave the graph untouched while scrolling the page. Regression spot-check: B-203's border alignment and B-204's graph-height hardening both re-confirmed intact.
+
+**Disclosed limitation:** genuinely proving the browser's own native page-zoom is prevented on a real Ctrl+wheel/pinch gesture isn't fully provable via Playwright's synthetic event dispatch (non-trusted events have inconsistent default-action enforcement for OS-level gestures) — the zoom state logic itself was fully verified via those same synthetic events, which do correctly exercise the real listener code; only the deepest "does the OS-level browser gesture actually get suppressed" layer is a real-hardware-only check, disclosed rather than glossed over.
+
+Full detail in `BACKLOG.md`'s new B-205 entry and `BUILT.md`'s `eami-ui` section.
+
+## Active decision thread (2026-09-21, older) — B-204 built: relationship graph headroom hardening (investigated thoroughly, could not reproduce the reported clip, applied a real defensive fix anyway per explicit instruction rather than chasing further) + Agent Details compact label-value pattern, both codified into a new DESIGN_SYSTEM.md §7.6
 
 Two more real defects found via direct screenshot review, same investigation-first discipline as B-203.
 
@@ -1940,6 +1958,30 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-21 (absolute latest) by Claude Code — B-205 DONE: real pan/zoom
+added to the relationship graph (0.5x-2.5x zoom-to-cursor via Ctrl/Cmd+
+wheel, click-drag to pan, a Maximize-icon reset-view control, plain
+wheel deliberately left alone so it still scrolls the page normally).
+Click-vs-drag disambiguation is a real 5px-threshold + capture-phase
+click interception at the container level -- zero changes to any node's
+own onClick wiring, exactly as scoped. Container height capped at 700px
+(Math.min against the real computed height), extending B-204's silent-
+clipping-hardening intent rather than reversing it, since the cap is
+paired with a real recovery mechanism (pan/zoom + reset) and never
+engages for any currently-real graph (175-643px range). A real
+regression -- junction labels wrapping onto two lines -- was caught
+during this brief's own live verification (the new transform wrapper's
+implicit shrink-to-fit width collapsed toward 0 since every child is
+position:absolute) and fixed with an explicit width/height on the
+wrapper before shipping, not left in. Both halves of the click/drag
+acceptance criteria verified with real proof (a genuine click opened the
+real SlideOverPanel with real data; a genuine drag on the same node
+panned instead and opened nothing), plus real zoom-bound clamping and
+plain-wheel-scrolls-the-page proof, all read back from the live DOM.
+Regression spot-check on B-203/B-204's fixes clean. Full detail in
+BACKLOG.md's new B-205 entry and BUILT.md's eami-ui section. Previous
+entry, preserved below:
+
 2026-09-21 (very latest) by Claude Code — B-204 DONE: relationship graph
 PAD hardened 40->48px (a real, grounded defensive fix, applied after
 thorough live investigation found the reported clip NOT reproducible
