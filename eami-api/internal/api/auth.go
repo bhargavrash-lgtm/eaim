@@ -122,7 +122,16 @@ func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	dbUser2, err := s.storeIface.GetUserByID(r.Context(), rt.UserID)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "user not found")
+		// B-211: same message as the GetRefreshToken failure above, not a
+		// distinct "user not found" -- this branch is now also reachable
+		// for a deactivated user (deleted_at IS NULL, added this brief),
+		// not just a hard-deleted/DB-error case. A distinguishable message
+		// here would let someone who already holds a stolen, still-valid
+		// refresh token learn "deactivated" vs. "token itself is bad" --
+		// low real risk (requires already possessing that secret), but
+		// free to close by matching Login's own already-uniform-401
+		// precedent (auth.go's GetUserByEmail branch above).
+		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid or expired refresh token")
 		return
 	}
 	user := &store.User{

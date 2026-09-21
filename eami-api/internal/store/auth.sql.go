@@ -15,7 +15,7 @@ import (
 const getUserByID = `-- name: GetUserByID :one
 SELECT id, org_id, email, name, password_hash, role
 FROM users
-WHERE id = $1
+WHERE id = $1 AND deleted_at IS NULL
 LIMIT 1
 `
 
@@ -32,7 +32,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (*User, error) 
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, org_id, email, name, password_hash, role
 FROM users
-WHERE email = $1
+WHERE email = $1 AND deleted_at IS NULL
 LIMIT 1
 `
 

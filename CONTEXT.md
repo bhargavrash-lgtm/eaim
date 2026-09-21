@@ -1373,7 +1373,17 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
-## Active decision thread (2026-09-21, newest) — B-209 built: workspace-scoped policy creation API, B-197 increment 4, closing B-208's own explicitly disclosed gap — treated, per the task brief's own framing, as the epic's highest-risk mechanism (the real, live attack surface B-197's Part B investigation was about). Both mandatory review passes ran, both clean; live-verified against the real shared container after rebuilding it
+## Active decision thread (2026-09-21, newest) — B-211 fixed: deactivated users retained full login AND refresh capability — GetUserByEmail/GetUserByID never filtered deleted_at. Same severity class as B-128/B-141/B-172/B-173. Surfaced by this session's own investigation, not discovered fresh. Mandatory code review caught a real bug in the fix's own first-draft test (a token-consumption ordering mistake that made the "post-deactivation refresh" assertion pass for the wrong reason); self-verified beyond the reviewer's own read by temporarily reverting the fix and confirming the tests then correctly fail. Both mandatory review passes ran, both clean; live-verified against the real rebuilt/restarted shared container
+
+**Preceding, same session: the investigation that found this** — a read-only, no-code brief (user provisioning, the complete RBAC permission matrix, fixed-vs-custom-configurable roles, Groups-for-users) traced the real current state rather than assuming it. Its most load-bearing findings: the invite-a-user flow creates a real DB row and a real signed token but points at a `/accept-invite` page that doesn't exist anywhere in the codebase, so `password_hash` never actually gets set and an invited user can never log in through any real path; there is no password-change/reset endpoint anywhere, self-service or admin-initiated; and — the finding this B-211 fix closes — "deactivating" a user via the existing soft-delete endpoint didn't actually revoke access, only hid them from the Users list. The fixed 5-role (+2 workspace-role) permission model itself traced internally consistent (one stale doc comment, two minor read-tier asymmetries found, not the role model's shape) — recommended NOT pursuing admin-configurable custom roles now, sized honestly as a real future epic instead. Full report delivered directly in conversation, not saved as a separate doc.
+
+**A real bug in this fix's OWN first-draft test, caught by the mandatory code-review pass, not shipped unnoticed:** `Refresh` revokes a refresh token on every successful use (single-use) — the test's original "confirm refresh works before deactivation" baseline check consumed the very token the real post-deactivation adversarial assertion needed, so that assertion was actually proving "a revoked token is rejected" (already true, unrelated to the deleted_at fix) rather than the brief's real required case. Fixed by holding the session's token unused for the real assertion and adding a genuine positive control via a separate second login. Went one step further than trusting the reviewer's fix: temporarily reverted the deleted_at predicate itself and confirmed both tests now correctly FAIL, then restored it and confirmed both PASS again — proof the tests weren't a second false positive.
+
+**Additional hardening applied from the review passes' own non-blocking notes, not left as disclosed residuals when cheap to close:** Refresh's GetUserByID-failure branch returned a distinguishable "user not found" message, newly reachable via deactivation (not just hard-delete/DB-error as before) — closed to match Login's own already-uniform-401 precedent. A genuinely disclosed, NOT fixed, residual: an already-issued, still-unexpired access token remains valid until natural expiry regardless of this fix (jwtMiddleware does no DB lookup at all, stateless JWT verification) — this closes the two places revocation is actually enforceable (Login/Refresh), not a bearer token already in someone's possession.
+
+Full detail in `BACKLOG.md`'s new B-211 entry and `BUILT.md`'s `eami-api` section.
+
+## Active decision thread (2026-09-21, older) — B-209 built: workspace-scoped policy creation API, B-197 increment 4, closing B-208's own explicitly disclosed gap — treated, per the task brief's own framing, as the epic's highest-risk mechanism (the real, live attack surface B-197's Part B investigation was about). Both mandatory review passes ran, both clean; live-verified against the real shared container after rebuilding it
 
 **The brief's own CRITICAL flagged item — the workspace_id server-resolution trace — resolved as a structural, not disciplinary, guarantee:** `PolicyCreateRequest`/`PolicyUpdateRequest` (`types.go`) have no `workspace_id` JSON field at all, so a malicious body (including an explicit `"workspace_id": null` or a real other-workspace UUID) has nothing to bind to — Go's `encoding/json` silently drops unknown fields. Every new handler resolves `workspace_id` exclusively from the route's `{workspaceId}` param, the same one `requireWorkspaceRole` already validated. Proven live, not just unit-tested: a real HTTP POST with a smuggled body `workspace_id` was confirmed via direct `psql` to have zero effect on the written row.
 
@@ -2020,7 +2030,37 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
-2026-09-21 (absolute newest) by Claude Code — B-209 DONE: workspace-
+2026-09-21 (absolute newest) by Claude Code — B-211 DONE: fixed
+deactivated users retaining full login AND refresh capability in
+eami-api -- GetUserByEmail/GetUserByID never filtered deleted_at. Same
+severity class as B-128/B-141/B-172/B-173, surfaced by this session's own
+preceding investigation (user provisioning, the complete RBAC permission
+matrix, fixed-vs-custom roles, Groups-for-users -- delivered directly in
+conversation, not saved as a doc), not discovered fresh. Added
+`AND deleted_at IS NULL` to both queries (source .sql + hand-synced
+generated .go, sqlc CLI not installed here). Mandatory code review caught
+a real bug in the fix's OWN first-draft test: Refresh revokes a refresh
+token on every use, and the test's original baseline "confirm refresh
+works" check consumed the token the real post-deactivation assertion
+needed, so that assertion was passing for the wrong reason (revoked-token
+rejection, unrelated to the fix) -- fixed by holding the token unused and
+adding a real positive control via a second login. Self-verified beyond
+the reviewer's own read: temporarily reverted the fix, confirmed both
+tests then correctly FAIL, restored it, confirmed both PASS again.
+Security review: zero HIGH/MEDIUM findings, explicitly confirmed
+fail-closed behavior and disclosed one real, unavoidable, NOT-fixed
+residual -- an already-issued unexpired access token stays valid until
+natural expiry (stateless JWT, no DB lookup in jwtMiddleware) -- this fix
+closes Login/Refresh, the only two places revocation is enforceable.
+Also closed a low-risk info-disclosure oracle in Refresh's error message
+and a harmless pre-existing source/generated SQL drift, both from the
+review passes' own non-blocking notes. Live-verified against the real
+rebuilt/restarted shared eami-api container on its real port -- a real
+deactivated user's fresh login and pre-existing-token refresh both
+correctly 401'd live. Full detail in BACKLOG.md's new B-211 entry and
+BUILT.md's eami-api section. Previous entry, preserved below:
+
+2026-09-21 (newest still) by Claude Code — B-209 DONE: workspace-
 scoped policy creation API in eami-api (B-197 increment 4), closing
 B-208's own explicitly disclosed gap -- treated as the epic's own
 highest-risk mechanism per the task brief's own framing. The brief's own

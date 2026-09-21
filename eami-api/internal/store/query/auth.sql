@@ -1,12 +1,19 @@
 -- name: GetUserByID :one
+-- B-211: deleted_at IS NULL is mandatory here -- this query backs Refresh,
+-- and without it a soft-deleted (deactivated) user's still-valid refresh
+-- token keeps minting fresh access tokens indefinitely.
 SELECT id, org_id, email, name, password_hash, role
 FROM users
-WHERE id = $1;
+WHERE id = $1 AND deleted_at IS NULL
+LIMIT 1;
 
 -- name: GetUserByEmail :one
+-- B-211: deleted_at IS NULL is mandatory here -- this query backs Login,
+-- and without it a soft-deleted (deactivated) user can still authenticate
+-- with a still-known password as if nothing happened.
 SELECT id, org_id, email, name, password_hash, role
 FROM users
-WHERE email = $1
+WHERE email = $1 AND deleted_at IS NULL
 LIMIT 1;
 
 -- name: CreateRefreshToken :one

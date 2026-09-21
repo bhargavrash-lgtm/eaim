@@ -846,6 +846,25 @@ New `POST /v1/gateway/openapi/discover` (`openapi_discover.go`, same `requireRol
 
 ---
 
+**Fix -- B-211 (2026-09-21), deactivated users retained full login and refresh capability, mandatory reviewer + security passes both ran, both clean.** Same severity class as B-128/B-141/B-172/B-173 per this brief's own framing. Surfaced by this session's own user-provisioning/permissions-maturity investigation, not discovered fresh here.
+
+**Root cause:** `GetUserByEmail` (`Login`) and `GetUserByID` (`Refresh`, via `queriesAdapter`) never filtered `deleted_at` -- a soft-deleted (deactivated, `DELETE /v1/users/{userId}`) user could still authenticate with a still-known password and still refresh an already-issued session indefinitely. Fixed with `AND deleted_at IS NULL` on both queries (`internal/store/query/auth.sql` + hand-synced `internal/store/auth.sql.go`, `sqlc` CLI not installed in this environment). Grepped every `FROM users` in the module to confirm no other auth/session-continuation query has the same gap -- the one other hit (`workspaces.go`'s `AddWorkspaceMember` cross-org check) is not an authentication-context query.
+
+**A real bug in this brief's own first-draft test, caught by the mandatory code-review pass:** `Refresh` revokes a refresh token on every successful use (single-use) -- the test's original "confirm refresh works before deactivation" sanity check consumed the token the real post-deactivation assertion needed, so that assertion was silently proving "a revoked token is rejected" (already true, unrelated to this fix) instead of the brief's actual required case. Fixed by holding the session's real token unused for the adversarial assertion, with a genuine positive control via a separate second login. Self-verified beyond the reviewer's read: temporarily reverted the fix, confirmed both tests fail, restored it, confirmed both pass again.
+
+**Additional hardening from the review passes' own non-blocking notes:** closed a low-risk information-disclosure oracle in `Refresh` (the `GetUserByID` failure branch's `"user not found"` message, newly reachable via deactivation, now matches `Login`'s own uniform-401 precedent: `"invalid or expired refresh token"`); closed a pre-existing, harmless source/generated `LIMIT 1` drift on `GetUserByID` while already in the file.
+
+**Security review: zero HIGH/MEDIUM findings.** Confirmed no SQL injection, no auth oracle on `Login`, fail-closed on both new no-rows cases, and explicitly disclosed a known, unavoidable residual: an already-issued, still-unexpired access token remains valid until natural expiry (`jwtMiddleware` does no DB lookup, stateless JWT) -- this fix closes the two places revocation is actually enforceable (`Login`/`Refresh`), not bearer tokens already in someone's possession.
+
+**2 real-Postgres tests (`deactivation_pg_test.go`):** the mandatory adversarial case (active session, deactivated mid-session, both fresh login and refresh-with-pre-existing-token correctly 401) plus a user deactivated before ever logging in.
+
+**Verified:** real `go build`/`go vet`/`go test ./... -count=1` clean, full module, fresh run. **Live-verified against the real rebuilt/restarted shared stack:** real throwaway org/user seeded, logged in for a genuine token pair, deactivated via real `UPDATE users SET deleted_at = NOW()`; against the live container's real port 8081, fresh login → real `401 "invalid email or password"`, refresh with the pre-deactivation token → real `401 "invalid or expired refresh token"` (confirming the message-uniformity hardening live too). All fixtures removed, confirmed 0 remaining.
+
+**Known limitations:** the disclosed already-issued-access-token residual above -- not a regression, the pre-existing and unavoidable behavior of stateless JWT verification.
+**Dependencies:** none blocking.
+
+---
+
 ## eami-ui
 **Purpose:** React SPA — Dashboard, Discover, Gateway (Agents/Policies/Tools/Nodes), Approvals, FinOps, Memory, Paste Detection, Audit, Alerts, Settings.
 **Status:** STABLE (all 14 pages are real implementations, 105–707 lines each; no bare placeholders remain).
