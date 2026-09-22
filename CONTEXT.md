@@ -1373,7 +1373,9 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
-## Active decision thread (2026-09-21, newest) — B-211 fixed: deactivated users retained full login AND refresh capability — GetUserByEmail/GetUserByID never filtered deleted_at. Same severity class as B-128/B-141/B-172/B-173. Surfaced by this session's own investigation, not discovered fresh. Mandatory code review caught a real bug in the fix's own first-draft test (a token-consumption ordering mistake that made the "post-deactivation refresh" assertion pass for the wrong reason); self-verified beyond the reviewer's own read by temporarily reverting the fix and confirming the tests then correctly fail. Both mandatory review passes ran, both clean; live-verified against the real rebuilt/restarted shared container
+## Active decision thread (2026-09-22, newest) — B-212 built: real user provisioning (invite acceptance, password reset, self-profile), closing the dead-`/accept-invite`-link gap B-211's own preceding investigation found. Part A investigation done first per the task brief's kickoff (confirmed no real email delivery exists anywhere in this codebase; confirmed and reused existing bcrypt/token utilities; found the existing invite JWT's real TTL bug — signed expiry was 1 hour, not the claimed 48). A genuine design-fork question was raised and founder-approved before building: replace the JWT-based invite token with a DB-backed opaque single-use token mirroring `bootstrap.go`'s `setup_tokens` pattern, rather than keeping the JWT and adding a separate consumed-marker — approved as the correct call, matching established convention and fixing the TTL bug as a side effect. Mandatory code review (fork) found 5 real issues (silent-name-blank on `PATCH /v1/users/me`, a non-transactional invite-user-creation gap that could permanently strand an email, missing rate limiting on all 3 new pre-auth routes, bcrypt running before token validation — a CPU-exhaustion amplifier, and a real concurrency race in reset-token invalidation) — all fixed and re-verified. Security review: zero HIGH/MEDIUM findings. Full real-Postgres adversarial test coverage (all 4 mandatory cases) plus a rate-limit regression test; live-verified end-to-end against the real rebuilt/restarted shared stack via direct HTTP calls (invite → accept → login → self-profile → change-password → request-reset → reset-password, each adversarial edge live-confirmed, not just tested). Frontend (4 new pages, `router.tsx`/`authStore.ts`/`LoginPage.tsx`/`UserMenu.tsx` updates) verified via clean `tsc`/`vite build` and the real dev-server container's served routes — no real browser click-through, disclosed (no browser-automation capability this session). New B-213 logged (doc-accuracy only, `openapi.yaml`'s stale 72h invite-expiry text, Architect-EAMI-owned, not fixed). Full detail in `BUILT.md`'s `eami-api`/`eami-ui` sections and `BACKLOG.md`'s new B-212/B-213 entries.
+
+## Active decision thread (2026-09-21, older) — B-211 fixed: deactivated users retained full login AND refresh capability — GetUserByEmail/GetUserByID never filtered deleted_at. Same severity class as B-128/B-141/B-172/B-173. Surfaced by this session's own investigation, not discovered fresh. Mandatory code review caught a real bug in the fix's own first-draft test (a token-consumption ordering mistake that made the "post-deactivation refresh" assertion pass for the wrong reason); self-verified beyond the reviewer's own read by temporarily reverting the fix and confirming the tests then correctly fail. Both mandatory review passes ran, both clean; live-verified against the real rebuilt/restarted shared container
 
 **Preceding, same session: the investigation that found this** — a read-only, no-code brief (user provisioning, the complete RBAC permission matrix, fixed-vs-custom-configurable roles, Groups-for-users) traced the real current state rather than assuming it. Its most load-bearing findings: the invite-a-user flow creates a real DB row and a real signed token but points at a `/accept-invite` page that doesn't exist anywhere in the codebase, so `password_hash` never actually gets set and an invited user can never log in through any real path; there is no password-change/reset endpoint anywhere, self-service or admin-initiated; and — the finding this B-211 fix closes — "deactivating" a user via the existing soft-delete endpoint didn't actually revoke access, only hid them from the Users list. The fixed 5-role (+2 workspace-role) permission model itself traced internally consistent (one stale doc comment, two minor read-tier asymmetries found, not the role model's shape) — recommended NOT pursuing admin-configurable custom roles now, sized honestly as a real future epic instead. Full report delivered directly in conversation, not saved as a separate doc.
 
@@ -2030,7 +2032,56 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
-2026-09-21 (absolute newest) by Claude Code — B-211 DONE: fixed
+2026-09-22 (absolute newest) by Claude Code — B-212 DONE: real user
+provisioning (invite acceptance, password reset, self-profile), closing
+the dead `/accept-invite` link B-211's own preceding investigation found
+(InviteUser created a real row and a real signed token but nothing ever
+consumed it, so password_hash never got set and nobody had ever been
+onboarded through it). Part A investigation done first per the task
+brief's kickoff: confirmed no real email delivery exists anywhere in this
+codebase (only ever an admin-displayed copy-paste link); confirmed and
+reused existing bcrypt/token utilities directly; found the existing
+invite JWT's real bug -- its actual signed expiry was accessTTL (1 hour
+default), not the 48 hours the response/comment claimed. A genuine
+design-fork question raised and founder-approved before building: replace
+the JWT invite token with a DB-backed opaque single-use token mirroring
+bootstrap.go's setup_tokens pattern (hash-only storage, expires_at,
+consumed_at, row-locked at use time) rather than keeping the JWT and
+bolting on a separate consumed-marker -- approved as correct, matching
+established convention and fixing the TTL bug as a real side effect, not
+a separate patch. New migration 000022 (invite_tokens/reset_tokens); new
+provisioning.go (POST /v1/auth/accept-invite, /request-reset,
+/reset-password); users.go gains GET/PATCH /v1/users/me and POST
+/v1/users/me/change-password. Mandatory code review found 5 real issues,
+all fixed: a silent-name-blank bug on PATCH /v1/users/me (plain string ->
+pointer + presence check), a non-transactional InviteUser gap that could
+permanently strand an email on partial failure (now one transaction),
+missing rate limiting on all 3 new pre-auth routes (new
+provisioningLimiter, mirroring setupLimiter), bcrypt running before token
+validation on both accept-invite/reset-password -- a CPU-exhaustion
+amplifier (reordered), and a real concurrency race in reset-token
+invalidation (fixed with a transaction + per-user Postgres advisory
+lock). Security review: zero HIGH/MEDIUM findings. Real-Postgres tests
+cover all 4 mandatory adversarial cases (expired/consumed token
+rejection, token-to-user binding, anti-enumeration, role/org-immutability
+on self-profile) plus a rate-limit regression test. Live-verified
+end-to-end against the real rebuilt/restarted shared stack via direct
+HTTP calls -- the full real flow (invite, accept, reuse-rejected, login,
+profile fetch/update with a role/org smuggling attempt confirmed
+ineffective, password change with wrong-then-right current password,
+request-reset with byte-identical existing-vs-nonexistent responses and
+the real link confirmed in the real container's log, reset-password with
+reuse-rejected, login with the new password) all confirmed live, not just
+via go test. Frontend: 4 new pages (AcceptInvitePage/ForgotPasswordPage/
+ResetPasswordPage/ProfilePage) plus router.tsx/authStore.ts/LoginPage.tsx/
+UserMenu.tsx updates; verified via clean tsc/vite build and the real
+dev-server container's served routes -- no real browser click-through,
+disclosed (no browser-automation capability this session). New B-213
+logged (openapi.yaml's stale 72h invite-expiry doc text, Architect-EAMI-
+owned, not fixed). Full detail in BUILT.md's eami-api/eami-ui sections and
+BACKLOG.md's new B-212/B-213 entries. Previous entry, preserved below:
+
+2026-09-21 by Claude Code — B-211 DONE: fixed
 deactivated users retaining full login AND refresh capability in
 eami-api -- GetUserByEmail/GetUserByID never filtered deleted_at. Same
 severity class as B-128/B-141/B-172/B-173, surfaced by this session's own

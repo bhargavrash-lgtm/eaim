@@ -1,7 +1,7 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
 import { useAuthStore, consumeRedirectPath } from '@/stores/authStore'
 import { Logo } from '@/components/layout/Logo'
@@ -98,6 +98,13 @@ export function LoginPage() {
           <Button type="submit" isLoading={isSubmitting} className="w-full">
             Sign in
           </Button>
+
+          <Link
+            to="/forgot-password"
+            className="block text-center text-xs text-gray-500 hover:text-gray-700 hover:underline"
+          >
+            Forgot your password?
+          </Link>
         </form>
       </Card>
     </div>

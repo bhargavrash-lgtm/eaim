@@ -21,3 +21,12 @@ RETURNING id, org_id, email, name, role, created_at, last_login, deleted_at;
 -- name: SoftDeleteUser :exec
 UPDATE users SET deleted_at = NOW()
 WHERE id = $1 AND org_id = $2;
+
+-- name: UpdateUserName :one
+UPDATE users SET name = $3
+WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
+RETURNING id, org_id, email, name, role, created_at, last_login, deleted_at;
+
+-- name: UpdateUserPasswordHash :exec
+UPDATE users SET password_hash = $2
+WHERE id = $1 AND deleted_at IS NULL;

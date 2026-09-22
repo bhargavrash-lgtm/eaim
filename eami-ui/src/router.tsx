@@ -1,6 +1,10 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
 import { LoginPage } from '@/pages/auth/LoginPage'
+import { AcceptInvitePage } from '@/pages/auth/AcceptInvitePage'
+import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage'
+import { ResetPasswordPage } from '@/pages/auth/ResetPasswordPage'
+import { ProfilePage } from '@/pages/settings/ProfilePage'
 import { SetupWizardPage } from '@/pages/setup/SetupWizardPage'
 import { DashboardPage } from '@/pages/dashboard/DashboardPage'
 import { DiscoverPage } from '@/pages/discover/DiscoverPage'
@@ -43,11 +47,24 @@ export const router = createBrowserRouter([
       { path: '/audit', element: <AuditPage /> },
       { path: '/alerts', element: <AlertsPage /> },
       { path: '/settings', element: <SettingsPage /> },
+      { path: '/profile', element: <ProfilePage /> },
     ],
   },
   {
     path: '/login',
     element: <LoginPage />,
+  },
+  {
+    path: '/accept-invite',
+    element: <AcceptInvitePage />,
+  },
+  {
+    path: '/forgot-password',
+    element: <ForgotPasswordPage />,
+  },
+  {
+    path: '/reset-password',
+    element: <ResetPasswordPage />,
   },
   {
     path: '/setup',

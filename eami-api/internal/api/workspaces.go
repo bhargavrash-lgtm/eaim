@@ -339,16 +339,28 @@ func (s *Server) MyWorkspaceMemberships(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	uc := claimsFromContext(r)
-	rows, err := s.queries.DB().Query(r.Context(), `
+	data, err := s.queryMyWorkspaceMemberships(r.Context(), uc.UserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, MyWorkspaceMembershipsResp{Data: data})
+}
+
+// queryMyWorkspaceMemberships is shared by MyWorkspaceMemberships (GET
+// /v1/workspaces/mine) and GetMe (GET /v1/users/me, users.go), which
+// embeds the identical data under its own "workspaces" field -- one query,
+// not two copies of the same JOIN.
+func (s *Server) queryMyWorkspaceMemberships(ctx context.Context, userID uuid.UUID) ([]MyWorkspaceMembershipResp, error) {
+	rows, err := s.queries.DB().Query(ctx, `
 		SELECT wm.workspace_id, w.name, wm.role
 		FROM workspace_memberships wm
 		JOIN workspaces w ON w.id = wm.workspace_id
 		WHERE wm.user_id = $1
 		ORDER BY w.name ASC
-	`, pgtype.UUID{Bytes: uc.UserID, Valid: true})
+	`, pgtype.UUID{Bytes: userID, Valid: true})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -357,13 +369,12 @@ func (s *Server) MyWorkspaceMemberships(w http.ResponseWriter, r *http.Request) 
 		var wsID uuid.UUID
 		var m MyWorkspaceMembershipResp
 		if err := rows.Scan(&wsID, &m.WorkspaceName, &m.Role); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
+			return nil, err
 		}
 		m.WorkspaceID = wsID.String()
 		data = append(data, m)
 	}
-	writeJSON(w, http.StatusOK, MyWorkspaceMembershipsResp{Data: data})
+	return data, rows.Err()
 }
 
 // ListWorkspaceMembers handles GET /v1/workspaces/{workspaceId}/members

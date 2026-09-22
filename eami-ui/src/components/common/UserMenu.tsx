@@ -1,6 +1,6 @@
 import { LogOut } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 // Phase 1 of the top-bar retrofit (B-201): the real, working logout
 // mechanism, extracted unmodified from Topbar.tsx (already correct on
@@ -23,7 +23,9 @@ export function UserMenu() {
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-gray-600">{user?.email}</span>
+      <Link to="/profile" className="text-xs text-gray-600 hover:text-gray-900 hover:underline">
+        {user?.email}
+      </Link>
       <button
         onClick={handleLogout}
         className="rounded p-1 text-gray-500 hover:bg-gray-100"

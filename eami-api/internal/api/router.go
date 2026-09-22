@@ -45,6 +45,16 @@ type Server struct {
 	// 256-bit entropy is the primary defense against brute force.
 	setupLimiter *rateLimiter
 
+	// provisioningLimiter rate-limits the 3 pre-auth provisioning routes
+	// (accept-invite, request-reset, reset-password -- provisioning.go),
+	// same shape and same reasoning as setupLimiter above: defense-in-depth
+	// against DB-spam/resource abuse, not the primary defense (each
+	// token's own 256-bit entropy already makes guessing infeasible).
+	// Code review flagged these 3 routes as the one pre-auth-route family
+	// in this codebase with no rate limit at all, unlike every sibling
+	// (login, setup) -- this closes that gap.
+	provisioningLimiter *rateLimiter
+
 	// loginIPLimiter/loginAccountLimiter rate-limit POST /v1/auth/login
 	// (B-070) -- see ratelimit_login.go. Both must pass for a login attempt
 	// to reach Login() at all: per-IP alone doesn't stop credential
@@ -73,6 +83,7 @@ func NewServer(queries *store.Queries, authSvc *auth.Service, engine *alerting.E
 		rl = cfg.RateLimit
 	}
 	s.setupLimiter = newRateLimiter(rl.Setup, time.Duration(rl.SetupWindowSeconds)*time.Second)
+	s.provisioningLimiter = newRateLimiter(rl.Provisioning, time.Duration(rl.ProvisioningWindowSeconds)*time.Second)
 	s.loginIPLimiter = newRateLimiter(rl.LoginPerIP, time.Duration(rl.LoginPerIPWindowSeconds)*time.Second)
 	s.loginAccountLimiter = newRateLimiter(rl.LoginPerAccount, time.Duration(rl.LoginPerAccountWindowSeconds)*time.Second)
 	var gwURL, gwKey string
@@ -110,6 +121,7 @@ func NewHandler(s Store, authSvc *auth.Service) *Server {
 		authSvc:             authSvc,
 		cfg:                 &config.Config{RateLimit: rl},
 		setupLimiter:        newRateLimiter(rl.Setup, time.Duration(rl.SetupWindowSeconds)*time.Second),
+		provisioningLimiter: newRateLimiter(rl.Provisioning, time.Duration(rl.ProvisioningWindowSeconds)*time.Second),
 		loginIPLimiter:      newRateLimiter(rl.LoginPerIP, time.Duration(rl.LoginPerIPWindowSeconds)*time.Second),
 		loginAccountLimiter: newRateLimiter(rl.LoginPerAccount, time.Duration(rl.LoginPerAccountWindowSeconds)*time.Second),
 	}
@@ -171,6 +183,16 @@ func (s *Server) Handler() http.Handler {
 	})
 	r.With(s.rateLimitLogin).Post("/v1/auth/login", s.Login)
 	r.Post("/v1/auth/refresh", s.Refresh)
+
+	// ── Real user provisioning (invite acceptance + password reset) ───────────
+	// Deliberately pre-auth, same reasoning as the setup wizard routes below:
+	// the invitee/requester has no session yet, and the token/credential
+	// itself (not route-level JWT auth) is what each handler verifies
+	// internally. See provisioning.go's package doc comment for the full
+	// design (DB-backed single-use tokens, mirroring setup_tokens).
+	r.Post("/v1/auth/accept-invite", s.AcceptInvite)
+	r.Post("/v1/auth/request-reset", s.RequestPasswordReset)
+	r.Post("/v1/auth/reset-password", s.ResetPassword)
 
 	// ── First-boot setup wizard (B-053 follow-up, bootstrap.go) ────────────────
 	// Deliberately pre-auth -- no user exists yet to authenticate as. The real
@@ -408,6 +430,20 @@ func (s *Server) Handler() http.Handler {
 			// own JWT sub claim (uc.UserID) -- can only ever return their
 			// own real rows, so any authenticated role may call it.
 			r.Get("/v1/workspaces/mine", s.MyWorkspaceMemberships)
+		})
+
+		// ── Self-profile: every authenticated role, including viewer ──────────
+		// Deliberately its own group, NOT nested inside the group above --
+		// viewerReadOnly there would block a viewer from ever changing their
+		// own name or password, which is a self-scoped action on the
+		// caller's own row (WHERE id = uc.UserID throughout users.go), not
+		// a privileged write. Same self-scoping reasoning as
+		// /v1/workspaces/mine, just without the read-only restriction.
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireRole("admin", "operator", "approver", "viewer"))
+			r.Get("/v1/users/me", s.GetMe)
+			r.Patch("/v1/users/me", s.UpdateMe)
+			r.Post("/v1/users/me/change-password", s.ChangeMyPassword)
 		})
 	})
 

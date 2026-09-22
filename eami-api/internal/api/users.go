@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -43,6 +44,41 @@ type InviteUserResp struct {
 
 type UpdateRoleRequest struct {
 	Role string `json:"role"`
+}
+
+// MeResp is GET /v1/users/me's response -- deliberately a distinct type
+// from UserResp2 (not just an alias) since it also carries workspace
+// memberships, which no other /v1/users response includes.
+type MeResp struct {
+	ID         string             `json:"id"`
+	Email      string             `json:"email"`
+	Name       *string            `json:"name,omitempty"`
+	Role       string             `json:"role"`
+	OrgID      string             `json:"org_id"`
+	Workspaces []MyWorkspaceMembershipResp `json:"workspaces"`
+}
+
+// UpdateMeRequest deliberately has only a Name field -- unlike
+// UpdateRoleRequest, there is no way for a caller to smuggle a role/org_id
+// change through this endpoint: encoding/json silently ignores unknown
+// fields on decode, so a client sending {"name":"...","role":"admin"}
+// only ever affects Name (proven by TestUpdateMe_CannotChangeRoleOrOrg).
+// Name is a pointer, not a plain string -- code review caught that a
+// plain string can't distinguish "field omitted" from "explicitly sent
+// empty", so an omitted name (e.g. a future field being added to this
+// same endpoint, or a partial client bug) would silently blank the
+// user's real display name via the zero value.
+type UpdateMeRequest struct {
+	Name *string `json:"name"`
+}
+
+// ChangeMyPasswordRequest requires the caller's current password --
+// PATCH /v1/users/me never touches password_hash, only this dedicated
+// endpoint does, and only after re-verifying the caller actually knows
+// their existing password (not just holds a still-valid access token).
+type ChangeMyPasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -101,8 +137,40 @@ func (s *Server) InviteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create the user record (password_hash will be set when they accept the invite).
-	u, err := s.queries.CreateInvitedUser(r.Context(), store.CreateInvitedUserParams{
+	// Issue a real, single-use, DB-backed invite token (invite_tokens,
+	// schema/migrations-v2/000022) -- NOT a JWT. The prior JWT-based design
+	// had a real bug: its actual signed expiry was accessTTL (config
+	// default 1 hour), not the 48 hours this comment and the response both
+	// claimed, since IssueAccessToken never received the locally-computed
+	// TTL at all. A DB row with a real expires_at column, checked directly,
+	// can't drift from what it claims. See provisioning.go's package doc
+	// comment for the full single-use-token pattern this mirrors
+	// (bootstrap.go's setup_tokens). Generated before the transaction below
+	// -- pure in-memory work, no reason to hold a DB transaction open for it.
+	rawToken, tokenHash, err := authpkg.IssueRefreshToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not issue invite token")
+		return
+	}
+	expiresAt := time.Now().Add(inviteTokenTTL)
+
+	// The user row and its invite token are created in one transaction --
+	// code review caught that two separate statements left a real gap: if
+	// the token INSERT failed after CreateInvitedUser had already
+	// committed, the user row would exist permanently with
+	// password_hash IS NULL and no usable invite token, and since
+	// users.email is globally UNIQUE, that email could never be
+	// (re-)invited again without a direct DB fix.
+	ctx := r.Context()
+	tx, err := s.queries.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not start transaction")
+		return
+	}
+	defer tx.Rollback(ctx) // no-op once Commit has succeeded
+
+	qtx := store.New(tx)
+	u, err := qtx.CreateInvitedUser(ctx, store.CreateInvitedUserParams{
 		OrgID:     uc.OrgID,
 		Email:     req.Email,
 		Role:      req.Role,
@@ -112,20 +180,22 @@ func (s *Server) InviteUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-
-	// Issue a 48-hour invite JWT.
-	inviteTTL := 48 * time.Hour
-	inviteToken, exp, err := s.authSvc.IssueAccessToken(u.ID, uc.OrgID, req.Email, "invited")
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "could not issue invite token")
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO invite_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
+		u.ID, tokenHash, expiresAt,
+	); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not persist invite token")
 		return
 	}
-	_ = exp
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not finalize invite")
+		return
+	}
 
 	writeJSON(w, http.StatusCreated, InviteUserResp{
 		User:       userRowToResp(*u),
-		InviteLink: "/accept-invite?token=" + inviteToken,
-		ExpiresAt:  time.Now().Add(inviteTTL),
+		InviteLink: "/accept-invite?token=" + rawToken,
+		ExpiresAt:  expiresAt,
 	})
 }
 
@@ -180,6 +250,117 @@ func (s *Server) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// GetMe handles GET /v1/users/me -- self-scoped entirely by the caller's
+// own JWT sub claim (uc.UserID), same reasoning as MyWorkspaceMemberships
+// for why any authenticated role may call it (it can only ever return the
+// caller's own row).
+func (s *Server) GetMe(w http.ResponseWriter, r *http.Request) {
+	if !s.requireQueries(w) {
+		return
+	}
+	uc := claimsFromContext(r)
+	u, err := s.queries.GetUserByID(r.Context(), uc.UserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	workspaces, err := s.queryMyWorkspaceMemberships(r.Context(), uc.UserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	resp := MeResp{
+		ID:         u.ID.String(),
+		Email:      u.Email,
+		Role:       u.Role,
+		OrgID:      u.OrgID.String(),
+		Workspaces: workspaces,
+	}
+	if u.Name.Valid {
+		resp.Name = &u.Name.String
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// UpdateMe handles PATCH /v1/users/me -- name only, by construction:
+// UpdateMeRequest (above) has no Role/OrgID field, so those can never be
+// set by this endpoint regardless of what a caller's JSON body contains
+// (encoding/json silently drops unknown fields on decode). Any
+// authenticated role may call it -- it only ever writes the caller's own
+// row (WHERE id = uc.UserID), the same self-scoping as GetMe.
+func (s *Server) UpdateMe(w http.ResponseWriter, r *http.Request) {
+	if !s.requireQueries(w) {
+		return
+	}
+	uc := claimsFromContext(r)
+	var req UpdateMeRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	if req.Name == nil || strings.TrimSpace(*req.Name) == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "name is required")
+		return
+	}
+	u, err := s.queries.UpdateUserName(r.Context(), uc.UserID, uc.OrgID, *req.Name)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			writeError(w, http.StatusNotFound, "not_found", "user not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, userRowToResp(*u))
+}
+
+// ChangeMyPassword handles POST /v1/users/me/change-password -- requires
+// the caller's current password (re-verified via authpkg.CheckPassword
+// against the real stored hash, not just trusted from a valid access
+// token) before setting a new one. An SSO-only account (no password_hash
+// set) has nothing to verify against and is rejected outright, same
+// "account uses SSO" convention Login already uses.
+func (s *Server) ChangeMyPassword(w http.ResponseWriter, r *http.Request) {
+	if !s.requireQueries(w) {
+		return
+	}
+	uc := claimsFromContext(r)
+	var req ChangeMyPasswordRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	if len(req.NewPassword) < minPasswordLen {
+		writeError(w, http.StatusBadRequest, "bad_request", "new_password must be at least 8 characters")
+		return
+	}
+
+	u, err := s.queries.GetUserByID(r.Context(), uc.UserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	if !u.PasswordHash.Valid {
+		writeError(w, http.StatusBadRequest, "bad_request", "account uses SSO")
+		return
+	}
+	if err := authpkg.CheckPassword(req.CurrentPassword, u.PasswordHash.String); err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "current password is incorrect")
+		return
+	}
+
+	newHash, err := authpkg.HashPassword(req.NewPassword)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not hash password")
+		return
+	}
+	if err := s.queries.UpdateUserPasswordHash(r.Context(), uc.UserID, newHash); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // ── Converter ─────────────────────────────────────────────────────────────────

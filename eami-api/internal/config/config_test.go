@@ -114,6 +114,7 @@ func TestValidate_AcceptsPositiveRateLimitValues(t *testing.T) {
 		LoginPerIP: 1, LoginPerIPWindowSeconds: 1,
 		LoginPerAccount: 1, LoginPerAccountWindowSeconds: 1,
 		Setup: 1, SetupWindowSeconds: 1,
+		Provisioning: 1, ProvisioningWindowSeconds: 1,
 	}
 	if err := validate(cfg); err != nil {
 		t.Errorf("validate() with all-positive rate-limit values: unexpected error: %v", err)
@@ -146,6 +147,7 @@ func clearSecretEnv(t *testing.T) {
 		"LOGIN_RATE_LIMIT_PER_IP", "LOGIN_RATE_LIMIT_PER_IP_WINDOW_SECONDS",
 		"LOGIN_RATE_LIMIT_PER_ACCOUNT", "LOGIN_RATE_LIMIT_PER_ACCOUNT_WINDOW_SECONDS",
 		"SETUP_RATE_LIMIT", "SETUP_RATE_LIMIT_WINDOW_SECONDS",
+		"PROVISIONING_RATE_LIMIT", "PROVISIONING_RATE_LIMIT_WINDOW_SECONDS",
 	} {
 		os.Unsetenv(k)
 	}

@@ -55,7 +55,14 @@ const STORAGE_KEY = 'eami-auth'
 // bookmark, pasted/shared URL -- exactly B-146's scenario), this module
 // loads before React Router has rendered anything, so the browser's URL
 // is still the one the user actually asked for.
-const REDIRECT_EXEMPT_PATHS = new Set(['/login', '/setup', '/'])
+const REDIRECT_EXEMPT_PATHS = new Set([
+  '/login',
+  '/setup',
+  '/',
+  '/accept-invite',
+  '/forgot-password',
+  '/reset-password',
+])
 
 let capturedRedirectPath: string | null = null
 if (typeof window !== 'undefined') {

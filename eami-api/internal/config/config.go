@@ -47,6 +47,16 @@ type RateLimitConfig struct {
 	// -- same defaults, now overridable instead of fixed in code.
 	Setup              int `yaml:"setup"`
 	SetupWindowSeconds int `yaml:"setup_window_seconds"`
+
+	// Provisioning* guards the 3 pre-auth provisioning routes (accept-invite,
+	// request-reset, reset-password -- provisioning.go) per client IP,
+	// same reasoning and same conservative default as Setup above: token
+	// brute force is already computationally infeasible (256-bit tokens),
+	// this is defense-in-depth against DB-spam/resource abuse on an
+	// unauthenticated route, same class of gap code review found missing
+	// here relative to login's existing rateLimitLogin.
+	Provisioning              int `yaml:"provisioning"`
+	ProvisioningWindowSeconds int `yaml:"provisioning_window_seconds"`
 }
 
 // CollectorConfig tells the API server how to reach the on-prem collector for
@@ -184,6 +194,8 @@ func Load(path string) (*Config, error) {
 	setIntEnv(os.Getenv("LOGIN_RATE_LIMIT_PER_ACCOUNT_WINDOW_SECONDS"), &cfg.RateLimit.LoginPerAccountWindowSeconds)
 	setIntEnv(os.Getenv("SETUP_RATE_LIMIT"), &cfg.RateLimit.Setup)
 	setIntEnv(os.Getenv("SETUP_RATE_LIMIT_WINDOW_SECONDS"), &cfg.RateLimit.SetupWindowSeconds)
+	setIntEnv(os.Getenv("PROVISIONING_RATE_LIMIT"), &cfg.RateLimit.Provisioning)
+	setIntEnv(os.Getenv("PROVISIONING_RATE_LIMIT_WINDOW_SECONDS"), &cfg.RateLimit.ProvisioningWindowSeconds)
 
 	if err := validate(cfg); err != nil {
 		return nil, err
@@ -267,6 +279,8 @@ func validate(cfg *Config) error {
 		{"LOGIN_RATE_LIMIT_PER_ACCOUNT_WINDOW_SECONDS", cfg.RateLimit.LoginPerAccountWindowSeconds},
 		{"SETUP_RATE_LIMIT", cfg.RateLimit.Setup},
 		{"SETUP_RATE_LIMIT_WINDOW_SECONDS", cfg.RateLimit.SetupWindowSeconds},
+		{"PROVISIONING_RATE_LIMIT", cfg.RateLimit.Provisioning},
+		{"PROVISIONING_RATE_LIMIT_WINDOW_SECONDS", cfg.RateLimit.ProvisioningWindowSeconds},
 	} {
 		if f.val <= 0 {
 			return fmt.Errorf("config: %s must be a positive integer, got %d", f.name, f.val)
@@ -325,6 +339,8 @@ func DefaultRateLimitConfig() RateLimitConfig {
 		LoginPerAccountWindowSeconds:  300,
 		Setup:                         10,
 		SetupWindowSeconds:            900,
+		Provisioning:                  10,
+		ProvisioningWindowSeconds:     900,
 	}
 }
 

@@ -102,3 +102,27 @@ func (q *Queries) SoftDeleteUser(ctx context.Context, id, orgID uuid.UUID) error
 	_, err := q.db.Exec(ctx, softDeleteUserQuery, toPgtypeUUID(id), toPgtypeUUID(orgID))
 	return err
 }
+
+const updateUserNameQuery = `-- name: UpdateUserName :one
+UPDATE users SET name = $3
+WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
+RETURNING id, org_id, email, name, role, created_at, last_login, deleted_at`
+
+func (q *Queries) UpdateUserName(ctx context.Context, id, orgID uuid.UUID, name string) (*UserRow, error) {
+	row := q.db.QueryRow(ctx, updateUserNameQuery, toPgtypeUUID(id), toPgtypeUUID(orgID), name)
+	var u UserRow
+	err := row.Scan(&u.ID, &u.OrgID, &u.Email, &u.Name, &u.Role,
+		&u.CreatedAt, &u.LastLogin, &u.DeletedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+const updateUserPasswordHashQuery = `-- name: UpdateUserPasswordHash :exec
+UPDATE users SET password_hash = $2 WHERE id = $1 AND deleted_at IS NULL`
+
+func (q *Queries) UpdateUserPasswordHash(ctx context.Context, id uuid.UUID, passwordHash string) error {
+	_, err := q.db.Exec(ctx, updateUserPasswordHashQuery, toPgtypeUUID(id), passwordHash)
+	return err
+}
