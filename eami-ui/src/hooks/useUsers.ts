@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/api/client'
+import { api, apiFetch } from '@/api/client'
 import type { components } from '@/api/schema'
 
 export type OrgUser = components['schemas']['OrgUser']
@@ -40,6 +40,25 @@ export function useChangeUserRole() {
       return data
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  })
+}
+
+// useAdminGenerateResetLink -- B-212 security correction. POST
+// /v1/users/{userId}/reset-link isn't in api/openapi.yaml yet
+// (Architect-EAMI-owned), same disclosed apiFetch escape-hatch precedent
+// as every other undocumented route in this app. This is the only real
+// delivery mechanism for a password reset given no email infra exists:
+// POST /v1/auth/request-reset (the self-service one, unauthenticated)
+// deliberately never returns or logs a usable token -- an admin must
+// generate the link explicitly here, same trust model as inviting a user.
+export function useAdminGenerateResetLink() {
+  return useMutation({
+    mutationFn: async (userId: string) => {
+      return apiFetch<{ reset_link: string; expires_at: string }>(
+        `/v1/users/${userId}/reset-link`,
+        { method: 'POST' },
+      )
+    },
   })
 }
 

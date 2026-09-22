@@ -239,6 +239,12 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/v1/users/invite", s.InviteUser)
 			r.Put("/v1/users/{userId}/role", s.UpdateUserRole)
 			r.Delete("/v1/users/{userId}", s.DeleteUser)
+			// Real delivery mechanism for password reset given no email
+			// infra exists -- same admin-only tier as InviteUser, same
+			// reasoning (see provisioning.go's package doc comment):
+			// RequestPasswordReset (pre-auth, below) never mints a usable
+			// token or logs one; only this authenticated action does.
+			r.Post("/v1/users/{userId}/reset-link", s.AdminGenerateResetLink)
 			// Workspaces (B-197 increment 3): create/delete are org-wide
 			// structural changes, admin-only, same tier as every other
 			// org-wide write on this line -- not workspace-scoped (there's

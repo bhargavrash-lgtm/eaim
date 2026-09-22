@@ -35,6 +35,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -259,6 +260,25 @@ func (e *provisioningTestEnv) login(t *testing.T, email, password string) *http.
 	return e.postJSON(t, "/v1/auth/login", map[string]string{"email": email, "password": password})
 }
 
+func (e *provisioningTestEnv) postJSONAuth(t *testing.T, path, bearer string, body any) *http.Response {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, e.url+path, bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("build POST %s: %v", path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	resp, err := e.http.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s: %v", path, err)
+	}
+	return resp
+}
+
 func readRespBody(t *testing.T, resp *http.Response) []byte {
 	t.Helper()
 	defer resp.Body.Close()
@@ -454,24 +474,24 @@ func TestRequestPasswordReset_RealDB_ResponseIdenticalForExistingAndNonexistentE
 		t.Fatalf("response bodies differ -- an enumeration oracle: existing=%s nonexistent=%s", existingBody, nonexistentBody)
 	}
 
-	// Prove real work actually happened server-side for the existing
-	// account despite the identical response -- a real reset_tokens row
-	// was minted, even though the HTTP caller can't tell.
+	// request-reset must NEVER mint a usable credential -- confirmed
+	// against the database directly, not just the HTTP response: zero
+	// reset_tokens rows exist for the real account either. Security
+	// correction (found after this task's own initial sign-off pass):
+	// an earlier version of this endpoint minted a real token here and
+	// logged its raw value server-side, which is exactly as exploitable
+	// as returning it in the response would have been -- a log reader
+	// gets a live bearer credential. The only thing that may ever mint a
+	// usable reset_tokens row now is the admin-authenticated
+	// AdminGenerateResetLink, covered by its own test below.
 	var count int
 	if err := env.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM reset_tokens rt JOIN users u ON u.id = rt.user_id WHERE u.email = $1
 	`, "real-user@example.com").Scan(&count); err != nil {
 		t.Fatalf("count reset_tokens: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("expected exactly 1 reset_tokens row minted for the real account, got %d", count)
-	}
-	var nonexistentCount int
-	if err := env.pool.QueryRow(ctx, `SELECT COUNT(*) FROM reset_tokens WHERE user_id NOT IN (SELECT id FROM users)`).Scan(&nonexistentCount); err != nil {
-		t.Fatalf("count orphan reset_tokens: %v", err)
-	}
-	if nonexistentCount != 0 {
-		t.Fatalf("no reset_tokens row should exist with no owning user, got %d", nonexistentCount)
+	if count != 0 {
+		t.Fatalf("request-reset must never mint a usable reset_tokens row, got %d", count)
 	}
 
 	// Best-effort timing sanity check -- not a rigorous constant-time
@@ -501,6 +521,127 @@ func TestRequestPasswordReset_RealDB_ResponseIdenticalForExistingAndNonexistentE
 	ratio := float64(existingAvg) / float64(nonexistentAvg+1)
 	if ratio > 5.0 || ratio < 0.2 {
 		t.Fatalf("existing vs. nonexistent avg latency ratio %.2f is far enough apart to be a plausible timing oracle (existing=%v nonexistent=%v)", ratio, existingAvg, nonexistentAvg)
+	}
+}
+
+// ── AdminGenerateResetLink: the real, safe delivery mechanism ───────────────
+// (added after RequestPasswordReset's original design was corrected to
+// never mint or log a usable token -- see provisioning.go's package doc
+// comment for the full reasoning.)
+
+func adminAccessToken(t *testing.T, env *provisioningTestEnv, email, password string) string {
+	t.Helper()
+	resp := env.login(t, email, password)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("admin login failed: %d", resp.StatusCode)
+	}
+	defer resp.Body.Close()
+	var lr struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&lr); err != nil {
+		t.Fatalf("decode login response: %v", err)
+	}
+	return lr.AccessToken
+}
+
+func TestAdminGenerateResetLink_RealDB_ProducesAWorkingResetToken(t *testing.T) {
+	env := newProvisioningTestEnv(t)
+	ctx := context.Background()
+	orgID := seedTestOrg(t, ctx, env.pool, "b-admin-reset")
+	adminID := env.seedActiveUser(t, ctx, orgID, "admin@example.com", "adminpass123", "admin")
+	_ = adminID
+	targetID := env.seedActiveUser(t, ctx, orgID, "target@example.com", "originalpass1", "operator")
+
+	adminToken := adminAccessToken(t, env, "admin@example.com", "adminpass123")
+
+	resp := env.postJSONAuth(t, "/v1/users/"+targetID.String()+"/reset-link", adminToken, nil)
+	body := readRespBody(t, resp)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", resp.StatusCode, body)
+	}
+	var link struct {
+		ResetLink string    `json:"reset_link"`
+		ExpiresAt time.Time `json:"expires_at"`
+	}
+	if err := json.Unmarshal(body, &link); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	idx := strings.Index(link.ResetLink, "token=")
+	if idx == -1 {
+		t.Fatalf("response reset_link has no token: %s", link.ResetLink)
+	}
+	rawToken := link.ResetLink[idx+len("token="):]
+
+	// The returned token is a real, working reset credential end to end.
+	resetResp := env.postJSON(t, "/v1/auth/reset-password", map[string]string{
+		"token":        rawToken,
+		"new_password": "brandNewPass1",
+	})
+	if resetResp.StatusCode != http.StatusOK {
+		t.Fatalf("reset-password with admin-generated token: expected 200, got %d", resetResp.StatusCode)
+	}
+	loginResp := env.login(t, "target@example.com", "brandNewPass1")
+	if loginResp.StatusCode != http.StatusOK {
+		t.Fatalf("target should log in with the reset password, got %d", loginResp.StatusCode)
+	}
+}
+
+func TestAdminGenerateResetLink_RealDB_CannotTargetAnotherOrg(t *testing.T) {
+	env := newProvisioningTestEnv(t)
+	ctx := context.Background()
+	orgA := seedTestOrg(t, ctx, env.pool, "b-admin-reset-org-a")
+	orgB := seedTestOrg(t, ctx, env.pool, "b-admin-reset-org-b")
+	env.seedActiveUser(t, ctx, orgA, "admin-a@example.com", "adminpass123", "admin")
+	targetInB := env.seedActiveUser(t, ctx, orgB, "target-b@example.com", "originalpass1", "operator")
+
+	adminToken := adminAccessToken(t, env, "admin-a@example.com", "adminpass123")
+
+	resp := env.postJSONAuth(t, "/v1/users/"+targetInB.String()+"/reset-link", adminToken, nil)
+	body := readRespBody(t, resp)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for a cross-org target, got %d: %s", resp.StatusCode, body)
+	}
+
+	var count int
+	if err := env.pool.QueryRow(ctx, `SELECT COUNT(*) FROM reset_tokens WHERE user_id = $1`, targetInB).Scan(&count); err != nil {
+		t.Fatalf("count reset_tokens: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("no reset_tokens row should be minted for a rejected cross-org request, got %d", count)
+	}
+}
+
+func TestAdminGenerateResetLink_RealDB_PriorLinkInvalidatedByNewOne(t *testing.T) {
+	env := newProvisioningTestEnv(t)
+	ctx := context.Background()
+	orgID := seedTestOrg(t, ctx, env.pool, "b-admin-reset-invalidate")
+	env.seedActiveUser(t, ctx, orgID, "admin2@example.com", "adminpass123", "admin")
+	targetID := env.seedActiveUser(t, ctx, orgID, "target2@example.com", "originalpass1", "operator")
+	adminToken := adminAccessToken(t, env, "admin2@example.com", "adminpass123")
+
+	first := env.postJSONAuth(t, "/v1/users/"+targetID.String()+"/reset-link", adminToken, nil)
+	var firstLink struct {
+		ResetLink string `json:"reset_link"`
+	}
+	if err := json.Unmarshal(readRespBody(t, first), &firstLink); err != nil {
+		t.Fatalf("decode first response: %v", err)
+	}
+	firstToken := firstLink.ResetLink[strings.Index(firstLink.ResetLink, "token=")+len("token="):]
+
+	second := env.postJSONAuth(t, "/v1/users/"+targetID.String()+"/reset-link", adminToken, nil)
+	if second.StatusCode != http.StatusCreated {
+		t.Fatalf("second generate: expected 201, got %d", second.StatusCode)
+	}
+	second.Body.Close()
+
+	// The first (now stale) token must no longer work.
+	resp := env.postJSON(t, "/v1/auth/reset-password", map[string]string{
+		"token":        firstToken,
+		"new_password": "shouldNotWork1",
+	})
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected the superseded first token to be rejected, got %d", resp.StatusCode)
 	}
 }
 

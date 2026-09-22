@@ -14,7 +14,7 @@ import type { Column } from '@/components/common/DataTable'
 import { useToast } from '@/components/common/Toast'
 import { useAuthStore } from '@/stores/authStore'
 import { useOrgSettings, useUpdateOrgSettings } from '@/hooks/useOrgSettings'
-import { useUsers, useInviteUser, useChangeUserRole, useRevokeUser, type UserRole } from '@/hooks/useUsers'
+import { useUsers, useInviteUser, useChangeUserRole, useRevokeUser, useAdminGenerateResetLink, type UserRole } from '@/hooks/useUsers'
 import { useNotificationSettings, useUpdateNotificationSettings, useTestNotification } from '@/hooks/useNotificationSettings'
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from '@/hooks/useApiKeys'
 import { useAgents, type Agent } from '@/hooks/useAgents'
@@ -196,14 +196,29 @@ type InviteFormValues = z.infer<typeof inviteSchema>
 
 function UsersTab() {
   const currentUser = useAuthStore((s) => s.user)
+  const { showToast } = useToast()
   const { data, isLoading } = useUsers()
   const invite = useInviteUser()
   const changeRole = useChangeUserRole()
   const revoke = useRevokeUser()
+  const generateResetLink = useAdminGenerateResetLink()
 
   const [showInvite, setShowInvite] = useState(false)
   const [inviteLink, setInviteLink] = useState<string | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<OrgUser | null>(null)
+  const [resetLink, setResetLink] = useState<string | null>(null)
+
+  async function onGenerateResetLink(u: OrgUser) {
+    try {
+      const result = await generateResetLink.mutateAsync(u.id)
+      setResetLink(result.reset_link)
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : 'Could not generate a reset link',
+        { type: 'error' },
+      )
+    }
+  }
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<InviteFormValues>({
     resolver: zodResolver(inviteSchema),
@@ -265,9 +280,18 @@ function UsersTab() {
       render: (u) => {
         const isSelf = u.id === currentUser?.id
         return !isSelf ? (
-          <button onClick={() => setRevokeTarget(u)} className="text-xs text-red-600 hover:underline">
-            Revoke
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => onGenerateResetLink(u)}
+              disabled={generateResetLink.isPending}
+              className="text-xs text-gray-600 hover:underline disabled:opacity-50"
+            >
+              Reset link
+            </button>
+            <button onClick={() => setRevokeTarget(u)} className="text-xs text-red-600 hover:underline">
+              Revoke
+            </button>
+          </div>
         ) : null
       },
     },
@@ -337,6 +361,30 @@ function UsersTab() {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Reset link modal -- B-212 security correction: POST /v1/auth/request-reset
+          (self-service) never returns or logs a usable token; this admin-authenticated
+          action is the only real delivery mechanism given no email infra exists. */}
+      {resetLink && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <h2 className="text-base font-semibold text-gray-900 mb-4">Password reset link</h2>
+            <div className="space-y-3">
+              <p className="text-sm text-gray-600">Share this link with the user -- it expires in 1 hour:</p>
+              <div className="flex items-center gap-2 rounded-md border border-gray-300 bg-gray-50 px-3 py-2">
+                <code className="flex-1 text-xs break-all text-gray-800">{resetLink}</code>
+                <CopyButton value={resetLink} />
+              </div>
+              <button
+                onClick={() => setResetLink(null)}
+                className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+              >
+                Done
+              </button>
+            </div>
           </div>
         </div>
       )}

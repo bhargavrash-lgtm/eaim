@@ -14,14 +14,31 @@
 // already returns its link directly to the inviting admin, who is expected
 // to hand-deliver it -- an acceptable trust model since the admin is
 // authenticated and already trusted with the invite in the first place.
-// RequestPasswordReset is different: it's an unauthenticated, self-service
-// endpoint, so it can NEVER return the reset link in its own HTTP response
-// -- doing so would let anyone mint a working password-reset link for any
-// email address they can guess, which is an account-takeover bug, not just
-// an enumeration leak. Instead the generated link is written to the server
-// log (log.Printf below) -- the same trust boundary bootstrap.go's own setup
-// token already relies on (console/server access), honestly disclosed as a
-// real limitation rather than implying email delivery that doesn't exist.
+//
+// RequestPasswordReset is different and does NOT follow that model: it's an
+// unauthenticated, self-service endpoint, so it can never return the reset
+// link in its own HTTP response, AND it must never put the raw token
+// anywhere else recoverable either -- including a log sink. A log line
+// containing the raw token is exactly as exploitable as returning it in the
+// response: anyone with read access to that log gets a live, unexpired
+// bearer credential for the account, and unlike a URL, a bcrypt hash, or an
+// opaque reference, this specific string *is* the credential itself, not a
+// pointer to one. (An earlier version of this file logged the raw token
+// here, reasoning it was "the same trust boundary as bootstrap.go's
+// console-only setup token" -- that reasoning doesn't hold: the setup token
+// is generated and displayed once, outside this process, before any log
+// line involving it could ever be written; this would have been a live
+// credential this process itself chose to duplicate into a log stream.
+// Corrected before shipping.)
+//
+// RequestPasswordReset therefore never mints or persists a usable token at
+// all -- it only logs that a reset was requested (user_id/email, no
+// secret), for ops visibility. The actual, safe delivery mechanism is
+// AdminGenerateResetLink below: a new admin-authenticated action
+// (POST /v1/users/{userId}/reset-link, same admin-only route tier as
+// InviteUser) that mints a fresh token and returns the link directly in its
+// HTTP response to the authenticated admin caller -- never logged, never
+// persisted in raw form, same trust model as InviteUser's own invite_link.
 package api
 
 import (
@@ -32,6 +49,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -195,11 +213,15 @@ type RequestPasswordResetResp struct {
 
 // RequestPasswordReset handles POST /v1/auth/request-reset (unauthenticated).
 // Always returns the identical 200 response regardless of whether the
-// account exists -- the standard anti-enumeration convention -- and NEVER
-// returns the generated token in the response body; see this file's own
-// package doc comment for why. When a real, active (non-SSO,
-// non-deactivated) account exists for the given email, a reset token is
-// minted and logged server-side.
+// account exists -- the standard anti-enumeration convention. Mints and
+// stores NOTHING usable as a credential: no token is generated, no
+// reset_tokens row is written, and no secret of any kind is logged --
+// only that a reset was requested, for ops visibility. See this file's own
+// package doc comment for why (a log line is exactly as exploitable as
+// returning the token in the response would have been). An admin who sees
+// this log line and wants to actually help the user completes the reset
+// via AdminGenerateResetLink below, which is the only thing that ever
+// mints a real, usable reset token.
 func (s *Server) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
 	// Applied uniformly before anything account-specific happens -- an
 	// IP-keyed limit that doesn't depend on whether the email exists is
@@ -219,7 +241,10 @@ func (s *Server) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
 
 	if s.queries != nil && email != "" {
 		if u, err := s.queries.GetUserByEmail(r.Context(), email); err == nil && u.PasswordHash.Valid {
-			s.issueResetToken(r, u.ID, u.Email)
+			// user_id/email only -- no token, no link, nothing an attacker
+			// or a log-reader without admin credentials could use.
+			log.Printf("password reset requested for user_id=%s email=%s -- an admin can complete this via POST /v1/users/%s/reset-link",
+				u.ID, u.Email, u.ID)
 		}
 		// A lookup miss, an SSO-only account, or an empty email all fall
 		// through silently -- same response either way, below.
@@ -228,48 +253,82 @@ func (s *Server) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, RequestPasswordResetResp{Status: "ok"})
 }
 
-// issueResetToken mints and persists a reset token for userID, invalidating
-// any previously-issued, still-unconsumed reset tokens for that user first
-// (so only the most recently requested link ever works -- a stale link from
-// an earlier request a user forgot about shouldn't remain a live credential
-// indefinitely). The invalidate + insert run inside one transaction --
-// code review caught that two separate, non-transactional Exec calls let
-// two overlapping requests both pass the invalidate step before either
-// insert committed, leaving two simultaneously-valid tokens and silently
-// breaking this function's own "only the latest link works" guarantee.
-// Logs the raw link server-side -- see package doc comment.
-func (s *Server) issueResetToken(r *http.Request, userID uuid.UUID, email string) {
-	raw, hash, err := authpkg.IssueRefreshToken() // generic random-token+hash helper, not refresh-token-specific
-	if err != nil {
-		log.Printf("password reset: could not generate token for user_id=%s: %v", userID, err)
+type AdminGenerateResetLinkResp struct {
+	ResetLink string    `json:"reset_link"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// AdminGenerateResetLink handles POST /v1/users/{userId}/reset-link
+// (admin-only, router.go -- same tier as InviteUser). This, not
+// RequestPasswordReset, is the real delivery mechanism for the disclosed
+// no-email-infrastructure limitation: mints a fresh, single-use reset
+// token and returns the link directly in this authenticated response to
+// the admin caller, exactly like InviteUser's own invite_link -- never
+// logged, never persisted anywhere in raw form (only its SHA-256 hash is
+// stored). The admin is expected to hand-deliver it, same as an invite.
+func (s *Server) AdminGenerateResetLink(w http.ResponseWriter, r *http.Request) {
+	if !s.requireQueries(w) {
 		return
 	}
+	uc := claimsFromContext(r)
+	userID, err := uuid.Parse(chi.URLParam(r, "userId"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid userId")
+		return
+	}
+
+	// Scoped to the caller's own org, and to a real, active (non-SSO)
+	// account -- an admin can't mint a reset link for a user outside
+	// their org, or for a user who has no password to reset in the first
+	// place, by supplying an arbitrary userId.
+	u, err := s.queries.GetUserByID(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "user not found")
+		return
+	}
+	if u.OrgID != uc.OrgID {
+		writeError(w, http.StatusNotFound, "not_found", "user not found")
+		return
+	}
+	if !u.PasswordHash.Valid {
+		writeError(w, http.StatusBadRequest, "bad_request", "account uses SSO")
+		return
+	}
+
+	raw, hash, err := authpkg.IssueRefreshToken() // generic random-token+hash helper, not refresh-token-specific
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not issue reset token")
+		return
+	}
+
 	ctx := r.Context()
 	tx, err := s.queries.Begin(ctx)
 	if err != nil {
-		log.Printf("password reset: could not start transaction for user_id=%s: %v", userID, err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not start transaction")
 		return
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) // no-op once Commit has succeeded
 
 	// Per-user advisory lock, held for the transaction's lifetime -- same
 	// technique as bootstrap.go's global pg_advisory_xact_lock, scoped to
 	// this one user_id instead of globally. Without it, two genuinely
-	// concurrent requests could each run the invalidate UPDATE against a
+	// concurrent calls could each run the invalidate UPDATE against a
 	// snapshot with zero prior unconsumed rows (neither sees the other's
 	// not-yet-inserted row, so neither has anything to invalidate) and
 	// both then INSERT, leaving two simultaneously-valid tokens -- a plain
 	// transaction alone doesn't serialize two independent INSERTs the way
 	// it does two UPDATEs racing the same existing row.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "reset_token:"+userID.String()); err != nil {
-		log.Printf("password reset: could not acquire per-user lock for user_id=%s: %v", userID, err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not acquire lock")
 		return
 	}
-
+	// Invalidate any previously-issued, still-unconsumed reset tokens for
+	// this user first -- so only the most recently generated link ever
+	// works, not a stale one from an earlier admin action.
 	if _, err := tx.Exec(ctx,
 		`UPDATE reset_tokens SET consumed_at = now() WHERE user_id = $1 AND consumed_at IS NULL`, userID,
 	); err != nil {
-		log.Printf("password reset: could not invalidate prior tokens for user_id=%s: %v", userID, err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not invalidate prior tokens")
 		return
 	}
 	expiresAt := time.Now().Add(resetTokenTTL)
@@ -277,15 +336,18 @@ func (s *Server) issueResetToken(r *http.Request, userID uuid.UUID, email string
 		`INSERT INTO reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
 		userID, hash, expiresAt,
 	); err != nil {
-		log.Printf("password reset: could not persist token for user_id=%s: %v", userID, err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not persist reset token")
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
-		log.Printf("password reset: could not finalize token for user_id=%s: %v", userID, err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not finalize reset token")
 		return
 	}
-	log.Printf("password reset requested for user_id=%s email=%s: reset_link=/reset-password?token=%s (expires %s) -- no email delivery configured, deliver this link out-of-band",
-		userID, email, raw, expiresAt.Format(time.RFC3339))
+
+	writeJSON(w, http.StatusCreated, AdminGenerateResetLinkResp{
+		ResetLink: "/reset-password?token=" + raw,
+		ExpiresAt: expiresAt,
+	})
 }
 
 type ResetPasswordRequest struct {

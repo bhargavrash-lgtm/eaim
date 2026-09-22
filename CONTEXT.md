@@ -1373,7 +1373,9 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
-## Active decision thread (2026-09-22, newest) — B-212 built: real user provisioning (invite acceptance, password reset, self-profile), closing the dead-`/accept-invite`-link gap B-211's own preceding investigation found. Part A investigation done first per the task brief's kickoff (confirmed no real email delivery exists anywhere in this codebase; confirmed and reused existing bcrypt/token utilities; found the existing invite JWT's real TTL bug — signed expiry was 1 hour, not the claimed 48). A genuine design-fork question was raised and founder-approved before building: replace the JWT-based invite token with a DB-backed opaque single-use token mirroring `bootstrap.go`'s `setup_tokens` pattern, rather than keeping the JWT and adding a separate consumed-marker — approved as the correct call, matching established convention and fixing the TTL bug as a side effect. Mandatory code review (fork) found 5 real issues (silent-name-blank on `PATCH /v1/users/me`, a non-transactional invite-user-creation gap that could permanently strand an email, missing rate limiting on all 3 new pre-auth routes, bcrypt running before token validation — a CPU-exhaustion amplifier, and a real concurrency race in reset-token invalidation) — all fixed and re-verified. Security review: zero HIGH/MEDIUM findings. Full real-Postgres adversarial test coverage (all 4 mandatory cases) plus a rate-limit regression test; live-verified end-to-end against the real rebuilt/restarted shared stack via direct HTTP calls (invite → accept → login → self-profile → change-password → request-reset → reset-password, each adversarial edge live-confirmed, not just tested). Frontend (4 new pages, `router.tsx`/`authStore.ts`/`LoginPage.tsx`/`UserMenu.tsx` updates) verified via clean `tsc`/`vite build` and the real dev-server container's served routes — no real browser click-through, disclosed (no browser-automation capability this session). New B-213 logged (doc-accuracy only, `openapi.yaml`'s stale 72h invite-expiry text, Architect-EAMI-owned, not fixed). Full detail in `BUILT.md`'s `eami-api`/`eami-ui` sections and `BACKLOG.md`'s new B-212/B-213 entries.
+## Active decision thread (2026-09-22, newest) — B-212 post-sign-off security correction, caught by the founder's own review before signing off, not self-caught: the reset-flow design in the entry immediately below logged the raw reset token via `log.Printf` — a live bearer credential in a log sink, exactly as exploitable as returning it in the unauthenticated response would have been (the exact account-takeover bug this same brief's own package doc comment had already correctly warned against, moved to a different sink and rationalized away at the time as matching `bootstrap.go`'s console-only setup-token trust boundary — a comparison that doesn't actually hold). Founder explicitly asked to see the current code for the specific log line before signing off, rather than accepting the completion report's summary — confirmed the exposure was real and unfixed, not already handled elsewhere. Fixed: `RequestPasswordReset` now mints/logs nothing (user_id/email only, no secret); a new admin-only `POST /v1/users/{userId}/reset-link` (same tier as `InviteUser`) is the sole real delivery mechanism, returning the link only in its own authenticated response, never logged, never persisted raw. Added a real admin UI action for it (`SettingsPage.tsx`'s Users tab, "Reset link" button + modal, mirroring the invite-link pattern) so the fix isn't curl-only. 3 new real-Postgres tests; existing AC3 test's DB-proof assertion inverted (0 rows minted by request-reset, not 1). Full suite re-run clean; re-verified live against the rebuilt container — log line confirmed to carry no token, the new admin endpoint's link confirmed to actually work and to never appear in logs. Full detail in `BUILT.md`'s `eami-api`/`eami-ui` sections' own correction entries and `BACKLOG.md`'s B-212 entry.
+
+## Active decision thread (2026-09-22, older) — B-212 built: real user provisioning (invite acceptance, password reset, self-profile), closing the dead-`/accept-invite`-link gap B-211's own preceding investigation found. Part A investigation done first per the task brief's kickoff (confirmed no real email delivery exists anywhere in this codebase; confirmed and reused existing bcrypt/token utilities; found the existing invite JWT's real TTL bug — signed expiry was 1 hour, not the claimed 48). A genuine design-fork question was raised and founder-approved before building: replace the JWT-based invite token with a DB-backed opaque single-use token mirroring `bootstrap.go`'s `setup_tokens` pattern, rather than keeping the JWT and adding a separate consumed-marker — approved as the correct call, matching established convention and fixing the TTL bug as a side effect. Mandatory code review (fork) found 5 real issues (silent-name-blank on `PATCH /v1/users/me`, a non-transactional invite-user-creation gap that could permanently strand an email, missing rate limiting on all 3 new pre-auth routes, bcrypt running before token validation — a CPU-exhaustion amplifier, and a real concurrency race in reset-token invalidation) — all fixed and re-verified. Security review: zero HIGH/MEDIUM findings. Full real-Postgres adversarial test coverage (all 4 mandatory cases) plus a rate-limit regression test; live-verified end-to-end against the real rebuilt/restarted shared stack via direct HTTP calls (invite → accept → login → self-profile → change-password → request-reset → reset-password, each adversarial edge live-confirmed, not just tested). Frontend (4 new pages, `router.tsx`/`authStore.ts`/`LoginPage.tsx`/`UserMenu.tsx` updates) verified via clean `tsc`/`vite build` and the real dev-server container's served routes — no real browser click-through, disclosed (no browser-automation capability this session). New B-213 logged (doc-accuracy only, `openapi.yaml`'s stale 72h invite-expiry text, Architect-EAMI-owned, not fixed). Full detail in `BUILT.md`'s `eami-api`/`eami-ui` sections and `BACKLOG.md`'s new B-212/B-213 entries.
 
 ## Active decision thread (2026-09-21, older) — B-211 fixed: deactivated users retained full login AND refresh capability — GetUserByEmail/GetUserByID never filtered deleted_at. Same severity class as B-128/B-141/B-172/B-173. Surfaced by this session's own investigation, not discovered fresh. Mandatory code review caught a real bug in the fix's own first-draft test (a token-consumption ordering mistake that made the "post-deactivation refresh" assertion pass for the wrong reason); self-verified beyond the reviewer's own read by temporarily reverting the fix and confirming the tests then correctly fail. Both mandatory review passes ran, both clean; live-verified against the real rebuilt/restarted shared container
 
@@ -2032,7 +2034,45 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
-2026-09-22 (absolute newest) by Claude Code — B-212 DONE: real user
+2026-09-22 (absolute newest) by Claude Code — B-212 post-sign-off
+security correction, caught by the founder's own review before signing
+off (asked to see the current code for the specific log line rather than
+accepting the completion report's summary), not self-caught. The
+originally-shipped reset-flow design (entry immediately below) logged the
+raw reset token via log.Printf -- a live bearer credential in a log sink,
+exactly as exploitable as returning it in the unauthenticated response
+would have been, which is the precise account-takeover bug this same
+brief's own package doc comment had already correctly warned against --
+moved to a different sink and rationalized at the time as matching
+bootstrap.go's console-only setup-token trust boundary, a comparison that
+doesn't actually hold (that token is generated and displayed once,
+outside this process, before any log line could involve it -- this was
+the process itself duplicating a live credential into its own log
+stream). Fixed: RequestPasswordReset now mints/logs nothing (user_id/
+email only, no secret, no reset_tokens row written); a new admin-only
+POST /v1/users/{userId}/reset-link (same route tier as InviteUser,
+org-scoped, rejects SSO-only accounts) is now the sole mechanism that
+mints a real reset token, returning the link only in its own
+authenticated HTTP response -- never logged, never persisted in raw
+form. Added a real admin UI action for it (SettingsPage.tsx's Users tab,
+new "Reset link" button + modal mirroring the existing invite-link
+pattern, new useAdminGenerateResetLink hook) so the fix is actually
+usable, not curl-only. 3 new real-Postgres tests (a genuinely working
+token end to end, cannot target another org, a new link invalidates the
+prior one); the existing AC3 anti-enumeration test's DB-proof assertion
+inverted (request-reset now mints exactly 0 reset_tokens rows, not 1 --
+the byte-identical-response half of that test, the actual anti-
+enumeration proof, was unaffected and still passes). Full suite
+(go build/go vet/go test ./... -count=1) re-run clean; frontend tsc/vite
+build clean. Re-verified live against the rebuilt container: the log
+line for a real reset request now shows only user_id/email, no token; the
+real admin's real POST to the new endpoint returned a real, working link
+that never appeared in the logs, and that link was confirmed to actually
+complete a real password reset end to end. Full detail in BUILT.md's
+eami-api/eami-ui sections' own correction entries and BACKLOG.md's B-212
+entry. Previous entry, preserved below:
+
+2026-09-22 by Claude Code — B-212 DONE: real user
 provisioning (invite acceptance, password reset, self-profile), closing
 the dead `/accept-invite` link B-211's own preceding investigation found
 (InviteUser created a real row and a real signed token but nothing ever
