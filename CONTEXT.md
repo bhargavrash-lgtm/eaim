@@ -1373,7 +1373,9 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
-## Active decision thread (2026-09-22, newest) — B-212 post-sign-off security correction, caught by the founder's own review before signing off, not self-caught: the reset-flow design in the entry immediately below logged the raw reset token via `log.Printf` — a live bearer credential in a log sink, exactly as exploitable as returning it in the unauthenticated response would have been (the exact account-takeover bug this same brief's own package doc comment had already correctly warned against, moved to a different sink and rationalized away at the time as matching `bootstrap.go`'s console-only setup-token trust boundary — a comparison that doesn't actually hold). Founder explicitly asked to see the current code for the specific log line before signing off, rather than accepting the completion report's summary — confirmed the exposure was real and unfixed, not already handled elsewhere. Fixed: `RequestPasswordReset` now mints/logs nothing (user_id/email only, no secret); a new admin-only `POST /v1/users/{userId}/reset-link` (same tier as `InviteUser`) is the sole real delivery mechanism, returning the link only in its own authenticated response, never logged, never persisted raw. Added a real admin UI action for it (`SettingsPage.tsx`'s Users tab, "Reset link" button + modal, mirroring the invite-link pattern) so the fix isn't curl-only. 3 new real-Postgres tests; existing AC3 test's DB-proof assertion inverted (0 rows minted by request-reset, not 1). Full suite re-run clean; re-verified live against the rebuilt container — log line confirmed to carry no token, the new admin endpoint's link confirmed to actually work and to never appear in logs. Full detail in `BUILT.md`'s `eami-api`/`eami-ui` sections' own correction entries and `BACKLOG.md`'s B-212 entry.
+## Active decision thread (2026-09-22, newest) — B-214 built: `PoliciesPage.tsx` gains a "Scope" column distinguishing workspace-scoped policies from the org-wide floor — `DESIGN_SYSTEM.md` §7.3 visibility gap. No `BACKLOG.md` entry existed for this item under any name despite the task brief referring to "BACKLOG.md's entry for this item" — checked thoroughly (B-209/B-210's own entries, full-text search) and found nothing, flagged honestly in Part A rather than assumed, same discipline as the B-155/B-163 precedents; minted B-214 fresh. Part A confirmed the bug was already live, not hypothetical: `listPoliciesQuery` (backing the real `GET /v1/gateway/policies` this page calls) never filtered or selected `workspace_id` at all, so every workspace-scoped policy created since B-209 shipped has rendered mixed into the floor, completely unmarked, this whole time. `store.Policy`/`PolicyRow` (sqlc, frozen per `schema.sql`/B-051) have no `WorkspaceID` field — `workspace_policies.go`'s own doc comment already explains why B-209 avoided extending them, followed the same reasoning here: one small, separate `Queries.DB()` merge query instead, no duplication of the existing condition-joined query, no change to the frozen struct or existing response shape for fields already in use. `PoliciesPage.tsx`'s own existing comment already rules out reusing `StatusPill` for this badge shape, so a new local `ScopeBadge` follows this file's own established `ActionBadge`/`StatusBadge` pattern instead — "Global floor" reuses the exact existing gray, workspace-specific uses the existing brand-accent token pair, no new colors invented. New real-Postgres test proves the real B-209 API's own policy shows up correctly distinguished from a plain floor policy. **Live-verified with a real Playwright browser — a genuine capability gain this session** (Chromium already installed from a prior session; the `playwright` npm package installed in isolation into the scratchpad directory, never touching `eami-ui`'s own `package.json`): real throwaway org/admin/workspace/policies, a real workspace-scoped policy created through the genuine API, screenshot + DOM assertion both confirm the "HR Workspace" vs. "Global floor" badges render correctly with zero console errors and no regression to any existing column. Full detail in `BUILT.md`'s `eami-api`/`eami-ui` sections and `BACKLOG.md`'s new B-214 entry.
+
+## Active decision thread (2026-09-22, older) — B-212 post-sign-off security correction, caught by the founder's own review before signing off, not self-caught: the reset-flow design in the entry immediately below logged the raw reset token via `log.Printf` — a live bearer credential in a log sink, exactly as exploitable as returning it in the unauthenticated response would have been (the exact account-takeover bug this same brief's own package doc comment had already correctly warned against, moved to a different sink and rationalized away at the time as matching `bootstrap.go`'s console-only setup-token trust boundary — a comparison that doesn't actually hold). Founder explicitly asked to see the current code for the specific log line before signing off, rather than accepting the completion report's summary — confirmed the exposure was real and unfixed, not already handled elsewhere. Fixed: `RequestPasswordReset` now mints/logs nothing (user_id/email only, no secret); a new admin-only `POST /v1/users/{userId}/reset-link` (same tier as `InviteUser`) is the sole real delivery mechanism, returning the link only in its own authenticated response, never logged, never persisted raw. Added a real admin UI action for it (`SettingsPage.tsx`'s Users tab, "Reset link" button + modal, mirroring the invite-link pattern) so the fix isn't curl-only. 3 new real-Postgres tests; existing AC3 test's DB-proof assertion inverted (0 rows minted by request-reset, not 1). Full suite re-run clean; re-verified live against the rebuilt container — log line confirmed to carry no token, the new admin endpoint's link confirmed to actually work and to never appear in logs. Full detail in `BUILT.md`'s `eami-api`/`eami-ui` sections' own correction entries and `BACKLOG.md`'s B-212 entry.
 
 ## Active decision thread (2026-09-22, older) — B-212 built: real user provisioning (invite acceptance, password reset, self-profile), closing the dead-`/accept-invite`-link gap B-211's own preceding investigation found. Part A investigation done first per the task brief's kickoff (confirmed no real email delivery exists anywhere in this codebase; confirmed and reused existing bcrypt/token utilities; found the existing invite JWT's real TTL bug — signed expiry was 1 hour, not the claimed 48). A genuine design-fork question was raised and founder-approved before building: replace the JWT-based invite token with a DB-backed opaque single-use token mirroring `bootstrap.go`'s `setup_tokens` pattern, rather than keeping the JWT and adding a separate consumed-marker — approved as the correct call, matching established convention and fixing the TTL bug as a side effect. Mandatory code review (fork) found 5 real issues (silent-name-blank on `PATCH /v1/users/me`, a non-transactional invite-user-creation gap that could permanently strand an email, missing rate limiting on all 3 new pre-auth routes, bcrypt running before token validation — a CPU-exhaustion amplifier, and a real concurrency race in reset-token invalidation) — all fixed and re-verified. Security review: zero HIGH/MEDIUM findings. Full real-Postgres adversarial test coverage (all 4 mandatory cases) plus a rate-limit regression test; live-verified end-to-end against the real rebuilt/restarted shared stack via direct HTTP calls (invite → accept → login → self-profile → change-password → request-reset → reset-password, each adversarial edge live-confirmed, not just tested). Frontend (4 new pages, `router.tsx`/`authStore.ts`/`LoginPage.tsx`/`UserMenu.tsx` updates) verified via clean `tsc`/`vite build` and the real dev-server container's served routes — no real browser click-through, disclosed (no browser-automation capability this session). New B-213 logged (doc-accuracy only, `openapi.yaml`'s stale 72h invite-expiry text, Architect-EAMI-owned, not fixed). Full detail in `BUILT.md`'s `eami-api`/`eami-ui` sections and `BACKLOG.md`'s new B-212/B-213 entries.
 
@@ -2034,7 +2036,46 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
-2026-09-22 (absolute newest) by Claude Code — B-212 post-sign-off
+2026-09-22 (absolute newest) by Claude Code — B-214 DONE: PoliciesPage.tsx
+gains a "Scope" column distinguishing workspace-scoped policies from the
+org-wide floor (DESIGN_SYSTEM.md §7.3). No BACKLOG.md entry existed for
+this item under any name despite the task brief referring to "BACKLOG.md's
+entry for this item" -- checked thoroughly and found nothing, flagged
+honestly rather than assumed, minted B-214 fresh. Part A confirmed the
+bug was already live: listPoliciesQuery (backing the real GET
+/v1/gateway/policies this page calls) never filtered or selected
+workspace_id at all, so every workspace-scoped policy created since B-209
+shipped has rendered mixed into the floor, completely unmarked, this
+whole time. store.Policy/PolicyRow (sqlc, frozen per schema.sql/B-051)
+have no WorkspaceID field -- followed workspace_policies.go's own
+already-established reasoning for using a separate Queries.DB() raw
+query instead of extending the frozen struct: one small merge query
+(policy id -> workspace id/name), no duplication of the existing
+condition-joined query, no change to the existing response shape for
+fields already in use. PoliciesPage.tsx's own existing comment already
+rules out reusing StatusPill for this badge shape, so a new local
+ScopeBadge follows this file's own established ActionBadge/StatusBadge
+pattern -- "Global floor" reuses the exact existing gray, workspace-
+specific uses the existing brand-accent token pair, no new colors.
+New real-Postgres test (TestListPolicies_RealDB_WorkspaceVisibility)
+proves a real B-209-created workspace-scoped policy shows up correctly
+distinguished from a plain floor policy via the real endpoint. Full
+go build/go vet/go test ./... -count=1 clean, zero regressions.
+Live-verified with a REAL Playwright browser -- a genuine capability
+gain this session (Chromium already installed from a prior session; the
+playwright npm package installed in isolation into the scratchpad
+directory via --prefix, never touching eami-ui's own package.json/
+node_modules): real throwaway org/admin/workspace/policies seeded, a
+real workspace-scoped policy created through the genuine API, the real
+admin logged in through the real /login page, a real script confirmed
+via DOM query and a full-page screenshot that the workspace-scoped
+policy shows a "HR Workspace" badge and the floor policy shows "Global
+floor," zero console/page errors, every pre-existing column unchanged
+(AC2). All fixtures removed, confirmed 0 remaining via direct psql. Full
+detail in BUILT.md's eami-api/eami-ui sections and BACKLOG.md's new
+B-214 entry. Previous entry, preserved below:
+
+2026-09-22 by Claude Code — B-212 post-sign-off
 security correction, caught by the founder's own review before signing
 off (asked to see the current code for the specific log line rather than
 accepting the completion report's summary), not self-caught. The

@@ -29,9 +29,55 @@ func (s *Server) ListPolicies(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
+		// DESIGN_SYSTEM.md §7.3: a workspace-scoped policy must be visibly
+		// distinguished from the org floor. listPoliciesQuery (sqlc,
+		// policies.sql.go) has no workspace_id column at all -- store.Policy/
+		// PolicyRow are frozen (schema.sql, B-051) and structurally have
+		// nothing to extend, the same reason workspace_policies.go's own
+		// doc comment already gives for using Queries.DB() raw queries
+		// instead. Rather than duplicate the whole condition-joined query
+		// (real drift risk between two copies), one small, separate lookup
+		// -- policy_id -> (workspace_id, workspace_name) -- merged into the
+		// response the existing sqlc call already built. Every pre-existing
+		// field/response shape is untouched; this is purely additive.
+		workspaceByPolicy, err := s.queries.DB().Query(r.Context(), `
+			SELECT p.id, p.workspace_id, w.name
+			FROM policies p
+			JOIN workspaces w ON w.id = p.workspace_id
+			WHERE p.org_id = $1 AND p.workspace_id IS NOT NULL
+		`, pgtype.UUID{Bytes: uc.OrgID, Valid: true})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		type workspaceInfo struct {
+			id, name string
+		}
+		byPolicyID := make(map[uuid.UUID]workspaceInfo)
+		for workspaceByPolicy.Next() {
+			var policyID, workspaceID pgtype.UUID
+			var name string
+			if err := workspaceByPolicy.Scan(&policyID, &workspaceID, &name); err != nil {
+				workspaceByPolicy.Close()
+				writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+				return
+			}
+			byPolicyID[uuid.UUID(policyID.Bytes)] = workspaceInfo{id: uuid.UUID(workspaceID.Bytes).String(), name: name}
+		}
+		workspaceByPolicy.Close()
+		if err := workspaceByPolicy.Err(); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+
 		resp := make([]PolicyResp, 0, len(rows))
 		for _, row := range rows {
-			resp = append(resp, policyRowToResp(row))
+			r := policyRowToResp(row)
+			if info, ok := byPolicyID[row.Policy.ID]; ok {
+				r.WorkspaceID = &info.id
+				r.WorkspaceName = &info.name
+			}
+			resp = append(resp, r)
 		}
 		writeJSON(w, http.StatusOK, PolicyListResponse{Data: resp})
 		return

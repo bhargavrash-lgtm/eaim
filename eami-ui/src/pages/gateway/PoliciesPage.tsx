@@ -21,7 +21,7 @@ import {
   useDeletePolicy,
   useReorderPolicies,
 } from '@/hooks/usePolicies'
-import type { Policy, PolicyCreate, PolicyUpdate } from '@/hooks/usePolicies'
+import type { Policy, PolicyCreate, PolicyUpdate, PolicyWithWorkspace } from '@/hooks/usePolicies'
 
 // Badges
 //
@@ -57,6 +57,29 @@ function StatusBadge({ status }: { status: string }) {
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium capitalize ${STATUS_STYLES[status] ?? 'bg-gray-100 text-gray-600'}`}>
       {status}
+    </span>
+  )
+}
+
+// ScopeBadge -- DESIGN_SYSTEM.md §7.3: a workspace-scoped policy must be
+// visibly distinguished from the org-wide floor. Same local-badge-function
+// pattern as ActionBadge/StatusBadge above (this file's own comment at the
+// top of this section already establishes why StatusPill's shape doesn't
+// fit here either). "Global floor" reuses STATUS_STYLES.draft's exact
+// gray -- the same neutral treatment already shipped in this file, not a
+// new color. The named-workspace case uses brand-50/brand-700, the
+// existing token pair for DESIGN_SYSTEM.md §2's Accent (#3B5BDB).
+function ScopeBadge({ workspaceName }: { workspaceName?: string | null }) {
+  if (!workspaceName) {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+        Global floor
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-brand-50 text-brand-700">
+      {workspaceName}
     </span>
   )
 }
@@ -381,6 +404,11 @@ export function PoliciesPage() {
           )}
         </>
       ),
+    },
+    {
+      key: 'scope',
+      header: 'Scope',
+      render: (policy) => <ScopeBadge workspaceName={(policy as PolicyWithWorkspace).workspace_name} />,
     },
     { key: 'conditions', header: 'Conditions', render: (policy) => <ConditionSummary conditions={policy.conditions} /> },
     {

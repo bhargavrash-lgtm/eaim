@@ -6,6 +6,16 @@ export type Policy = components['schemas']['Policy']
 export type PolicyCreate = components['schemas']['PolicyCreate']
 export type PolicyUpdate = components['schemas']['PolicyUpdate']
 
+// PolicyWithWorkspace -- workspace_id/workspace_name (DESIGN_SYSTEM.md
+// §7.3 visibility fix, eami-api PolicyResp) aren't in api/openapi.yaml
+// yet (Architect-EAMI-owned), same undocumented-field precedent as
+// useTools.ts's ToolWithActions. Nil/undefined on both means "org-wide
+// floor policy" -- the same meaning the backend response documents.
+export type PolicyWithWorkspace = Policy & {
+  workspace_id?: string | null
+  workspace_name?: string | null
+}
+
 export function usePolicies() {
   return useQuery({
     queryKey: ['policies'],

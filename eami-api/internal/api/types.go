@@ -140,14 +140,19 @@ type PolicyResp struct {
 	CreatedBy   *string              `json:"created_by,omitempty"`
 	CreatedAt   time.Time            `json:"created_at"`
 	UpdatedAt   time.Time            `json:"updated_at"`
-	// WorkspaceID (B-197 increment 4) is set only by the new workspace-
-	// scoped handlers (workspace_policies.go) -- nil/omitted for every
-	// existing org-wide handler in policies.go, which never populates it.
-	// Nil means "org-wide floor policy" when returned from
-	// ListWorkspacePolicies (which deliberately includes both a
-	// workspace's own rows AND the org floor, matching DESIGN_SYSTEM.md
-	// §7.3's visibility model) -- distinct from "field not applicable."
+	// WorkspaceID (B-197 increment 4) was originally set only by the
+	// workspace-scoped handlers (workspace_policies.go) -- nil/omitted
+	// meant "org-wide floor policy" there. Now also populated by
+	// ListPolicies (policies.go, DESIGN_SYSTEM.md §7.3 visibility fix)
+	// so the org-wide list can distinguish a workspace-scoped policy from
+	// the floor too, not just the workspace-scoped endpoint. Nil under
+	// the same "org-wide floor" meaning in both callers.
 	WorkspaceID *string `json:"workspace_id,omitempty"`
+	// WorkspaceName is populated alongside WorkspaceID wherever the
+	// caller has it cheaply available so the frontend can render the
+	// §7.3 "Global floor" vs. named-workspace badge without a second
+	// round trip. Nil under the exact same conditions as WorkspaceID.
+	WorkspaceName *string `json:"workspace_name,omitempty"`
 }
 
 type PolicyConditionsReq struct {
