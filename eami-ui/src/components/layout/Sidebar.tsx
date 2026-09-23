@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { NAV_ITEMS, NAV_GROUPS } from './Navigation'
 import { useUIStore } from '@/stores/uiStore'
 import { usePendingApprovalCount } from '@/hooks/useApprovals'
+import { useMyWorkspaces } from '@/hooks/useWorkspaces'
 import { Logo } from './Logo'
 
 // B-200: real collapsible nav rail (DESIGN_SYSTEM.md §6/Layer 2). Reuses
@@ -16,10 +17,28 @@ import { Logo } from './Logo'
 // Deliberately NOT persisted (matches sidebarOpen's existing non-persisted
 // convention) -- see BACKLOG.md's B-200 entry for why that's a considered
 // choice, not an oversight.
+// hasWorkspaces (real gap found reviewing the Workspaces epic): the
+// two-hat case -- a real org-level role AND a real workspace_memberships
+// row -- had NO visible entry point anywhere in Admin's own navigation;
+// the only path in was Profile's membership list, two clicks removed
+// from primary nav. Gated on GET /v1/workspaces/mine's real response
+// (same signal LoginPage.tsx's post-login routing now uses), never
+// shown for a user with zero real memberships -- not a static item every
+// user sees regardless of whether it applies to them.
 export function Sidebar() {
   const sidebarOpen = useUIStore((s) => s.sidebarOpen)
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
   const pendingApprovals = usePendingApprovalCount()
+  const { data: myWorkspaces } = useMyWorkspaces()
+  const hasWorkspaces = (myWorkspaces?.data.length ?? 0) > 0
+  // B-216 code review: single filter feeds BOTH render branches below,
+  // replacing two hand-duplicated NavLink blocks that previously existed
+  // only for the 'My Workspaces' item. A conditional item (currently just
+  // 'hasWorkspaces') is included only when its live condition holds; every
+  // unconditional item passes through unchanged.
+  const visibleNavItems = NAV_ITEMS.filter(
+    (item) => item.conditional !== 'hasWorkspaces' || hasWorkspaces,
+  )
 
   if (!sidebarOpen) {
     return (
@@ -38,7 +57,7 @@ export function Sidebar() {
           </button>
         </div>
         <nav className="flex flex-1 flex-col items-center gap-1.5 overflow-y-auto overflow-x-hidden py-3">
-          {NAV_ITEMS.map((item) => (
+          {visibleNavItems.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}
@@ -84,7 +103,7 @@ export function Sidebar() {
       {/* Nav groups */}
       <nav className="flex-1 overflow-y-auto py-4">
         {NAV_GROUPS.map((group) => {
-          const items = NAV_ITEMS.filter((i) => i.group === group.key)
+          const items = visibleNavItems.filter((i) => i.group === group.key)
           if (items.length === 0) return null
           return (
             <div key={group.key} className="mb-4">

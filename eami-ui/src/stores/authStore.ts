@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
+import { queryClient } from '@/lib/query'
 
 interface User {
   id: string
@@ -91,13 +92,26 @@ export const useAuthStore = create<AuthState>()(
 
       setUser: (user) => set({ user }),
 
-      logout: () =>
+      // queryClient.clear() (code-review finding): every useQuery cache key
+      // in this app (usePolicies, useMyWorkspaces, etc.) is keyed on the
+      // resource, never on the calling user -- logout previously cleared
+      // only auth state, so on a shared machine/tab a second user logging
+      // in within the same SPA session (no full page reload) could
+      // momentarily see the FIRST user's still-cached data (e.g.
+      // Sidebar.tsx's "My Workspaces" entry reflecting the wrong account)
+      // until each query's own staleTime naturally expired. Clearing here,
+      // the one real logout path every caller already goes through,
+      // closes this for every current and future useQuery hook at once --
+      // not just the one this session's own B-216 brief happened to add.
+      logout: () => {
+        queryClient.clear()
         set({
           accessToken: null,
           refreshToken: null,
           user: null,
           isAuthenticated: false,
-        }),
+        })
+      },
     }),
     {
       name: STORAGE_KEY,

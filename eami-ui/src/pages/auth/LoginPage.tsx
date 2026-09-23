@@ -2,8 +2,10 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Link, useNavigate } from 'react-router-dom'
-import { api } from '@/api/client'
+import { useQueryClient } from '@tanstack/react-query'
+import { api, apiFetch } from '@/api/client'
 import { useAuthStore, consumeRedirectPath } from '@/stores/authStore'
+import type { MyWorkspaceMembership } from '@/hooks/useWorkspaces'
 import { Logo } from '@/components/layout/Logo'
 import { Card } from '@/components/common/Card'
 import { Button } from '@/components/common/Button'
@@ -17,6 +19,7 @@ type LoginFormValues = z.infer<typeof loginSchema>
 
 export function LoginPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { setTokens, setUser } = useAuthStore()
 
   const {
@@ -42,9 +45,56 @@ export function LoginPage() {
     if (data.user) {
       setUser(data.user)
     }
+
     // B-146 AC2: return to the page the user originally tried to reach
-    // (captured by authStore.ts at module load) instead of always /dashboard.
-    navigate(consumeRedirectPath() ?? '/dashboard', { replace: true })
+    // (captured by authStore.ts at module load), unconditionally first --
+    // this must keep winning over the workspace-routing decision below,
+    // not just over the plain '/dashboard' default it always beat before.
+    const redirectPath = consumeRedirectPath()
+    if (redirectPath) {
+      navigate(redirectPath, { replace: true })
+      return
+    }
+
+    // Real post-login routing (closing a real gap found reviewing the
+    // Workspaces epic): 'viewer' is the org-role floor -- read-only
+    // everywhere in Admin mode, no create/edit/delete capability anywhere
+    // -- so a viewer who ALSO has a real workspace membership has no real
+    // reason to land on /dashboard; route them straight to their
+    // workspace instead. Any other org role (admin/operator/approver)
+    // keeps the existing /dashboard default, completely unchanged --
+    // this check only ever adds one extra request (GET
+    // /v1/workspaces/mine) for viewers, never for anyone else. A viewer
+    // with zero memberships (a real, occurring case -- any low-privilege
+    // user not yet added to a workspace) falls through to the same
+    // unchanged /dashboard default below, same as today.
+    if (data.user?.role === 'viewer') {
+      try {
+        const mine = await apiFetch<{ data: MyWorkspaceMembership[] }>('/v1/workspaces/mine')
+        // Code-review finding: prime useMyWorkspaces' own cache (same
+        // ['workspaces', 'mine'] key, hooks/useWorkspaces.ts) with the
+        // response this fetch already has, so WorkspaceShell's immediate
+        // next render doesn't re-issue the identical request against a
+        // cold cache -- this is a real request made once, not fetched
+        // twice for one navigation.
+        queryClient.setQueryData(['workspaces', 'mine'], mine)
+        if (mine.data.length > 0) {
+          // No specific id -- WorkspaceShell itself resolves to the
+          // user's own first real membership, and its already-built
+          // in-shell switcher covers the genuinely-more-than-one case
+          // (DESIGN_SYSTEM.md §7.5's own real-but-restricted selector),
+          // so this doubles as the "minimal chooser" without a second
+          // dedicated UI.
+          navigate('/workspace', { replace: true })
+          return
+        }
+      } catch {
+        // Fall through to the unchanged /dashboard default below --
+        // never block a successful login on this being unreachable.
+      }
+    }
+
+    navigate('/dashboard', { replace: true })
   }
 
   return (
