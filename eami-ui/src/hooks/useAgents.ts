@@ -6,6 +6,16 @@ export type Agent = components['schemas']['Agent']
 export type AgentCreate = components['schemas']['AgentCreate']
 export type AgentUpdate = components['schemas']['AgentUpdate']
 
+// AgentWithWorkspace -- workspace_id/workspace_name (B-196 increment 1)
+// aren't in api/openapi.yaml yet (Architect-EAMI-owned), same undocumented-
+// field precedent as usePolicies.ts's PolicyWithWorkspace/useTools.ts's
+// ToolWithActions. Nil/undefined on both means this agent has no real
+// workspace assignment -- CMDB's list renders "Global floor" for that case.
+export type AgentWithWorkspace = Agent & {
+  workspace_id?: string | null
+  workspace_name?: string | null
+}
+
 export function useAgents() {
   return useQuery({
     queryKey: ['agents'],

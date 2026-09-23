@@ -94,6 +94,16 @@ type AgentResp struct {
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 	LastSeen        *time.Time `json:"last_seen,omitempty"`
+	// WorkspaceID/WorkspaceName (B-196 increment 1): the same
+	// merge-not-extend pattern PolicyResp already established (B-214) --
+	// store.GatewayAgent is frozen (schema.sql, B-051) and has no
+	// WorkspaceID field, so these are populated by a separate raw query in
+	// ListAgents/GetAgent, never by extending the frozen struct. Nil on
+	// both means this agent has no real workspace assignment yet (CMDB's
+	// list renders "Global floor" for that case, matching §7.3's existing
+	// meaning for policies).
+	WorkspaceID   *string `json:"workspace_id,omitempty"`
+	WorkspaceName *string `json:"workspace_name,omitempty"`
 }
 
 type AgentCreateRequest struct {

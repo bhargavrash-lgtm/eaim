@@ -14,6 +14,7 @@ import {
   Settings,
   Copy,
   Building2,
+  Boxes,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -34,6 +35,18 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, group: 'main' },
   { label: 'Discover', path: '/discover', icon: Monitor, group: 'main' },
+  // Assets (B-196 increment 1, CMDB epic): a real, new top-level page, not
+  // one of CLAUDE.md's six named core sidebar pages -- flagged explicitly
+  // per the one-spine rule rather than silently added. Judged a legitimate
+  // exception: it introduces no new identity model, audit trail, or
+  // policy mechanism of its own -- it's a read-only normalization layer
+  // over three of the six core pages' own real underlying data (Discover's
+  // endpoints, Agents, Tools), reusing B-200's proven agent-connections
+  // endpoint directly rather than building a parallel relationship
+  // mechanism. It's also a long-scoped, founder-approved epic
+  // (BACKLOG.md's B-196) with its own design-canvas backing (Layer 2b),
+  // not an ad hoc addition.
+  { label: 'Assets', path: '/assets', icon: Boxes, group: 'main' },
   { label: 'Agents', path: '/gateway/agents', icon: Bot, group: 'gateway' },
   { label: 'Policies', path: '/gateway/policies', icon: ShieldCheck, group: 'gateway' },
   { label: 'Tools', path: '/gateway/tools', icon: Wrench, group: 'gateway' },

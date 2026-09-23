@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,6 +15,15 @@ import (
 
 	"github.com/eami/api/internal/store"
 )
+
+// workspaceInfo is the (id, name) pair for a real workspace row -- shared
+// shape for every B-196/B-214-style merge-not-extend workspace lookup in
+// this package (policies.go's ListPolicies declares its own function-local
+// equivalent; this one is package-level since workspaceInfoByAgentID below
+// returns it from a method, not an inline block).
+type workspaceInfo struct {
+	id, name string
+}
 
 // validRiskTiers is the exhaustive set of allowed risk_tier values.
 var validRiskTiers = map[string]bool{
@@ -53,9 +63,23 @@ func (s *Server) ListAgents(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
+		// B-196 increment 1: same merge-not-extend pattern as
+		// policies.go's ListPolicies (B-214) -- store.GatewayAgent is
+		// frozen and has no WorkspaceID field, so one small separate
+		// lookup merges it into the response instead.
+		byAgentID, err := s.workspaceInfoByAgentID(r.Context(), uc.OrgID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
 		resp := make([]AgentResp, 0, len(agents))
 		for _, a := range agents {
-			resp = append(resp, agentToResp(a))
+			ar := agentToResp(a)
+			if info, ok := byAgentID[a.ID]; ok {
+				ar.WorkspaceID = &info.id
+				ar.WorkspaceName = &info.name
+			}
+			resp = append(resp, ar)
 		}
 		writeJSON(w, http.StatusOK, AgentListResponse{Data: resp})
 		return
@@ -90,7 +114,17 @@ func (s *Server) GetAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, agentToResp(*a))
+		ar := agentToResp(*a)
+		info, err := s.workspaceInfoForAgent(r.Context(), uc.OrgID, a.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		if info != nil {
+			ar.WorkspaceID = &info.id
+			ar.WorkspaceName = &info.name
+		}
+		writeJSON(w, http.StatusOK, ar)
 		return
 	}
 	sa, err := s.storeIface.GetAgent(r.Context(), id)
@@ -454,6 +488,62 @@ func (s *Server) GetAgentConnections(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// workspaceInfoByAgentID returns real workspace_id/workspace_name for every
+// gateway_agents row in this org that has one, keyed by agent ID -- the same
+// merge-not-extend pattern policies.go's ListPolicies uses (B-214), since
+// store.GatewayAgent (schema.sql, B-051) is frozen and has no WorkspaceID
+// field to select directly.
+func (s *Server) workspaceInfoByAgentID(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]workspaceInfo, error) {
+	rows, err := s.queries.DB().Query(ctx, `
+		SELECT a.id, a.workspace_id, w.name
+		FROM gateway_agents a
+		JOIN workspaces w ON w.id = a.workspace_id
+		WHERE a.org_id = $1 AND a.workspace_id IS NOT NULL
+	`, pgtype.UUID{Bytes: orgID, Valid: true})
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byAgentID := make(map[uuid.UUID]workspaceInfo)
+	for rows.Next() {
+		var agentID, workspaceID pgtype.UUID
+		var name string
+		if err := rows.Scan(&agentID, &workspaceID, &name); err != nil {
+			return nil, err
+		}
+		byAgentID[uuid.UUID(agentID.Bytes)] = workspaceInfo{id: uuid.UUID(workspaceID.Bytes).String(), name: name}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return byAgentID, nil
+}
+
+// workspaceInfoForAgent returns real workspace_id/workspace_name for one
+// specific gateway_agents row, or nil if it has no workspace assignment.
+// Code-review finding: GetAgent originally reused workspaceInfoByAgentID
+// (the full-org list helper meant for ListAgents) just to look up one row,
+// an O(all workspace-scoped agents in the org) query for what should be
+// O(1) -- the same single-ID-scoped shape policies.go's own GetPolicy
+// (B-214's precedent this file otherwise follows) already uses correctly.
+func (s *Server) workspaceInfoForAgent(ctx context.Context, orgID, agentID uuid.UUID) (*workspaceInfo, error) {
+	var workspaceID pgtype.UUID
+	var name string
+	err := s.queries.DB().QueryRow(ctx, `
+		SELECT a.workspace_id, w.name
+		FROM gateway_agents a
+		JOIN workspaces w ON w.id = a.workspace_id
+		WHERE a.org_id = $1 AND a.id = $2 AND a.workspace_id IS NOT NULL
+	`, pgtype.UUID{Bytes: orgID, Valid: true}, pgtype.UUID{Bytes: agentID, Valid: true}).Scan(&workspaceID, &name)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &workspaceInfo{id: uuid.UUID(workspaceID.Bytes).String(), name: name}, nil
 }
 
 // ── converters ────────────────────────────────────────────────────────────────

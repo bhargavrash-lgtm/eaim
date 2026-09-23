@@ -1,6 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { STALE_TIMES } from '@/lib/query'
+import type { components } from '@/api/schema'
+
+export type Endpoint = components['schemas']['Endpoint']
+
+// EndpointWithWorkspace -- workspace_id/workspace_name (B-196 increment 1),
+// same undocumented-field precedent as useAgents.ts's AgentWithWorkspace/
+// usePolicies.ts's PolicyWithWorkspace. Nil/undefined on both means this
+// endpoint has no real workspace assignment yet.
+export type EndpointWithWorkspace = Endpoint & {
+  workspace_id?: string | null
+  workspace_name?: string | null
+}
 
 interface EndpointParams {
   has_ai?: boolean

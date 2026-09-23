@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/eami/api/internal/store"
 )
@@ -35,6 +37,13 @@ type agentEndpointListItem struct {
 	// derivation.
 	GatewayAgentID   *string `json:"gateway_agent_id,omitempty"`
 	GatewayAgentName *string `json:"gateway_agent_name,omitempty"`
+	// WorkspaceID/WorkspaceName (B-196 increment 1): same merge-not-extend
+	// pattern as agents.go's workspaceInfoByAgentID -- store.AgentEndpoint
+	// is frozen and has no WorkspaceID field, so this is populated by a
+	// separate query in ListAgentEndpoints, merged in here. Nil means this
+	// endpoint has no real workspace assignment yet.
+	WorkspaceID   *string `json:"workspace_id,omitempty"`
+	WorkspaceName *string `json:"workspace_name,omitempty"`
 }
 
 // agentEndpointDetail is the shape returned by GET /v1/endpoints/{endpointId}.
@@ -72,9 +81,19 @@ func (s *Server) ListAgentEndpoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	byEndpointID, err := s.workspaceInfoByEndpointID(ctx, uc.OrgID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to load workspace info")
+		return
+	}
 	data := make([]agentEndpointListItem, len(endpoints))
 	for i, e := range endpoints {
-		data[i] = toAgentEndpointItem(e)
+		item := toAgentEndpointItem(e)
+		if info, ok := byEndpointID[e.ID]; ok {
+			item.WorkspaceID = &info.id
+			item.WorkspaceName = &info.name
+		}
+		data[i] = item
 	}
 
 	writeJSON(w, http.StatusOK, struct {
@@ -105,11 +124,77 @@ func (s *Server) GetAgentEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	item := toAgentEndpointItem(e.AgentEndpoint)
+	info, err := s.workspaceInfoForEndpoint(r.Context(), uc.OrgID, e.AgentEndpoint.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to load workspace info")
+		return
+	}
+	if info != nil {
+		item.WorkspaceID = &info.id
+		item.WorkspaceName = &info.name
+	}
 	resp := agentEndpointDetail{
-		agentEndpointListItem: toAgentEndpointItem(e.AgentEndpoint),
+		agentEndpointListItem: item,
 		LatestReport:          e.LatestReport,
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// workspaceInfoByEndpointID returns real workspace_id/workspace_name for
+// every endpoints row in this org that has one, keyed by endpoint ID -- same
+// merge-not-extend pattern as agents.go's workspaceInfoByAgentID and
+// policies.go's ListPolicies (B-214); store.AgentEndpoint is frozen and has
+// no WorkspaceID field to select directly.
+func (s *Server) workspaceInfoByEndpointID(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]workspaceInfo, error) {
+	rows, err := s.queries.DB().Query(ctx, `
+		SELECT e.id, e.workspace_id, w.name
+		FROM endpoints e
+		JOIN workspaces w ON w.id = e.workspace_id
+		WHERE e.org_id = $1 AND e.workspace_id IS NOT NULL
+	`, pgtype.UUID{Bytes: orgID, Valid: true})
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byEndpointID := make(map[uuid.UUID]workspaceInfo)
+	for rows.Next() {
+		var endpointID, workspaceID pgtype.UUID
+		var name string
+		if err := rows.Scan(&endpointID, &workspaceID, &name); err != nil {
+			return nil, err
+		}
+		byEndpointID[uuid.UUID(endpointID.Bytes)] = workspaceInfo{id: uuid.UUID(workspaceID.Bytes).String(), name: name}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return byEndpointID, nil
+}
+
+// workspaceInfoForEndpoint returns real workspace_id/workspace_name for one
+// specific endpoints row, or nil if it has no workspace assignment.
+// Code-review finding: GetAgentEndpoint originally reused
+// workspaceInfoByEndpointID (the full-org list helper meant for
+// ListAgentEndpoints) just to look up one row, an O(all workspace-scoped
+// endpoints in the org) query for what should be O(1) -- same fix shape as
+// agents.go's workspaceInfoForAgent.
+func (s *Server) workspaceInfoForEndpoint(ctx context.Context, orgID, endpointID uuid.UUID) (*workspaceInfo, error) {
+	var workspaceID pgtype.UUID
+	var name string
+	err := s.queries.DB().QueryRow(ctx, `
+		SELECT e.workspace_id, w.name
+		FROM endpoints e
+		JOIN workspaces w ON w.id = e.workspace_id
+		WHERE e.org_id = $1 AND e.id = $2 AND e.workspace_id IS NOT NULL
+	`, pgtype.UUID{Bytes: orgID, Valid: true}, pgtype.UUID{Bytes: endpointID, Valid: true}).Scan(&workspaceID, &name)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &workspaceInfo{id: uuid.UUID(workspaceID.Bytes).String(), name: name}, nil
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

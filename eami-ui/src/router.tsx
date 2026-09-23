@@ -11,6 +11,7 @@ import { ProfilePage } from '@/pages/settings/ProfilePage'
 import { SetupWizardPage } from '@/pages/setup/SetupWizardPage'
 import { DashboardPage } from '@/pages/dashboard/DashboardPage'
 import { DiscoverPage } from '@/pages/discover/DiscoverPage'
+import { AssetsPage } from '@/pages/cmdb/AssetsPage'
 import { AgentsPage } from '@/pages/gateway/AgentsPage'
 import { AgentDetailPage } from '@/pages/gateway/AgentDetailPage'
 import { PoliciesPage } from '@/pages/gateway/PoliciesPage'
@@ -36,6 +37,7 @@ export const router = createBrowserRouter([
     children: [
       { path: '/dashboard', element: <DashboardPage /> },
       { path: '/discover', element: <DiscoverPage /> },
+      { path: '/assets', element: <AssetsPage /> },
       { path: '/gateway/agents', element: <AgentsPage /> },
       { path: '/gateway/agents/:id', element: <AgentDetailPage /> },
       { path: '/gateway/policies', element: <PoliciesPage /> },
