@@ -1373,7 +1373,9 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
-## Active decision thread (2026-09-22, newest) — B-214 built: `PoliciesPage.tsx` gains a "Scope" column distinguishing workspace-scoped policies from the org-wide floor — `DESIGN_SYSTEM.md` §7.3 visibility gap. No `BACKLOG.md` entry existed for this item under any name despite the task brief referring to "BACKLOG.md's entry for this item" — checked thoroughly (B-209/B-210's own entries, full-text search) and found nothing, flagged honestly in Part A rather than assumed, same discipline as the B-155/B-163 precedents; minted B-214 fresh. Part A confirmed the bug was already live, not hypothetical: `listPoliciesQuery` (backing the real `GET /v1/gateway/policies` this page calls) never filtered or selected `workspace_id` at all, so every workspace-scoped policy created since B-209 shipped has rendered mixed into the floor, completely unmarked, this whole time. `store.Policy`/`PolicyRow` (sqlc, frozen per `schema.sql`/B-051) have no `WorkspaceID` field — `workspace_policies.go`'s own doc comment already explains why B-209 avoided extending them, followed the same reasoning here: one small, separate `Queries.DB()` merge query instead, no duplication of the existing condition-joined query, no change to the frozen struct or existing response shape for fields already in use. `PoliciesPage.tsx`'s own existing comment already rules out reusing `StatusPill` for this badge shape, so a new local `ScopeBadge` follows this file's own established `ActionBadge`/`StatusBadge` pattern instead — "Global floor" reuses the exact existing gray, workspace-specific uses the existing brand-accent token pair, no new colors invented. New real-Postgres test proves the real B-209 API's own policy shows up correctly distinguished from a plain floor policy. **Live-verified with a real Playwright browser — a genuine capability gain this session** (Chromium already installed from a prior session; the `playwright` npm package installed in isolation into the scratchpad directory, never touching `eami-ui`'s own `package.json`): real throwaway org/admin/workspace/policies, a real workspace-scoped policy created through the genuine API, screenshot + DOM assertion both confirm the "HR Workspace" vs. "Global floor" badges render correctly with zero console errors and no regression to any existing column. Full detail in `BUILT.md`'s `eami-api`/`eami-ui` sections and `BACKLOG.md`'s new B-214 entry.
+## Active decision thread (2026-09-23, newest) — B-215 built: real Workspace-mode UI, built only on real data. Task brief's own title called this "B-210" — `BACKLOG.md` already has an unrelated B-210 (`PolicyCreateRequest`/`PolicyUpdateRequest.Status` allow-list validation, a prior session's entry) — a genuine numbering collision, checked and flagged rather than silently overwritten; used B-215 instead (the real next free counter value). Part A investigation, reported before any code: confirmed real/buildable now — `GET /v1/workspaces/mine` (the one real membership signal, since `GetWorkspace`/`ListWorkspaces` are NOT membership-gated — a real fail-open trap avoided by checking), `/{id}/members`, and the full `/{id}/policies` CRUD (B-209, built, never had a UI). Confirmed with direct in-schema evidence (migration 000021's own comment) that AI Usage Health/Monthly Spend/Team Adoption have zero real backend support — `audit_log`/`token_usage` have no `workspace_id`, Spend's "$600 monthly allocation" has no backing budget concept anywhere, Team Adoption has no human-user-to-AI-tool-usage data model at all — none built, per the brief's own explicit instruction not to fabricate. Found workspace "description" was real, unexposed data (`groups.description`, never joined) rather than something to invent — one small backend join added. Shipped a deliberately separate `WorkspaceShell` (not nested under Admin's `AppShell`, DESIGN_SYSTEM.md §0's "don't blend modes"), Overview + Our Policies pages, with `PoliciesPage.tsx`'s badges/form extracted into shared components so both views use one real implementation. Mandatory code review found 4 real issues (swallowed query errors, a `useToast()` standing-rule violation, a missing delete error handler, duplicate route blocks), all fixed. **Live verification itself then found 2 more real bugs neither review pass caught:** editing any workspace-scoped policy with conditions 500'd — `UpsertPolicyCondition`'s `ON CONFLICT (policy_id)` had no matching UNIQUE constraint, a pre-existing bug equally affecting the org-wide policy-edit path too, not introduced by this brief — fixed via migration 000023 after confirming zero duplicate rows; and `ListWorkspacePolicies` never joined the workspace's real name, so its own `ScopeBadge` wrongly showed "Global floor" for workspace-scoped policies — fixed with the same join B-214 established. Live-verified with a real Playwright browser against all 4 acceptance criteria in one script against real seeded data — all pass. Full detail in `BUILT.md`'s `eami-api`/`eami-ui` sections and `BACKLOG.md`'s new B-215 entry.
+
+## Active decision thread (2026-09-22, older) — B-214 built: `PoliciesPage.tsx` gains a "Scope" column distinguishing workspace-scoped policies from the org-wide floor — `DESIGN_SYSTEM.md` §7.3 visibility gap. No `BACKLOG.md` entry existed for this item under any name despite the task brief referring to "BACKLOG.md's entry for this item" — checked thoroughly (B-209/B-210's own entries, full-text search) and found nothing, flagged honestly in Part A rather than assumed, same discipline as the B-155/B-163 precedents; minted B-214 fresh. Part A confirmed the bug was already live, not hypothetical: `listPoliciesQuery` (backing the real `GET /v1/gateway/policies` this page calls) never filtered or selected `workspace_id` at all, so every workspace-scoped policy created since B-209 shipped has rendered mixed into the floor, completely unmarked, this whole time. `store.Policy`/`PolicyRow` (sqlc, frozen per `schema.sql`/B-051) have no `WorkspaceID` field — `workspace_policies.go`'s own doc comment already explains why B-209 avoided extending them, followed the same reasoning here: one small, separate `Queries.DB()` merge query instead, no duplication of the existing condition-joined query, no change to the frozen struct or existing response shape for fields already in use. `PoliciesPage.tsx`'s own existing comment already rules out reusing `StatusPill` for this badge shape, so a new local `ScopeBadge` follows this file's own established `ActionBadge`/`StatusBadge` pattern instead — "Global floor" reuses the exact existing gray, workspace-specific uses the existing brand-accent token pair, no new colors invented. New real-Postgres test proves the real B-209 API's own policy shows up correctly distinguished from a plain floor policy. **Live-verified with a real Playwright browser — a genuine capability gain this session** (Chromium already installed from a prior session; the `playwright` npm package installed in isolation into the scratchpad directory, never touching `eami-ui`'s own `package.json`): real throwaway org/admin/workspace/policies, a real workspace-scoped policy created through the genuine API, screenshot + DOM assertion both confirm the "HR Workspace" vs. "Global floor" badges render correctly with zero console errors and no regression to any existing column. Full detail in `BUILT.md`'s `eami-api`/`eami-ui` sections and `BACKLOG.md`'s new B-214 entry.
 
 ## Active decision thread (2026-09-22, older) — B-212 post-sign-off security correction, caught by the founder's own review before signing off, not self-caught: the reset-flow design in the entry immediately below logged the raw reset token via `log.Printf` — a live bearer credential in a log sink, exactly as exploitable as returning it in the unauthenticated response would have been (the exact account-takeover bug this same brief's own package doc comment had already correctly warned against, moved to a different sink and rationalized away at the time as matching `bootstrap.go`'s console-only setup-token trust boundary — a comparison that doesn't actually hold). Founder explicitly asked to see the current code for the specific log line before signing off, rather than accepting the completion report's summary — confirmed the exposure was real and unfixed, not already handled elsewhere. Fixed: `RequestPasswordReset` now mints/logs nothing (user_id/email only, no secret); a new admin-only `POST /v1/users/{userId}/reset-link` (same tier as `InviteUser`) is the sole real delivery mechanism, returning the link only in its own authenticated response, never logged, never persisted raw. Added a real admin UI action for it (`SettingsPage.tsx`'s Users tab, "Reset link" button + modal, mirroring the invite-link pattern) so the fix isn't curl-only. 3 new real-Postgres tests; existing AC3 test's DB-proof assertion inverted (0 rows minted by request-reset, not 1). Full suite re-run clean; re-verified live against the rebuilt container — log line confirmed to carry no token, the new admin endpoint's link confirmed to actually work and to never appear in logs. Full detail in `BUILT.md`'s `eami-api`/`eami-ui` sections' own correction entries and `BACKLOG.md`'s B-212 entry.
 
@@ -2036,7 +2038,92 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
-2026-09-22 (absolute newest) by Claude Code — B-214 DONE: PoliciesPage.tsx
+2026-09-23 (absolute newest) by Claude Code — B-215 DONE: real
+Workspace-mode UI, built only on real data. Task brief's own title called
+this "B-210" -- BACKLOG.md already has an unrelated B-210
+(PolicyCreateRequest/PolicyUpdateRequest.Status allow-list validation, a
+prior session's entry) -- a genuine numbering collision, checked and
+flagged rather than silently overwritten; used B-215 instead (the real
+next free counter value, confirmed against both the counter and a full
+grep for overlap first). Part A investigation, reported before any code:
+confirmed real/buildable now -- GET /v1/workspaces/mine (the one real
+membership signal -- GetWorkspace/ListWorkspaces are NOT membership-
+gated, a real fail-open trap avoided by checking rather than assuming),
+/{id}/members, and the full /{id}/policies CRUD (B-209, built, never had
+a UI). Confirmed with direct in-schema evidence (migration
+000021_groups_workspaces.up.sql's own comment: "deliberately NOT added
+here... not silently included or dropped") that AI Usage Health/Monthly
+Spend/Team Adoption have zero real backend support -- audit_log/
+token_usage have no workspace_id at all, Spend's "$600 monthly
+allocation" has no backing budget concept anywhere in the schema, Team
+Adoption has no data model linking a human user to AI-tool usage at all
+-- none built, per the brief's own explicit instruction not to fabricate.
+Found workspace "description" was real, unexposed data (groups.
+description, never joined into any workspace response) rather than
+something to invent -- one small, honest backend join added instead.
+Read the live Layer4-WorkspaceUserMode.dc.html canvas artboard directly
+(not from memory) to confirm the real parts' exact visual language and
+separately confirm the illustrative dashboard cards Part A's data
+investigation doesn't support.
+
+Shipped a deliberately separate WorkspaceShell (not nested under Admin's
+AppShell -- DESIGN_SYSTEM.md §0's "do not blend modes"), Overview + Our
+Policies pages, with PoliciesPage.tsx's ActionBadge/StatusBadge/
+ScopeBadge/ConditionSummary and its full create/edit form extracted into
+shared components/policies/ so both the admin and workspace views use one
+real implementation, per the brief's own explicit "reuse, don't reinvent"
+instruction -- PoliciesPage.tsx itself behaviorally unchanged. Entry
+point: ProfilePage.tsx's existing (B-212) real membership list now links
+to /workspace/{id} -- no new Admin-sidebar item, which would both blend
+modes and show for users with zero memberships.
+
+Mandatory code review (fork, high effort) found 4 real issues, all fixed:
+WorkspaceOverviewPage.tsx swallowed query errors, rendering misleading
+empty-state copy as if it were real data; PolicyPanel.tsx's toast
+violated CLAUDE.md's explicit B-182 useToast() rule (a genuinely
+applicable fix, not a stale carryover -- both real call sites have a
+ToastProvider in scope); WorkspacePoliciesPage.tsx's delete mutation had
+no onError handler; router.tsx had two near-duplicate route blocks,
+collapsed into one with an optional :workspaceId? param.
+
+Live verification itself then found 2 MORE real bugs, neither caught by
+either review pass -- the exact reason "live verification required" is a
+standing rule, not a formality: (1) editing any workspace-scoped policy
+with conditions 500'd -- UpsertPolicyCondition's `ON CONFLICT (policy_id)
+DO UPDATE` has always had no matching UNIQUE constraint on
+policy_conditions.policy_id (only a plain index), a real, pre-existing
+bug (confirmed live, Postgres SQLSTATE 42P10) equally affecting the
+ORG-WIDE policy-edit path too, not something this brief introduced --
+fixed via migration 000023_policy_conditions_unique_policy_id after
+confirming zero duplicate policy_id rows existed in the real dev DB
+first; 2 new real-Postgres regression tests cover both the org-wide and
+workspace-scoped edit-with-conditions paths, including a second
+consecutive edit that actually exercises the ON CONFLICT DO UPDATE branch
+(not just the first INSERT). (2) ListWorkspacePolicies/
+getWorkspacePolicyRow never joined the workspace's real name, so
+WorkspacePoliciesPage.tsx's own ScopeBadge rendered "Global floor" for a
+genuinely workspace-scoped policy -- fixed with the same join pattern
+B-214 already established for the org-wide list; the existing workspace-
+policy CRUD test extended with a real workspace_name assertion.
+
+Full go build/go vet/go test ./... -count=1 clean, zero regressions;
+frontend tsc/vite build clean. Live-verified with a real Playwright
+browser against all 4 acceptance criteria in ONE script, real seeded data
+throughout (a real org, workspace with a real description, a real
+workspace_admin, a real workspace_member, a real zero-membership user, a
+real org-floor policy): AC1 (create/edit/delete through the real UI,
+correct ScopeBadge, org floor unaffected by delete) -- pass. AC2 (real
+workspace_member sees zero write affordances, floor row shows a plain
+read-only label) -- pass. AC3 (zero-membership user redirected away
+before any workspace content renders; the only console errors present
+traced via a separate isolated repro to an unrelated, pre-existing
+Dashboard widget, not a workspace-mode issue) -- pass. AC4 (every
+displayed value cross-checked against the real seeded data) -- pass. All
+fixtures removed afterward, confirmed 0 remaining via direct psql. Full
+detail in BUILT.md's eami-api/eami-ui sections and BACKLOG.md's new
+B-215 entry. Previous entry, preserved below:
+
+2026-09-22 by Claude Code — B-214 DONE: PoliciesPage.tsx
 gains a "Scope" column distinguishing workspace-scoped policies from the
 org-wide floor (DESIGN_SYSTEM.md §7.3). No BACKLOG.md entry existed for
 this item under any name despite the task brief referring to "BACKLOG.md's

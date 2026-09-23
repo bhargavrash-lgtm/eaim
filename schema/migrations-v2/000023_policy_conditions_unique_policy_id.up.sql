@@ -1,0 +1,23 @@
+-- B-210: real bug found live while verifying workspace-scoped policy
+-- editing -- UpsertPolicyCondition (internal/store/policies.sql.go)
+-- has always done `INSERT INTO policy_conditions (...) ON CONFLICT
+-- (policy_id) DO UPDATE ...`, but policy_conditions.policy_id has only
+-- ever had a plain index (idx_policy_conditions_policy), never a UNIQUE
+-- constraint -- so every real call to this upsert (both the org-wide
+-- PATCH /v1/gateway/policies/{policyId} and the workspace-scoped PATCH
+-- /v1/workspaces/{workspaceId}/policies/{policyId}, whenever the request
+-- includes `conditions`, which PolicyPanel.tsx's real form always does)
+-- has failed with a real 500 the whole time this table has existed:
+-- "there is no unique or exclusion constraint matching the ON CONFLICT
+-- specification" (Postgres 42P10). Confirmed live against the real
+-- running container before writing this migration, not assumed.
+--
+-- Confirmed zero duplicate policy_id rows exist in the real dev database
+-- before adding this constraint (a prior INSERT-only bug could otherwise
+-- have produced them, which this ADD CONSTRAINT would then reject).
+--
+-- This is the correct, minimal fix -- it makes the schema match what the
+-- application code already assumed (one policy_conditions row per
+-- policy), rather than changing UpsertPolicyCondition's own
+-- already-correct upsert logic to work around a missing invariant.
+ALTER TABLE policy_conditions ADD CONSTRAINT policy_conditions_policy_id_key UNIQUE (policy_id);

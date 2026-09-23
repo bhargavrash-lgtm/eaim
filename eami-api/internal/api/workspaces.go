@@ -33,6 +33,12 @@ type WorkspaceResp struct {
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// Description (B-210) -- real data that already existed unexposed:
+	// every workspace is 1:1 with a groups row (group_id), and groups
+	// already has a real description column (migration 000021). Never
+	// surfaced by any workspace endpoint until now. Nil, not "", when the
+	// group has none -- distinguishable from a deliberately empty string.
+	Description *string `json:"description,omitempty"`
 }
 
 type WorkspaceListResp struct {
@@ -191,8 +197,10 @@ func (s *Server) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	}
 	uc := claimsFromContext(r)
 	rows, err := s.queries.DB().Query(r.Context(), `
-		SELECT id, org_id, group_id, name, created_at, updated_at
-		FROM workspaces WHERE org_id = $1 ORDER BY name ASC
+		SELECT w.id, w.org_id, w.group_id, w.name, w.created_at, w.updated_at, g.description
+		FROM workspaces w
+		JOIN groups g ON g.id = w.group_id
+		WHERE w.org_id = $1 ORDER BY w.name ASC
 	`, pgtype.UUID{Bytes: uc.OrgID, Valid: true})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -204,11 +212,15 @@ func (s *Server) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id, orgID, groupID uuid.UUID
 		var resp WorkspaceResp
-		if err := rows.Scan(&id, &orgID, &groupID, &resp.Name, &resp.CreatedAt, &resp.UpdatedAt); err != nil {
+		var description pgtype.Text
+		if err := rows.Scan(&id, &orgID, &groupID, &resp.Name, &resp.CreatedAt, &resp.UpdatedAt, &description); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
 		resp.ID, resp.OrgID, resp.GroupID = id.String(), orgID.String(), groupID.String()
+		if description.Valid {
+			resp.Description = &description.String
+		}
 		data = append(data, resp)
 	}
 	writeJSON(w, http.StatusOK, WorkspaceListResp{Data: data})
@@ -315,16 +327,22 @@ func (s *Server) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getWorkspaceRow(ctx context.Context, id, orgID uuid.UUID) (WorkspaceResp, error) {
 	var resp WorkspaceResp
 	var idOut, orgIDOut, groupIDOut uuid.UUID
+	var description pgtype.Text
 	err := s.queries.DB().QueryRow(ctx, `
-		SELECT id, org_id, group_id, name, created_at, updated_at
-		FROM workspaces WHERE id = $1 AND org_id = $2
+		SELECT w.id, w.org_id, w.group_id, w.name, w.created_at, w.updated_at, g.description
+		FROM workspaces w
+		JOIN groups g ON g.id = w.group_id
+		WHERE w.id = $1 AND w.org_id = $2
 	`, pgtype.UUID{Bytes: id, Valid: true}, pgtype.UUID{Bytes: orgID, Valid: true}).Scan(
-		&idOut, &orgIDOut, &groupIDOut, &resp.Name, &resp.CreatedAt, &resp.UpdatedAt,
+		&idOut, &orgIDOut, &groupIDOut, &resp.Name, &resp.CreatedAt, &resp.UpdatedAt, &description,
 	)
 	if err != nil {
 		return WorkspaceResp{}, err
 	}
 	resp.ID, resp.OrgID, resp.GroupID = idOut.String(), orgIDOut.String(), groupIDOut.String()
+	if description.Valid {
+		resp.Description = &description.String
+	}
 	return resp, nil
 }
 

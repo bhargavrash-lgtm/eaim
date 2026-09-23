@@ -9,8 +9,6 @@ import {
   EmptyState,
   LoadingSpinner,
   DataTable,
-  SlideOverPanel,
-  Button,
 } from '@/components/common'
 import { AppTopBar } from '@/components/layout/AppTopBar'
 import type { Column } from '@/components/common'
@@ -21,306 +19,14 @@ import {
   useDeletePolicy,
   useReorderPolicies,
 } from '@/hooks/usePolicies'
-import type { Policy, PolicyCreate, PolicyUpdate, PolicyWithWorkspace } from '@/hooks/usePolicies'
-
-// Badges
-//
-// Neither of these genuinely fits StatusPill's existing shape once shape
-// (not just enum values) is considered: StatusPill renders `rounded-full`
-// with `capitalize`, these render plain `rounded` with no `capitalize` --
-// reusing StatusPill here would be a real, unauthorized visual change
-// (pill shape), not a pure token substitution. Both stay local; colors
-// now source from the shared status.* design tokens instead of
-// hardcoded green/red/amber values.
-
-const ACTION_STYLES: Record<string, string> = {
-  allow:    'bg-status-success text-status-success-text',
-  deny:     'bg-status-danger text-status-danger-text',
-  escalate: 'bg-status-warning text-status-warning-text',
-}
-
-const STATUS_STYLES: Record<string, string> = {
-  active:   'bg-status-success text-status-success-text',
-  draft:    'bg-gray-100 text-gray-600',
-  disabled: 'bg-status-danger text-status-danger-text',
-}
-
-function ActionBadge({ action }: { action: string }) {
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold capitalize ${ACTION_STYLES[action] ?? 'bg-gray-100 text-gray-600'}`}>
-      {action}
-    </span>
-  )
-}
-
-function StatusBadge({ status }: { status: string }) {
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium capitalize ${STATUS_STYLES[status] ?? 'bg-gray-100 text-gray-600'}`}>
-      {status}
-    </span>
-  )
-}
-
-// ScopeBadge -- DESIGN_SYSTEM.md §7.3: a workspace-scoped policy must be
-// visibly distinguished from the org-wide floor. Same local-badge-function
-// pattern as ActionBadge/StatusBadge above (this file's own comment at the
-// top of this section already establishes why StatusPill's shape doesn't
-// fit here either). "Global floor" reuses STATUS_STYLES.draft's exact
-// gray -- the same neutral treatment already shipped in this file, not a
-// new color. The named-workspace case uses brand-50/brand-700, the
-// existing token pair for DESIGN_SYSTEM.md §2's Accent (#3B5BDB).
-function ScopeBadge({ workspaceName }: { workspaceName?: string | null }) {
-  if (!workspaceName) {
-    return (
-      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
-        Global floor
-      </span>
-    )
-  }
-  return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-brand-50 text-brand-700">
-      {workspaceName}
-    </span>
-  )
-}
-
-function ConditionSummary({ conditions }: { conditions: Policy['conditions'] }) {
-  const parts: string[] = []
-  if (conditions.agent_name_pattern) parts.push('agent: ' + conditions.agent_name_pattern)
-  if (conditions.tool_names?.length) parts.push('tools: ' + conditions.tool_names.join(', '))
-  if (conditions.action_types?.length) parts.push('actions: ' + conditions.action_types.join(', '))
-  if (conditions.environments?.length) parts.push('env: ' + conditions.environments.join(', '))
-  if (conditions.record_count_gt != null) parts.push('records > ' + conditions.record_count_gt)
-  if (conditions.semantic_rule) parts.push('semantic rule set')
-  if (conditions.scope_drift) parts.push('scope drift')
-  if (parts.length === 0) return <span className="text-gray-400 italic text-xs">any request</span>
-  return <span className="text-xs text-gray-600 truncate max-w-xs" title={parts.join(' / ')}>{parts.join(' / ')}</span>
-}
-
-// Slide-out panel
-
-type PanelMode = 'create' | 'edit'
-
-interface PanelProps {
-  mode: PanelMode
-  policy?: Policy
-  onClose: () => void
-}
-
-const ENVIRONMENTS = ['any', 'production', 'staging', 'development'] as const
-
-function PolicyPanel({ mode, policy, onClose }: PanelProps) {
-  const create = useCreatePolicy()
-  const update = useUpdatePolicy()
-  const [toast, setToast] = useState<string | null>(null)
-
-  const [name, setName] = useState(policy?.name ?? '')
-  const [description, setDescription] = useState(policy?.description ?? '')
-  const [priority, setPriority] = useState(policy?.priority ?? 10)
-  const [action, setAction] = useState<'allow' | 'deny' | 'escalate'>(
-    (policy?.action as 'allow' | 'deny' | 'escalate') ?? 'deny'
-  )
-  const [status, setStatus] = useState<'active' | 'draft' | 'disabled'>(
-    (policy?.status as 'active' | 'draft' | 'disabled') ?? 'draft'
-  )
-  const [alert, setAlert] = useState(policy?.alert ?? false)
-
-  const [agentPattern, setAgentPattern] = useState(policy?.conditions.agent_name_pattern ?? '')
-  const [toolNames, setToolNames]       = useState(policy?.conditions.tool_names?.join(', ') ?? '')
-  const [actionTypes, setActionTypes]   = useState(policy?.conditions.action_types?.join(', ') ?? '')
-  const [environments, setEnvironments] = useState<string[]>(policy?.conditions.environments ?? [])
-  const [recordCountGt, setRecordCountGt] = useState(policy?.conditions.record_count_gt?.toString() ?? '')
-  const [semanticRule, setSemanticRule] = useState(policy?.conditions.semantic_rule ?? '')
-  const [scopeDrift, setScopeDrift]     = useState(policy?.conditions.scope_drift ?? false)
-
-  const isPending = create.isPending || update.isPending
-
-  function buildConditions() {
-    return {
-      agent_name_pattern: agentPattern.trim() || undefined,
-      tool_names: toolNames.trim() ? toolNames.split(',').map(s => s.trim()).filter(Boolean) : undefined,
-      action_types: actionTypes.trim() ? actionTypes.split(',').map(s => s.trim()).filter(Boolean) : undefined,
-      environments: environments.length ? (environments as ('production' | 'staging' | 'development' | 'any')[]) : undefined,
-      record_count_gt: recordCountGt ? parseInt(recordCountGt, 10) : undefined,
-      semantic_rule: semanticRule.trim() || undefined,
-      scope_drift: scopeDrift || undefined,
-    }
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    try {
-      if (mode === 'create') {
-        const body: PolicyCreate = {
-          name, description: description || undefined, priority, action, alert,
-          status: status === 'disabled' ? 'draft' : status,
-          conditions: buildConditions(),
-        }
-        await create.mutateAsync(body)
-      } else {
-        const body: PolicyUpdate = {
-          name, description: description || undefined, priority, action, alert, status,
-          conditions: buildConditions(),
-        }
-        await update.mutateAsync({ id: policy!.id, body })
-      }
-      setToast(mode === 'create' ? 'Policy created' : 'Policy saved')
-      setTimeout(() => { setToast(null); onClose() }, 1000)
-    } catch {
-      setToast('Save failed')
-    }
-  }
-
-  function toggleEnv(env: string) {
-    setEnvironments(prev => prev.includes(env) ? prev.filter(e => e !== env) : [...prev, env])
-  }
-
-  return (
-    <SlideOverPanel onClose={onClose}>
-      <div className="flex items-center justify-between px-6 py-4 border-b">
-        <div>
-          <h2 className="font-semibold text-gray-900">
-            {mode === 'create' ? 'New Policy' : 'Edit Policy'}
-          </h2>
-          {policy && <p className="text-xs text-gray-500 truncate">{policy.name}</p>}
-        </div>
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">x</button>
-      </div>
-
-      {toast && (
-        <div className={`mx-6 mt-4 px-4 py-2 rounded text-sm border ${
-          toast.includes('failed') ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'
-        }`}>
-          {toast}
-        </div>
-      )}
-
-      <div className="flex-1 overflow-y-auto px-6 py-4">
-        <form id="policy-form" onSubmit={handleSubmit} className="space-y-6">
-
-          <div className="space-y-4">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Basic</p>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-              <input required value={name} onChange={e => setName(e.target.value)}
-                className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="Block production deletes" />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-              <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2}
-                className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Priority (lower = first)</label>
-                <input type="number" min={1} required value={priority}
-                  onChange={e => setPriority(parseInt(e.target.value, 10) || 1)}
-                  className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                <select value={status} onChange={e => setStatus(e.target.value as typeof status)}
-                  className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                  <option value="active">Active</option>
-                  <option value="draft">Draft</option>
-                  {mode === 'edit' && <option value="disabled">Disabled</option>}
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Action</label>
-                <select value={action} onChange={e => setAction(e.target.value as typeof action)}
-                  className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                  <option value="allow">Allow</option>
-                  <option value="deny">Deny</option>
-                  <option value="escalate">Escalate (require approval)</option>
-                </select>
-              </div>
-              <div className="flex items-end pb-2">
-                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                  <input type="checkbox" checked={alert} onChange={e => setAlert(e.target.checked)}
-                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
-                  Send alert on match
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-4 pt-4 border-t">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Conditions (all specified must match)</p>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Agent name pattern (glob)</label>
-              <input value={agentPattern} onChange={e => setAgentPattern(e.target.value)}
-                className="w-full border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="claude-support-* or leave blank for any" />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Tool names (comma-separated)</label>
-              <input value={toolNames} onChange={e => setToolNames(e.target.value)}
-                className="w-full border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="delete_file, drop_table" />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Action verbs (comma-separated)</label>
-              <input value={actionTypes} onChange={e => setActionTypes(e.target.value)}
-                className="w-full border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="delete, drop, truncate" />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Environments</label>
-              <div className="flex flex-wrap gap-3">
-                {ENVIRONMENTS.map(env => (
-                  <label key={env} className="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
-                    <input type="checkbox" checked={environments.includes(env)} onChange={() => toggleEnv(env)}
-                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
-                    <span className="font-mono text-xs">{env}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Estimated records greater than</label>
-              <input type="number" min={0} value={recordCountGt} onChange={e => setRecordCountGt(e.target.value)}
-                className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="e.g. 1000 -- leave blank to skip" />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Semantic rule (LLM-evaluated)</label>
-              <textarea value={semanticRule} onChange={e => setSemanticRule(e.target.value)} rows={2}
-                className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="Agent must not exfiltrate PII" />
-            </div>
-
-            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-              <input type="checkbox" checked={scopeDrift} onChange={e => setScopeDrift(e.target.checked)}
-                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
-              Match on scope drift (agent acts outside declared task)
-            </label>
-          </div>
-        </form>
-      </div>
-
-      <div className="px-6 py-4 border-t flex gap-3">
-        <Button type="submit" form="policy-form" isLoading={isPending} className="flex-1">
-          {mode === 'create' ? 'Create policy' : 'Save changes'}
-        </Button>
-        <Button variant="secondary" onClick={onClose} disabled={isPending}>Cancel</Button>
-      </div>
-    </SlideOverPanel>
-  )
-}
+import type { Policy, PolicyWithWorkspace } from '@/hooks/usePolicies'
+// ActionBadge/StatusBadge/ScopeBadge/ConditionSummary and PolicyPanel
+// (B-210): extracted to components/policies/ so the new workspace-scoped
+// policy view can reuse them exactly rather than reinventing them -- see
+// those files' own doc comments for the full reasoning (unchanged from
+// this page's original comment: StatusPill's shape doesn't fit).
+import { ActionBadge, StatusBadge, ScopeBadge, ConditionSummary } from '@/components/policies/PolicyBadges'
+import { PolicyPanel, type PanelMode } from '@/components/policies/PolicyPanel'
 
 // Main page
 
@@ -328,6 +34,8 @@ export function PoliciesPage() {
   const { data, isLoading, error } = usePolicies()
   const deletePolicy = useDeletePolicy()
   const reorder = useReorderPolicies()
+  const createPolicy = useCreatePolicy()
+  const updatePolicy = useUpdatePolicy()
   // Deep-linking/highlighting by ID (B-092): ?highlight=<policy id> lands
   // on and highlights that row via DataTable's getRowId/highlightRowId.
   const [searchParams] = useSearchParams()
@@ -481,7 +189,13 @@ export function PoliciesPage() {
       </div>
 
       {panel && (
-        <PolicyPanel mode={panel.mode} policy={panel.policy} onClose={() => setPanel(null)} />
+        <PolicyPanel
+          mode={panel.mode}
+          policy={panel.policy}
+          onClose={() => setPanel(null)}
+          createMutation={createPolicy}
+          updateMutation={updatePolicy}
+        />
       )}
 
       {deleteTarget && (

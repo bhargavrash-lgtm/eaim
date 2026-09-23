@@ -257,9 +257,11 @@ func (s *Server) ListWorkspacePolicies(w http.ResponseWriter, r *http.Request) {
 		SELECT p.id, p.workspace_id, p.name, p.description, p.priority, p.action, p.alert, p.status,
 		       p.created_by, p.created_at, p.updated_at,
 		       pc.agent_name_pattern, pc.tool_names, pc.action_types, pc.environments,
-		       pc.record_count_gt, pc.semantic_rule, COALESCE(pc.scope_drift, FALSE)
+		       pc.record_count_gt, pc.semantic_rule, COALESCE(pc.scope_drift, FALSE),
+		       w.name
 		FROM policies p
 		LEFT JOIN policy_conditions pc ON pc.policy_id = p.id
+		LEFT JOIN workspaces w ON w.id = p.workspace_id
 		WHERE p.org_id = $1 AND (p.workspace_id = $2 OR p.workspace_id IS NULL)
 		ORDER BY (p.workspace_id IS NULL) DESC, p.priority ASC
 	`, pgtype.UUID{Bytes: uc.OrgID, Valid: true}, pgtype.UUID{Bytes: workspaceID, Valid: true})
@@ -294,11 +296,17 @@ type rowScanner interface {
 	Scan(dest ...interface{}) error
 }
 
-// scanWorkspacePolicyRow scans one policies+policy_conditions joined row
-// (column order fixed by both getWorkspacePolicyRow's and
+// scanWorkspacePolicyRow scans one policies+policy_conditions+workspaces
+// joined row (column order fixed by both getWorkspacePolicyRow's and
 // ListWorkspacePolicies' SELECT above) into a PolicyResp, including
-// workspace_id -- nil/omitted on the JSON response means "org-wide floor
-// policy," matching PolicyResp.WorkspaceID's own doc comment.
+// workspace_id/workspace_name -- nil/omitted on the JSON response means
+// "org-wide floor policy," matching PolicyResp.WorkspaceID's own doc
+// comment. WorkspaceName joined in here (code review / live verification
+// finding, B-210): WorkspacePoliciesPage.tsx's ScopeBadge needs the real
+// name, not just the id, to distinguish "Global floor" from a named
+// workspace the same way B-214 already does on the org-wide list -- this
+// endpoint hadn't been updated for that even though PolicyResp already
+// carries the field.
 func scanWorkspacePolicyRow(row rowScanner) (PolicyResp, error) {
 	var resp PolicyResp
 	var idOut uuid.UUID
@@ -310,11 +318,13 @@ func scanWorkspacePolicyRow(row rowScanner) (PolicyResp, error) {
 	var recordCountGT pgtype.Int4
 	var semanticRule pgtype.Text
 	var scopeDrift bool
+	var wsName pgtype.Text
 
 	if err := row.Scan(
 		&idOut, &wsID, &resp.Name, &desc, &resp.Priority, &resp.Action, &resp.Alert, &resp.Status,
 		&createdBy, &resp.CreatedAt, &resp.UpdatedAt,
 		&agentPattern, &toolNames, &actionTypes, &envs, &recordCountGT, &semanticRule, &scopeDrift,
+		&wsName,
 	); err != nil {
 		return PolicyResp{}, err
 	}
@@ -323,6 +333,9 @@ func scanWorkspacePolicyRow(row rowScanner) (PolicyResp, error) {
 	if wsID.Valid {
 		id := uuid.UUID(wsID.Bytes).String()
 		resp.WorkspaceID = &id
+	}
+	if wsName.Valid {
+		resp.WorkspaceName = &wsName.String
 	}
 	if desc.Valid {
 		resp.Description = &desc.String
@@ -359,9 +372,11 @@ func (s *Server) getWorkspacePolicyRow(ctx context.Context, id, orgID uuid.UUID)
 		SELECT p.id, p.workspace_id, p.name, p.description, p.priority, p.action, p.alert, p.status,
 		       p.created_by, p.created_at, p.updated_at,
 		       pc.agent_name_pattern, pc.tool_names, pc.action_types, pc.environments,
-		       pc.record_count_gt, pc.semantic_rule, COALESCE(pc.scope_drift, FALSE)
+		       pc.record_count_gt, pc.semantic_rule, COALESCE(pc.scope_drift, FALSE),
+		       w.name
 		FROM policies p
 		LEFT JOIN policy_conditions pc ON pc.policy_id = p.id
+		LEFT JOIN workspaces w ON w.id = p.workspace_id
 		WHERE p.id = $1 AND p.org_id = $2
 	`, pgtype.UUID{Bytes: id, Valid: true}, pgtype.UUID{Bytes: orgID, Valid: true})
 	return scanWorkspacePolicyRow(row)

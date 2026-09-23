@@ -9,6 +9,7 @@
 // rule's sidebar covers (CLAUDE.md), same precedent SettingsPage already
 // sets for account-level (not governance) pages.
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -160,8 +161,11 @@ export function ProfilePage() {
                   <dt className="text-sm text-gray-500">Workspaces</dt>
                   <ul className="mt-2 space-y-1">
                     {me.workspaces.map((w) => (
-                      <li key={w.workspace_id} className="text-sm text-gray-900">
-                        {w.workspace_name} <span className="text-gray-500 capitalize">({w.role})</span>
+                      <li key={w.workspace_id} className="text-sm">
+                        <Link to={`/workspace/${w.workspace_id}`} className="text-brand-700 hover:underline">
+                          {w.workspace_name}
+                        </Link>{' '}
+                        <span className="text-gray-500 capitalize">({w.role.replace('workspace_', '')})</span>
                       </li>
                     ))}
                   </ul>

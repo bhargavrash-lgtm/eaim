@@ -243,6 +243,76 @@ func TestWorkspaces_RealDB_CreateListGetUpdateDelete(t *testing.T) {
 	}
 }
 
+// TestGetWorkspace_RealDB_DescriptionFromGroup (B-210): real data that
+// already existed unexposed -- groups.description (migration 000021),
+// joined into WorkspaceResp for the first time by this brief. Confirms
+// both states: NULL (CreateWorkspace never sets one -- no UI writes it
+// yet) renders as an omitted field on both GetWorkspace and ListWorkspaces,
+// and a real value set directly on the backing group (simulating a future
+// groups-management UI, not yet built) surfaces correctly through both.
+func TestGetWorkspace_RealDB_DescriptionFromGroup(t *testing.T) {
+	env := newWorkspaceTestEnv(t)
+	ctx := context.Background()
+	orgID := seedTestOrg(t, ctx, env.pool, "ws-description")
+	adminID := seedTestUser(t, ctx, env.pool, orgID)
+	adminTok := env.token(t, adminID, orgID, "admin@ws-description.test", "admin")
+
+	createResp := env.do(t, http.MethodPost, "/v1/workspaces", adminTok, map[string]string{"name": "Finance"})
+	var created struct {
+		ID      string `json:"id"`
+		GroupID string `json:"group_id"`
+	}
+	json.NewDecoder(createResp.Body).Decode(&created)
+	createResp.Body.Close()
+
+	getNull := env.do(t, http.MethodGet, "/v1/workspaces/"+created.ID, adminTok, nil)
+	var gotNull struct {
+		Description *string `json:"description"`
+	}
+	json.NewDecoder(getNull.Body).Decode(&gotNull)
+	getNull.Body.Close()
+	if gotNull.Description != nil {
+		t.Fatalf("expected nil description for a freshly-created workspace, got %v", *gotNull.Description)
+	}
+
+	if _, err := env.pool.Exec(ctx, `UPDATE groups SET description = $1 WHERE id = $2`,
+		"Handles payroll and expense approvals", created.GroupID); err != nil {
+		t.Fatalf("set group description: %v", err)
+	}
+
+	getWithDesc := env.do(t, http.MethodGet, "/v1/workspaces/"+created.ID, adminTok, nil)
+	var gotWithDesc struct {
+		Description *string `json:"description"`
+	}
+	json.NewDecoder(getWithDesc.Body).Decode(&gotWithDesc)
+	getWithDesc.Body.Close()
+	if gotWithDesc.Description == nil || *gotWithDesc.Description != "Handles payroll and expense approvals" {
+		t.Fatalf("GetWorkspace: description = %v, want the real group description", gotWithDesc.Description)
+	}
+
+	listResp := env.do(t, http.MethodGet, "/v1/workspaces", adminTok, nil)
+	var list struct {
+		Data []struct {
+			ID          string  `json:"id"`
+			Description *string `json:"description"`
+		} `json:"data"`
+	}
+	json.NewDecoder(listResp.Body).Decode(&list)
+	listResp.Body.Close()
+	found := false
+	for _, w := range list.Data {
+		if w.ID == created.ID {
+			found = true
+			if w.Description == nil || *w.Description != "Handles payroll and expense approvals" {
+				t.Fatalf("ListWorkspaces: description = %v, want the real group description", w.Description)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("created workspace not found in list")
+	}
+}
+
 // ── Mandatory adversarial test 1 ─────────────────────────────────────────────────
 // A user with NO row in workspace_memberships cannot access the workspace,
 // even holding a normally-sufficient org-level role (operator -- which

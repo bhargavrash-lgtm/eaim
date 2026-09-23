@@ -1,5 +1,8 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
+import { WorkspaceShell } from '@/components/layout/WorkspaceShell'
+import { WorkspaceOverviewPage } from '@/pages/workspace/WorkspaceOverviewPage'
+import { WorkspacePoliciesPage } from '@/pages/workspace/WorkspacePoliciesPage'
 import { LoginPage } from '@/pages/auth/LoginPage'
 import { AcceptInvitePage } from '@/pages/auth/AcceptInvitePage'
 import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage'
@@ -48,6 +51,23 @@ export const router = createBrowserRouter([
       { path: '/alerts', element: <AlertsPage /> },
       { path: '/settings', element: <SettingsPage /> },
       { path: '/profile', element: <ProfilePage /> },
+    ],
+  },
+  // Workspace mode (B-210) -- deliberately its own top-level shell, not
+  // nested under AppShell/Admin mode (DESIGN_SYSTEM.md §0: don't blend
+  // modes). WorkspaceShell itself is the real access guard (GET
+  // /v1/workspaces/mine-driven, not just a hidden nav item) -- a single
+  // route with an optional :workspaceId param covers both a bare
+  // /workspace (resolves to the user's own first real membership) and
+  // /workspace/:workspaceId, instead of two near-duplicate route blocks
+  // that a future workspace page could update only one of (code-review
+  // finding).
+  {
+    path: '/workspace/:workspaceId?',
+    element: <WorkspaceShell />,
+    children: [
+      { index: true, element: <WorkspaceOverviewPage /> },
+      { path: 'policies', element: <WorkspacePoliciesPage /> },
     ],
   },
   {

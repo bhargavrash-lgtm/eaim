@@ -78,8 +78,9 @@ func TestWorkspacePolicies_RealDB_CRUDLifecycle(t *testing.T) {
 	}
 	var list struct {
 		Data []struct {
-			ID          string  `json:"id"`
-			WorkspaceID *string `json:"workspace_id"`
+			ID            string  `json:"id"`
+			WorkspaceID   *string `json:"workspace_id"`
+			WorkspaceName *string `json:"workspace_name"`
 		} `json:"data"`
 	}
 	json.NewDecoder(listResp.Body).Decode(&list)
@@ -88,11 +89,21 @@ func TestWorkspacePolicies_RealDB_CRUDLifecycle(t *testing.T) {
 	for _, p := range list.Data {
 		if p.ID == created.ID {
 			sawOwn = true
+			// B-210 regression: ListWorkspacePolicies originally selected
+			// workspace_id only, never the workspace's real name -- found
+			// live (WorkspacePoliciesPage.tsx's ScopeBadge rendered "Global
+			// floor" for a genuinely workspace-scoped policy) and fixed.
+			if p.WorkspaceName == nil || *p.WorkspaceName != "WSP CRUD Workspace" {
+				t.Fatalf("own policy in list has wrong/missing workspace_name: %v, want %q", p.WorkspaceName, "WSP CRUD Workspace")
+			}
 		}
 		if p.ID == floorID.String() {
 			sawFloor = true
 			if p.WorkspaceID != nil {
 				t.Fatalf("floor policy in list has non-nil workspace_id: %v", *p.WorkspaceID)
+			}
+			if p.WorkspaceName != nil {
+				t.Fatalf("floor policy in list has non-nil workspace_name: %v", *p.WorkspaceName)
 			}
 		}
 	}

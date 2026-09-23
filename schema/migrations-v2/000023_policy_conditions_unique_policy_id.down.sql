@@ -1,0 +1,1 @@
+ALTER TABLE policy_conditions DROP CONSTRAINT IF EXISTS policy_conditions_policy_id_key;
