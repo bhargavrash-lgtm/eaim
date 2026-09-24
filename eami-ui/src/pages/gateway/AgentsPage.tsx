@@ -5,7 +5,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ConfirmDialog, DataTable, SlideOverPanel, Button } from '@/components/common'
+import { ConfirmDialog, DataTable, SlideOverPanel, Button, EmptyState } from '@/components/common'
 import { AppTopBar } from '@/components/layout/AppTopBar'
 import type { Column } from '@/components/common'
 import {
@@ -415,7 +415,18 @@ export function AgentsPage() {
       )}
 
       {agents.length === 0 ? (
-        <p className="text-sm text-gray-400">No agents registered yet.</p>
+        <EmptyState
+          title="No agents registered yet"
+          description="Register a governed agent identity to start issuing scoped, policy-enforced tokens."
+          action={
+            <button
+              onClick={() => setShowAdd(true)}
+              className="mt-4 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+            >
+              + Add agent
+            </button>
+          }
+        />
       ) : (
         <DataTable
           columns={agentColumns}

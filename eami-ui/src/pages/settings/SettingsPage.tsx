@@ -313,9 +313,22 @@ function UsersTab() {
         columns={userColumns}
         data={users}
         loading={isLoading}
-        emptyMessage="No users yet"
         pageSize={1000}
         getRowId={(u) => u.id}
+        renderEmpty={() => (
+          <EmptyState
+            title="No users yet"
+            description="Invite a teammate to give them access to this organization."
+            action={
+              <button
+                onClick={() => { setShowInvite(true); setInviteLink(null) }}
+                className="mt-4 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+              >
+                Invite user
+              </button>
+            }
+          />
+        )}
       />
 
       {/* Invite modal */}
@@ -617,7 +630,18 @@ function ApiKeysTab() {
         pageSize={1000}
         getRowId={(k) => k.id}
         renderEmpty={() => (
-          <EmptyState title="No API keys" description="Create a key to authenticate the collector or other services." />
+          <EmptyState
+            title="No API keys"
+            description="Create a key to authenticate the collector or other services."
+            action={
+              <button
+                onClick={() => { setShowCreate(true); setNewKey(null) }}
+                className="mt-4 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+              >
+                Create API key
+              </button>
+            }
+          />
         )}
       />
 
@@ -834,7 +858,18 @@ function ModelPricingTab() {
         pageSize={1000}
         getRowId={(m) => m.model}
         renderEmpty={() => (
-          <EmptyState title="No model pricing configured" description="Add a model's rates so its dispatches price correctly in FinOps." />
+          <EmptyState
+            title="No model pricing configured"
+            description="Add a model's rates so its dispatches price correctly in FinOps."
+            action={
+              <button
+                onClick={openCreate}
+                className="mt-4 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+              >
+                Add model pricing
+              </button>
+            }
+          />
         )}
       />
 

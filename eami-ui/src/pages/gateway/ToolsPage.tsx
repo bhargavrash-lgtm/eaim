@@ -1020,6 +1020,14 @@ export function ToolsPage() {
             <EmptyState
               title="No tools connected"
               description="Add an MCP server or REST API to allow gateway-controlled access."
+              action={
+                <button
+                  onClick={() => setShowAdd(true)}
+                  className="mt-4 px-4 py-2 rounded-md bg-indigo-600 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+                >
+                  Add tool
+                </button>
+              }
             />
           )}
         />

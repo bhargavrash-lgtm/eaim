@@ -6,6 +6,8 @@
 
 **Scope:** every Horizon 0 page has been adversarially proven correct and secure. None had been evaluated for whether it's genuinely mature and usable — feature-rich, not just functionally right. Pages audited: Agents, Policies, Tools, Workflows, Approvals, Audit, FinOps, Alerts, Assets/CMDB, Discover, Settings.
 
+**Status update (2026-09-24, B-219):** priority-order item 1 below (wiring `EmptyState`'s existing `action` prop everywhere a real create action already exists) is now DONE, live-verified — see `BUILT.md`/`BACKLOG.md`'s B-219 entries. The findings below are left exactly as originally written, as the historical record of what the audit found; only this note reflects that item 1 has since been closed.
+
 **Method:** direct file reads of every page's real source (`eami-ui/src/pages/...`), plus targeted grep across the whole `eami-ui/src/pages` tree for export/download/CSV/tooltip/help patterns. All findings below are cited to file:line. No assumptions from page names.
 
 ---

@@ -175,6 +175,14 @@ export function PoliciesPage() {
           <EmptyState
             title="No policies yet"
             description="Create your first policy to start governing gateway traffic."
+            action={
+              <button
+                onClick={() => setPanel({ mode: 'create' })}
+                className="mt-4 px-4 py-2 rounded-md bg-indigo-600 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+              >
+                New policy
+              </button>
+            }
           />
         ) : (
           <DataTable

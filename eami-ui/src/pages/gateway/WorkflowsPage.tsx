@@ -853,6 +853,14 @@ export function WorkflowsPage() {
           <EmptyState
             title="No workflows defined"
             description="Chain connectors together into an ordered sequence of steps."
+            action={
+              <button
+                onClick={() => setShowAdd(true)}
+                className="mt-4 px-4 py-2 rounded-md bg-indigo-600 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+              >
+                Add workflow
+              </button>
+            }
           />
         ) : (
           <DataTable columns={workflowColumns} data={workflows} onRowClick={(wf) => setEditTargetId(wf.id)} pageSize={1000} />
