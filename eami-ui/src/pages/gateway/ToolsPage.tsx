@@ -905,10 +905,11 @@ export function ToolsPage() {
   const tools: ToolWithActions[] = (data as any)?.data ?? []
 
   const toolColumns: Column<ToolWithActions>[] = [
-    { key: 'name', header: 'Name', render: (tool) => <span className="font-medium text-gray-900">{tool.name}</span> },
+    { key: 'name', header: 'Name', sortable: true, render: (tool) => <span className="font-medium text-gray-900">{tool.name}</span> },
     {
       key: 'type',
       header: 'Type',
+      sortable: true,
       render: (tool) => (
         <div className="flex items-center gap-1.5">
           <TypeBadge type={tool.type} />

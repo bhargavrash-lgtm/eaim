@@ -8,6 +8,8 @@
 
 **Status update (2026-09-24, B-219):** priority-order item 1 below (wiring `EmptyState`'s existing `action` prop everywhere a real create action already exists) is now DONE, live-verified — see `BUILT.md`/`BACKLOG.md`'s B-219 entries. The findings below are left exactly as originally written, as the historical record of what the audit found; only this note reflects that item 1 has since been closed.
 
+**Status update (2026-09-24, B-220):** priority-order item 3 below (real multi-column sort on `DataTable.tsx`) is now DONE, live-verified — see `BUILT.md`/`BACKLOG.md`'s B-220 entries. One real correction to Part A's own findings, made during B-220's investigation: the cross-page summary line below reads as if single-column sort was broadly reachable before this fix ("DataTable.tsx only supports single-column sort") — direct grepping found it was actually reachable on exactly 1 of 11 audited pages (`AssetsPage.tsx`) before B-220, not broadly. Left uncorrected in the findings below as the historical record of what this audit originally said; the accurate version is in B-220's own `BUILT.md`/`BACKLOG.md` entries.
+
 **Method:** direct file reads of every page's real source (`eami-ui/src/pages/...`), plus targeted grep across the whole `eami-ui/src/pages` tree for export/download/CSV/tooltip/help patterns. All findings below are cited to file:line. No assumptions from page names.
 
 ---

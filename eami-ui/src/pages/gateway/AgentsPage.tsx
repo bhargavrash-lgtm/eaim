@@ -349,8 +349,22 @@ export function AgentsPage() {
   // passed below). pageSize is set high enough to never engage DataTable's
   // own pager, matching this page's existing "show every agent" behavior.
   const agentColumns: Column<Agent>[] = [
-    { key: 'name', header: 'Name', render: (agent) => <span className="font-medium text-gray-900">{agent.name}</span> },
-    { key: 'model', header: 'Model', render: (agent) => <span className="font-mono text-gray-600">{agent.model}</span> },
+    { key: 'name', header: 'Name', sortable: true, render: (agent) => <span className="font-medium text-gray-900">{agent.name}</span> },
+    {
+      key: 'model',
+      header: 'Model',
+      // sortable (B-220): code-review finding -- risk_tier was the
+      // original choice here, but its real values ("low"/"medium"/
+      // "high"/"critical") are a severity ordering, not an alphabetical
+      // one; DataTable's generic comparator only does localeCompare on
+      // strings (no per-column comparator hook exists in Column<T>), so
+      // sorting risk_tier alphabetically would give "high, low, medium"
+      // -- looks broken to an admin expecting low->high or high->low.
+      // model is real free text with no implied ordering, so plain
+      // alphabetical sort is correct, not misleading.
+      sortable: true,
+      render: (agent) => <span className="font-mono text-gray-600">{agent.model}</span>,
+    },
     { key: 'risk_tier', header: 'Risk', render: (agent) => <RiskBadge tier={(agent as any).risk_tier} /> },
     { key: 'status', header: 'Status', render: (agent) => <StatusBadge status={(agent as any).status} /> },
     { key: 'owner', header: 'Owner', render: (agent) => <span className="text-gray-500">{(agent as any).owner}</span> },

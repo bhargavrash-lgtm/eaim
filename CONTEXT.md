@@ -1373,7 +1373,9 @@ or prior context suggests otherwise, it is wrong; trust this line.
   writeup in `BUILT.md`'s `eami-gateway` section and `BACKLOG.md`'s
   B-168 entry.
 
-## Active decision thread (2026-09-24, newest) — B-219 built: wired `EmptyState`'s existing, already-proven `action` prop into every empty state with a real create action already on the same page — `MATURITY_AUDIT.md`'s Part B priority-1 item, closed same-session it was written. Zero new components/state: `PoliciesPage.tsx`/`ToolsPage.tsx`/`WorkflowsPage.tsx`/`SettingsPage.tsx` (API Keys, Model Pricing tabs) each threaded their own already-existing create handler into the already-existing prop, the exact mechanism `AlertsPage.tsx`'s Alert Rules tab already proved works. `AgentsPage.tsx`'s bare `<p>No agents registered yet.</p>` (no `EmptyState` import, no icon, no button) replaced with a real `EmptyState` + action, matching its peers. One additional real match found during implementation, not in the brief's own named list: `SettingsPage.tsx`'s Users tab used `DataTable`'s plain `emptyMessage` string, not `EmptyState` at all — converted and wired the same way. Confirmed, not assumed, correctly left description-only: `AuditPage.tsx`/`DiscoverPage.tsx`/`FinOpsPage.tsx`/`ApprovalsPage.tsx`/`AssetsPage.tsx` (grepped each, zero create-action handlers — none of their content is user-created) and `SettingsPage.tsx`'s License tab (its real next step, the upload form, is already inline in the same tab, not behind a separate panel to wire in). Live-verified with a real Playwright browser against a fresh, genuinely empty throwaway org (Dev Org already has real data everywhere): 5 of 7 fixes fully click-through verified (empty state renders → button click → exact real create panel opens); 2 of 7 (Model Pricing, Users) are structurally unreachable in an empty state on this shared dev stack (model pricing is global seed data, never actually zero; a Users-tab empty state is logically impossible for a real logged-in session to ever see) — verified instead by handler-equivalence against each page's own already-working header button, disclosed as the weaker form of verification rather than silently claimed as full live click-through. No-regression check confirmed all 7 touched pages' real populated views still render correctly and all 5 untouched pages still load cleanly. `tsc`/`vite build` clean, zero console/page errors, all fixtures removed. Full detail in `BUILT.md`'s `eami-ui` section and `BACKLOG.md`'s new B-219 entry.
+## Active decision thread (2026-09-24, newest) — B-220 built: real multi-column sort on `DataTable.tsx` — `MATURITY_AUDIT.md`'s Part A priority-3 item, one shared-component fix cascading across all 19 real consumer call sites in 15 files. Part A investigation confirmed before building: sort is 100% client-side for every consumer, zero server-side follow-up needed. A real correction to the audit's own framing, found only by grepping every consumer directly: exactly 1 of 11 audited pages (`AssetsPage.tsx`, B-217) had any column marked `sortable: true` at all — single-column sort was reachable on 1 page, not broadly as the audit's cross-page summary line implied; flagged and corrected before building. 19 real `<DataTable` call sites exist across 15 files, not just the 11 audited pages — none pass an unexpected prop. `Column<T>` has no per-column comparator field anywhere — nothing column-specific to preserve beyond the existing generic comparator. Satisfying the brief's own 3-page live-verification requirement needed flipping `sortable: true` on a couple more pages' existing columns — disclosed as a pure flag flip on an already-built prop, not scope creep. Shipped: `sortColumns: {key, dir}[]` replaced the single key/dir pair; plain click reproduces the old single-column toggle exactly (traced every branch); shift-click (native `MouseEvent.shiftKey`) is additive; comparator cascades in priority order; header gained a priority-number badge. **Mandatory code review found 2 real issues, both fixed:** the pre-existing `highlightRowId` deep-link effect never depended on sort state — a pre-existing gap newly reachable once `AgentsPage.tsx` combined sortable columns with `highlightRowId` — fixed by adding `sortColumns` to its dependency array; `AgentsPage.tsx` originally marked `risk_tier` sortable, but its real values are a severity ordering the generic string comparator would sort alphabetically ("high, low, medium") — swapped for `model` (real free text, correct AND a better test case since every real dev-org agent happens to share `risk_tier: low`). **Mandatory security review: zero real findings** — sort key is always a hardcoded string literal from each page's own `Column<T>[]`, never user-controlled. Live-verified with a real Playwright browser across 3 real pages with different real data shapes (`AssetsPage.tsx`: Type then Name, 3 groups; `AgentsPage.tsx`: Model then Name, priority badge confirmed; `ToolsPage.tsx`: Type then Name) — all genuine multi-level groupings verified programmatically, not just visually. AC1 regression check live: ascending → same-column toggle → exactly reversed; different-column plain click → correctly collapses to single-column. Broader sweep confirmed all 12 other real `DataTable` surfaces still load cleanly. `tsc`/`vite build` clean, zero console/page errors anywhere. Full detail in `BUILT.md`'s `eami-ui` section and `BACKLOG.md`'s new B-220 entry; `MATURITY_AUDIT.md` itself updated with a status note marking priority item 3 closed.
+
+## Active decision thread (2026-09-24, older) — B-219 built: wired `EmptyState`'s existing, already-proven `action` prop into every empty state with a real create action already on the same page — `MATURITY_AUDIT.md`'s Part B priority-1 item, closed same-session it was written. Zero new components/state: `PoliciesPage.tsx`/`ToolsPage.tsx`/`WorkflowsPage.tsx`/`SettingsPage.tsx` (API Keys, Model Pricing tabs) each threaded their own already-existing create handler into the already-existing prop, the exact mechanism `AlertsPage.tsx`'s Alert Rules tab already proved works. `AgentsPage.tsx`'s bare `<p>No agents registered yet.</p>` (no `EmptyState` import, no icon, no button) replaced with a real `EmptyState` + action, matching its peers. One additional real match found during implementation, not in the brief's own named list: `SettingsPage.tsx`'s Users tab used `DataTable`'s plain `emptyMessage` string, not `EmptyState` at all — converted and wired the same way. Confirmed, not assumed, correctly left description-only: `AuditPage.tsx`/`DiscoverPage.tsx`/`FinOpsPage.tsx`/`ApprovalsPage.tsx`/`AssetsPage.tsx` (grepped each, zero create-action handlers — none of their content is user-created) and `SettingsPage.tsx`'s License tab (its real next step, the upload form, is already inline in the same tab, not behind a separate panel to wire in). Live-verified with a real Playwright browser against a fresh, genuinely empty throwaway org (Dev Org already has real data everywhere): 5 of 7 fixes fully click-through verified (empty state renders → button click → exact real create panel opens); 2 of 7 (Model Pricing, Users) are structurally unreachable in an empty state on this shared dev stack (model pricing is global seed data, never actually zero; a Users-tab empty state is logically impossible for a real logged-in session to ever see) — verified instead by handler-equivalence against each page's own already-working header button, disclosed as the weaker form of verification rather than silently claimed as full live click-through. No-regression check confirmed all 7 touched pages' real populated views still render correctly and all 5 untouched pages still load cleanly. `tsc`/`vite build` clean, zero console/page errors, all fixtures removed. Full detail in `BUILT.md`'s `eami-ui` section and `BACKLOG.md`'s new B-219 entry.
 
 ## Active decision thread (2026-09-24, older) — Horizon 0 usability/maturity audit investigated, no code: `MATURITY_AUDIT.md` written and committed. Kickoff explicitly invoked the new roadmap-discipline rule — confirmed honestly that this doesn't map onto any specific named Horizon/numbered item in `rheoARC_Roadmap_Enterprise_AI_Platform.md` (Horizon 0's own text defines its bar as correctness/security proof, not feature maturity), flagged rather than forced, proceeded as clearly Horizon-0-adjacent (testing the roadmap's own closing claim in the feature-maturity sense). Full Parts A–D for all 11 Horizon 0 pages (Agents, Policies, Tools, Workflows, Approvals, Audit, FinOps, Alerts, Assets/CMDB, Discover, Settings), via two parallel investigation agents plus direct investigation of Assets/CMDB and Parts C/D. Key findings: bulk actions and export are 0/11 pages, universal gaps; multi-column sort is 0/11, a shared `DataTable.tsx` ceiling not a per-page gap; the global top-bar search/notifications in `AppTopBar.tsx` are decorative chrome on every page, self-disclosed in the code's own `title` attributes as "not built yet" — in tension with `DESIGN_SYSTEM.md` §7.4's honest-data rule; real search/multi-field-filtering exists on exactly 2/11 pages (Audit, Discover); `EmptyState.tsx` already supports a real `action` prop, used with an actual embedded action in exactly 1 of ~15+ call sites (Alerts' Rules tab) before this audit; zero real first-run guidance beyond the one-time setup wizard (`DashboardPage.tsx` has no zero-state detection, a new admin lands on a wall of empty widgets); zero systematic in-product help (one genuine example found, `AuditEntryDetailPanel.tsx`'s self-consistency-check explanation, never replicated). Recommended priority order given (EmptyState action-wiring first, cheapest/highest-leverage) — item 1 built same-session as B-219. Explicitly written to a durable, committed file rather than left only in chat context, per direct instruction, after the same class of relay risk surfaced a few messages earlier in the roadmap handoff. Full detail in `MATURITY_AUDIT.md` itself (repo root).
 
@@ -2050,7 +2052,56 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
-2026-09-24 (absolute newest) by Claude Code — B-219 DONE: wired
+2026-09-24 (absolute newest) by Claude Code — B-220 DONE: real
+multi-column sort on DataTable.tsx -- MATURITY_AUDIT.md's Part A
+priority-3 item, one shared-component fix cascading across all 19 real
+consumer call sites in 15 files at once.
+
+Part A investigation confirmed: sort is 100% client-side for every
+consumer, zero server-side follow-up needed. A real correction to the
+audit's own framing, found only by grepping every consumer directly:
+exactly 1 of 11 audited pages (AssetsPage.tsx, B-217) had any column
+marked sortable: true at all before this brief -- single-column sort was
+reachable on 1 page, not broadly as the audit's cross-page summary line
+implied. 19 real <DataTable call sites exist across 15 files, not just
+the 11 audited pages. Column<T> has no per-column comparator field
+anywhere. Satisfying the brief's own 3-page live-verification requirement
+needed flipping sortable: true on a couple more pages' existing columns
+-- disclosed as a pure flag flip, not scope creep.
+
+Shipped: sortColumns: {key, dir}[] replaced the single key/dir pair;
+plain click reproduces the old single-column toggle exactly; shift-click
+(native MouseEvent.shiftKey) is additive, toggling an active column or
+appending it as the next tiebreaker; comparator cascades in priority
+order; header gained a priority-number badge (2nd+ column only).
+
+Mandatory code review found 2 real issues, both fixed: the pre-existing
+highlightRowId deep-link effect never depended on sort state -- a
+pre-existing gap newly reachable once AgentsPage.tsx combined sortable
+columns with highlightRowId -- fixed by adding sortColumns to its
+dependency array; AgentsPage.tsx originally marked risk_tier sortable,
+but its real values are a severity ordering the generic string comparator
+would sort alphabetically ("high, low, medium") -- swapped for model
+(real free text, correct AND a better test case since every real
+dev-org agent happens to share risk_tier: low). Mandatory security
+review: zero real findings -- sort key is always a hardcoded string
+literal from each page's own Column<T>[], never user-controlled.
+
+Live-verified with a real Playwright browser across 3 real pages with
+different real data shapes (AssetsPage.tsx: Type then Name, 3 groups;
+AgentsPage.tsx: Model then Name, priority badge confirmed; ToolsPage.tsx:
+Type then Name) -- all genuine multi-level groupings verified
+programmatically. AC1 regression check live: ascending -> same-column
+toggle -> exactly reversed; different-column plain click -> correctly
+collapses to single-column. Broader sweep confirmed all 12 other real
+DataTable surfaces still load cleanly. tsc/vite build clean, zero
+console/page errors anywhere.
+
+Full detail in BUILT.md's eami-ui section and BACKLOG.md's new B-220
+entry; MATURITY_AUDIT.md itself updated with a status note marking
+priority item 3 closed. Previous entry, preserved below:
+
+2026-09-24 by Claude Code — B-219 DONE: wired
 EmptyState's existing, already-proven action prop into every empty state
 with a real create action already on the same page -- MATURITY_AUDIT.md's
 Part B priority-1 item, closed same-session it was written. Zero new
