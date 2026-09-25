@@ -1,5 +1,15 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-196 CMDB Completion, Increment 2 Part A — 2026-09-25
+
+Investigation and implementation planning only; no application code, migration, API contract, or UI changed. The full reviewable report is `B-196_CMDB_INCREMENT_2_PART_A.md`.
+
+Verified the current CMDB surface end to end: B-217 client-merges endpoints, gateway agents, and gateway tools under three hardcoded display classifications; endpoint reports normalize only AI apps, local model files, and MCP servers while retaining seven other wired scanner domains only in raw JSON; gateway nodes and the separate HTTP-observation inventory remain dormant. Read-only checks against the running local Postgres found 5 endpoints, 12 gateway agents, 4 gateway tools, 3 normalized AI apps, and zero current model-file/MCP-server/gateway-node/HTTP-observation rows.
+
+Recommended a two-brief Increment 2: first, org-scoped reusable CI categories/types with one resolved classification on each authoritative asset row and a server-paginated Assets API/UI; second, an endpoint-centered relationship route and full-width graph using only normalized child FKs plus the explicit endpoint→gateway-agent link. Classification definitions stay org-wide, workspace assignment stays on the existing asset rows, and B-218 is not expanded. True arbitrary multi-hop relationships, reconciliation, lifecycle, AI-workload records, and raw-report normalization remain out of scope.
+
+Found and recorded two concrete stale assumptions: B-196 still claimed no investigation despite B-217 and this Part A, and B-200 describes endpoint→agent as one-to-one even though `endpoints.gateway_agent_id` has no uniqueness constraint while the agent query uses `LIMIT 1`. No new B-ID was minted and neither issue was changed in code. Validation was documentation/source inspection plus read-only live row counts; runtime tests do not apply to an investigation-only task.
+
 ## B-221 — Real CSV export for Audit and FinOps — 2026-09-25
 
 Built real CSV export for the two `MATURITY_AUDIT.md` priority-4 surfaces. `AuditPage.tsx` exports the current applied agent/tool/decision/from/to filters from the top bar through authenticated `apiFetchBlob`; datetime-local fields are converted to RFC3339. `FinOpsPage.tsx` exports the three current server-filtered aggregate tables (agent, team, connector) from the top bar, blocks export while the range is loading or errored, and makes its established `[from,to)` UTC boundary explicit. `src/lib/csv.ts` safely quotes cells and neutralizes spreadsheet formulas.

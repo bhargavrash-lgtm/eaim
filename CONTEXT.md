@@ -4,6 +4,14 @@
 # anything else.
 ACTIVE AGENT: none — none — started none
 
+## Active decision thread (2026-09-25, newest) — B-196 Increment 2 Part A complete; founder scope approval required before implementation
+
+Horizon 1 “CMDB completion,” investigation and implementation planning only. Full report: `B-196_CMDB_INCREMENT_2_PART_A.md`. No application code, migration, API contract, or UI changed; no new B-ID minted. Verified the current top-level asset authority (endpoints, gateway agents, gateway tools), endpoint normalized-vs-raw discovery data, real writers/dormant tables, hardcoded Assets classification, direct-vs-observed relationships, current workspace limits, RBAC/API boundary, Design System mode/pattern requirements, tenancy risks, migration strategy, tests, and live-acceptance needs. Read-only live DB counts: endpoints 5, agents 12, tools 4, normalized AI apps 3; normalized models/MCP servers, nodes, and HTTP-observed endpoints 0.
+
+Recommended one product increment split into two sequential build briefs: (1) org-scoped reusable CI categories/types, nullable per-authoritative-row override with default resolution, strict cross-org/type-kind enforcement, a unified server-paginated Assets endpoint, and Admin-mode classification UI; (2) an endpoint-centered direct relationship endpoint/full-width graph using normalized AI-app/model/MCP child FKs plus the explicit gateway-agent link, with B-200's SVG/pan/zoom mechanics extracted behind a generic graph input and its existing agent adapter preserved. Classification stays org-wide; Workspace mode gets no new surface; B-218 remains out of scope. Arbitrary persisted/multi-hop relationships, reconciliation, lifecycle, AI workloads, semantic raw-data edges, and new sidebar/audit systems remain later B-196 increments.
+
+Two stale assumptions recorded: B-196 still said investigation never started despite B-217; B-200 calls the endpoint-agent link one-to-one, but migration 000013 has no uniqueness constraint and the agent connection query's `LIMIT 1` can hide additional endpoints. No fix or new B-ID was made at this checkpoint. Architect-EAMI must update `api/openapi.yaml` before generated-client/frontend work. Implementation is blocked only on the brief's explicit founder approval checkpoint.
+
 ## Active decision thread (2026-09-25, newest) — B-221 CSV export complete; authenticated live acceptance pending
 
 B-221 completed the `MATURITY_AUDIT.md` priority-4 CSV capability after its required Part A investigation. Audit now exports the exact server-side applied agent/tool/decision/from/to filters from `AppTopBar`, with browser datetime-local bounds converted to RFC3339. FinOps exports the current server-filtered per-agent, per-team, and per-connector aggregates from `AppTopBar`; its pre-existing UTC `[from,to)` boundary is explicit in filename, toast, and page copy. Audit list/export share strict filter parsing, so malformed bounds fail closed rather than widening a request.
@@ -2079,6 +2087,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-25 by Codex — B-196 CMDB Increment 2 Part A investigation and plan complete; report committed with current-state evidence, schema/API/UI proposal, security/migration/tests, and a two-brief recommendation. No product implementation or new B-ID; awaiting founder scope approval. Active marker cleared.
+
+Prior entry:
 2026-09-25 by Codex — B-221 CSV export implementation complete, reviewer/security passes clean, Docker API live rebuild verified. Automated API/UI checks pass; authenticated browser and real-Postgres acceptance remain pending an explicitly supplied local test session/credential. B-222 queued for the Architect-owned API contract update; active marker cleared.
 
 Prior entry:
