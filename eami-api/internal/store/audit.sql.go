@@ -105,13 +105,21 @@ func (q *Queries) CountAudit(ctx context.Context, p ListAuditParams) (int64, err
 	return count, row.Scan(&count)
 }
 
-// ExportAuditMaxRows is the hard cap on audit export rows to prevent OOM.
-const ExportAuditMaxRows = 100_000
+// ExportAuditMaxRows is the hard cap on audit export rows. The handler rejects
+// an over-limit export before writing a response, rather than silently handing
+// a compliance user a partial CSV.
+const ExportAuditMaxRows = 10_000
+
+// ExportAuditMaxFieldBytes limits one gateway-controlled text cell before an
+// export scans it into API process memory. The aggregate CSV ceiling is
+// enforced by the API; this lower per-cell limit keeps a single malformed
+// audit value from defeating that aggregate bound during pgx scanning.
+const ExportAuditMaxFieldBytes = 1 << 20
 
 const exportAuditQuery = `-- name: ExportAudit :many
 SELECT
-    id, org_id, agent_id, agent_name, tool_name, action, decision,
-    latency_ms, timestamp, prev_hash, hash
+    id, agent_id, agent_name, tool_name, action, decision, latency_ms,
+    token_in, token_out, timestamp, hash
 FROM audit_log
 WHERE org_id = $1
   AND ($2::text IS NULL OR agent_name ILIKE '%' || $2 || '%')
@@ -122,22 +130,64 @@ WHERE org_id = $1
 ORDER BY timestamp DESC
 LIMIT $7`
 
+const exportAuditStatsQuery = `-- name: ExportAuditStats :one
+SELECT
+  COUNT(*)::int,
+  COALESCE(MAX(GREATEST(
+    COALESCE(octet_length(agent_name), 0),
+    COALESCE(octet_length(tool_name), 0),
+    COALESCE(octet_length(action), 0),
+    COALESCE(octet_length(decision), 0),
+    COALESCE(octet_length(hash), 0)
+  )), 0)::int,
+  COALESCE(SUM(
+    2 * (
+      COALESCE(octet_length(agent_name), 0) +
+      COALESCE(octet_length(tool_name), 0) +
+      COALESCE(octet_length(action), 0) +
+      COALESCE(octet_length(decision), 0) +
+      COALESCE(octet_length(hash), 0)
+    ) + 256
+  ), 0)::bigint
+FROM (
+  SELECT agent_name, tool_name, action, decision, hash
+  FROM audit_log
+  WHERE org_id = $1
+    AND ($2::text IS NULL OR agent_name ILIKE '%' || $2 || '%')
+    AND ($3::text IS NULL OR tool_name  ILIKE '%' || $3 || '%')
+    AND ($4::text IS NULL OR decision = $4)
+    AND ($5::timestamptz IS NULL OR timestamp >= $5)
+    AND ($6::timestamptz IS NULL OR timestamp <= $6)
+  ORDER BY timestamp DESC
+  LIMIT $7
+) AS export_rows`
+
 // AuditExportRow is a minimal audit row for CSV export (no parameters JSONB).
 type AuditExportRow struct {
 	ID        uuid.UUID
-	OrgID     uuid.UUID
 	AgentID   pgtype.UUID
 	AgentName string
 	ToolName  string
 	Action    string
 	Decision  string
 	LatencyMS pgtype.Int4
+	TokenIn   pgtype.Int4
+	TokenOut  pgtype.Int4
 	Timestamp time.Time
-	PrevHash  string
 	Hash      string
 }
 
-func (q *Queries) ExportAudit(ctx context.Context, p ListAuditParams) ([]AuditExportRow, bool, error) {
+// AuditExportStats is a preflight result. EstimatedBytes deliberately assumes
+// every text byte must be quoted and escaped, then leaves 256 bytes for each
+// CSV row's fixed fields. It is therefore a conservative upper bound for the
+// CSV writer before gateway-controlled text is scanned into API memory.
+type AuditExportStats struct {
+	Rows           int
+	MaxFieldBytes  int
+	EstimatedBytes int64
+}
+
+func (q *Queries) AuditExportStats(ctx context.Context, p ListAuditParams) (AuditExportStats, error) {
 	toTsArg := func(t *time.Time) pgtype.Timestamptz {
 		if t == nil {
 			return pgtype.Timestamptz{}
@@ -145,8 +195,32 @@ func (q *Queries) ExportAudit(ctx context.Context, p ListAuditParams) ([]AuditEx
 		return pgtype.Timestamptz{Time: *t, Valid: true}
 	}
 
-	// Fetch one extra row to detect truncation.
+	// Fetch one extra row so callers can reject, rather than truncate, an
+	// over-limit export before transferring unbounded text values.
 	limit := int32(ExportAuditMaxRows + 1)
+	var stats AuditExportStats
+	err := q.db.QueryRow(ctx, exportAuditStatsQuery,
+		toPgtypeUUID(p.OrgID),
+		toPgtypeText(p.AgentName),
+		toPgtypeText(p.ToolName),
+		toPgtypeText(p.Decision),
+		toTsArg(p.From),
+		toTsArg(p.To),
+		limit,
+	).Scan(&stats.Rows, &stats.MaxFieldBytes, &stats.EstimatedBytes)
+	return stats, err
+}
+
+// ExportAudit streams rows to visit. Callers must preflight with
+// AuditExportStats in the same read-only repeatable-read transaction, so this
+// function never accumulates a complete CSV-sized row slice in API memory.
+func (q *Queries) ExportAudit(ctx context.Context, p ListAuditParams, visit func(AuditExportRow) error) error {
+	toTsArg := func(t *time.Time) pgtype.Timestamptz {
+		if t == nil {
+			return pgtype.Timestamptz{}
+		}
+		return pgtype.Timestamptz{Time: *t, Valid: true}
+	}
 
 	rows, err := q.db.Query(ctx, exportAuditQuery,
 		toPgtypeUUID(p.OrgID),
@@ -155,32 +229,24 @@ func (q *Queries) ExportAudit(ctx context.Context, p ListAuditParams) ([]AuditEx
 		toPgtypeText(p.Decision),
 		toTsArg(p.From),
 		toTsArg(p.To),
-		limit,
+		int32(ExportAuditMaxRows),
 	)
 	if err != nil {
-		return nil, false, err
+		return err
 	}
 	defer rows.Close()
 
-	var out []AuditExportRow
 	for rows.Next() {
 		var e AuditExportRow
 		if err := rows.Scan(
-			&e.ID, &e.OrgID, &e.AgentID, &e.AgentName, &e.ToolName, &e.Action,
-			&e.Decision, &e.LatencyMS, &e.Timestamp, &e.PrevHash, &e.Hash,
+			&e.ID, &e.AgentID, &e.AgentName, &e.ToolName, &e.Action, &e.Decision,
+			&e.LatencyMS, &e.TokenIn, &e.TokenOut, &e.Timestamp, &e.Hash,
 		); err != nil {
-			return nil, false, err
+			return err
 		}
-		out = append(out, e)
+		if err := visit(e); err != nil {
+			return err
+		}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, false, err
-	}
-
-	truncated := false
-	if len(out) > ExportAuditMaxRows {
-		out = out[:ExportAuditMaxRows]
-		truncated = true
-	}
-	return out, truncated, nil
+	return rows.Err()
 }

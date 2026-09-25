@@ -12,6 +12,8 @@
 
 **Method:** direct file reads of every page's real source (`eami-ui/src/pages/...`), plus targeted grep across the whole `eami-ui/src/pages` tree for export/download/CSV/tooltip/help patterns. All findings below are cited to file:line. No assumptions from page names.
 
+**Status update (2026-09-25, B-221):** priority item 4 is now built for Audit and FinOps. Audit exports the exact applied five filters through a bounded, org-scoped backend CSV; FinOps exports its three real, server-date-filtered tables. The original Audit date-filter defect is fixed by RFC3339 serialization, and the former 100,000-row buffered/truncating export is replaced by an all-or-error 10,000-row / 20 MiB / 15-second, formula-safe streaming policy with per-org concurrency protection. FinOps's existing `[from,to)` UTC boundary is explicit in the export UI. Automated API/UI validation and Docker rebuild pass; authenticated browser acceptance remains pending a supplied local test session. Historical findings below are retained.
+
 ---
 
 ## Part A — Real feature-completeness audit, per page

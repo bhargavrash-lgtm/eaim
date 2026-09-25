@@ -298,6 +298,57 @@ func TestFinOpsSummary_Real_OrgIsolation(t *testing.T) {
 	}
 }
 
+// TestFinOpsSummary_Real_TeamBreakdownDoesNotExposeForeignAgentOwner proves
+// the team join remains tenant-bound even though token_usage.agent_id has no
+// schema FK tying it to token_usage.org_id.
+func TestFinOpsSummary_Real_TeamBreakdownDoesNotExposeForeignAgentOwner(t *testing.T) {
+	env := newFinOpsPgTestEnv(t)
+	other := newFinOpsPgTestEnv(t)
+	now := time.Now().UTC()
+
+	foreignAgentID := other.seedAgent(t, "foreign-agent", "foreign-owner-must-not-leak")
+	env.insertUsage(t, foreignAgentID, "own-usage-agent", "test-model", 100, 10, 1.00, now.Add(-time.Minute))
+	t.Cleanup(func() {
+		_, _ = env.pool.Exec(context.Background(), `DELETE FROM token_usage WHERE org_id = $1`, env.orgID)
+	})
+
+	resp, summary := env.getSummary(t, now.Add(-time.Hour).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	for _, row := range summary.ByTeam {
+		if row.Team == "foreign-owner-must-not-leak" {
+			t.Fatalf("cross-org agent owner leaked into team breakdown: %+v", summary.ByTeam)
+		}
+	}
+	if len(summary.ByTeam) != 1 || summary.ByTeam[0].Team != "unknown" {
+		t.Errorf("ByTeam = %+v, want one unknown bucket", summary.ByTeam)
+	}
+}
+
+// TestFinOpsSummary_Real_DateRangeHasExclusiveEnd locks down the existing
+// API contract used by the CSV filename/UI: summaries and exports cover
+// [from, to) in UTC, so a record exactly at `to` belongs only to the next
+// reporting window.
+func TestFinOpsSummary_Real_DateRangeHasExclusiveEnd(t *testing.T) {
+	env := newFinOpsPgTestEnv(t)
+	boundary := time.Now().UTC().Truncate(time.Second)
+	agentID := env.seedAgent(t, "boundary-agent", "boundary-team")
+	env.insertUsage(t, agentID, "before-boundary", "test-model", 100, 10, 1.00, boundary.Add(-time.Second))
+	env.insertUsage(t, agentID, "at-boundary", "test-model", 200, 20, 2.00, boundary)
+	t.Cleanup(func() {
+		_, _ = env.pool.Exec(context.Background(), `DELETE FROM token_usage WHERE org_id = $1`, env.orgID)
+	})
+
+	resp, summary := env.getSummary(t, boundary.Add(-time.Minute).Format(time.RFC3339), boundary.Format(time.RFC3339))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if summary.TotalCostUSD != 1.00 || summary.TotalTokensIn != 100 || summary.TotalTokensOut != 10 {
+		t.Errorf("[from,to) summary = %+v, want only the before-boundary record", summary)
+	}
+}
+
 // TestFinOpsSummary_Real_NoDataInRange proves an empty result set (a real,
 // valid date range with zero matching rows) still returns a clean 200 with
 // zeroed totals and empty breakdown slices, not an error -- the COALESCE(...,

@@ -1,5 +1,13 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-221 — Real CSV export for Audit and FinOps — 2026-09-25
+
+Built real CSV export for the two `MATURITY_AUDIT.md` priority-4 surfaces. `AuditPage.tsx` exports the current applied agent/tool/decision/from/to filters from the top bar through authenticated `apiFetchBlob`; datetime-local fields are converted to RFC3339. `FinOpsPage.tsx` exports the three current server-filtered aggregate tables (agent, team, connector) from the top bar, blocks export while the range is loading or errored, and makes its established `[from,to)` UTC boundary explicit. `src/lib/csv.ts` safely quotes cells and neutralizes spreadsheet formulas.
+
+The Audit handler/store path now shares strict filter parsing with listing, writes `agent_name`, and uses a read-only repeatable-read transaction with preflight count/text/serialized-byte limits before streaming at most 10,000 rows into a 20 MiB bounded CSV buffer. Gateway-controlled text is capped at 1 MiB per field; a 15-second query deadline maps to a narrow-filter response. Per-org rate and in-flight guards bound repeated and concurrent export egress. FinOps's team join now requires matching `gateway_agents.org_id` and `token_usage.org_id`.
+
+Added formula, quota, deadline, cross-org/filter, malformed-date, FinOps foreign-agent-owner, and exclusive-end boundary coverage in `audit_export_test.go`, `audit_export_pg_test.go`, and `finops_pg_test.go`. `go test ./internal/api ./internal/store`, `npx tsc --noEmit`, and `npx vite build` pass; Docker rebuilt and started the API, and the export route returned 401 without a JWT. The real-Postgres tests skip without a supplied test credential, and the local browser is at sign-in, so authenticated browser CSV acceptance remains to be performed without reading secrets. Mandatory code and security reviews passed after the memory, concurrency, stale-data, and org-isolation fixes. `B-222` records the Architect-owned OpenAPI contract alignment follow-up.
+
 ## Repository coordination — 2026-09-25
 
 Founder-directed documentation only: added `MULTI_AGENT_PROTOCOL.md` with the supplied coordination rules, one mandatory-reading reference in `CLAUDE.md` Conventions, and the active-agent marker plus completion record in `CONTEXT.md`. No runtime interfaces, application code, or backlog statuses changed; no B-ID allocated. Validation: reviewed the documentation diff and whitespace check; runtime tests do not apply. Limitation: protocol §1's CLAUDE-first sequence conflicts with the older CONTEXT-first wording; preserved both texts and flagged the conflict in CONTEXT.md rather than silently changing the supplied policy. Existing untracked files left untouched.

@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { api, apiFetch } from '@/api/client'
+import { api, apiFetch, apiFetchBlob } from '@/api/client'
 import { STALE_TIMES } from '@/lib/query'
 import type { components } from '@/api/schema'
 import type { ToolDataHandling } from './useTools'
@@ -41,6 +41,18 @@ export function useAudit(params?: AuditParams) {
     },
     staleTime: STALE_TIMES.DEFAULT,
   })
+}
+
+// exportAuditCSV intentionally takes the applied AuditParams object used by
+// the table, so a download cannot silently discard a user's active filters.
+export function exportAuditCSV(params: AuditParams): Promise<Blob> {
+  const query = new URLSearchParams()
+  const filters: Pick<AuditParams, 'agent_name' | 'tool_name' | 'decision' | 'from' | 'to'> = params
+  for (const [key, value] of Object.entries(filters)) {
+    if (value != null && value !== '') query.set(key, String(value))
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : ''
+  return apiFetchBlob(`/v1/audit/export${suffix}`)
 }
 
 // AuditVerifyResult mirrors eami-api/internal/store.AuditVerifyResult's JSON

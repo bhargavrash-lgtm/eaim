@@ -4,6 +4,7 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
+import { Download } from 'lucide-react'
 import { AppTopBar } from '@/components/layout/AppTopBar'
 import { PageHeader } from '@/components/common/PageHeader'
 import { MetricCard } from '@/components/common/MetricCard'
@@ -11,10 +12,12 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Card } from '@/components/common/Card'
 import { DataTable } from '@/components/common/DataTable'
+import { Button, useToast } from '@/components/common'
 import type { Column } from '@/components/common/DataTable'
 import { useFinOpsSummary, useFinOpsTimeSeries } from '@/hooks/useFinOps'
 import { CHART_PALETTE } from '@/lib/chartPalette'
 import type { components } from '@/api/schema'
+import { buildCSV, downloadCSV } from '@/lib/csv'
 
 type AgentSpend = components['schemas']['AgentSpend']
 type TeamSpend = components['schemas']['TeamSpend']
@@ -74,6 +77,48 @@ interface DateRangePickerProps {
   onChange: (from: string, to: string) => void
 }
 
+type ExportKind = 'agent' | 'team' | 'connector'
+
+function FinOpsExportMenu({
+  onExport,
+  disabled,
+  isLoading,
+}: {
+  onExport: (kind: ExportKind) => void
+  disabled: boolean
+  isLoading: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const choices: Array<{ kind: ExportKind; label: string }> = [
+    { kind: 'agent', label: 'Spend by agent' },
+    { kind: 'team', label: 'Spend by team' },
+    { kind: 'connector', label: 'Spend by connector' },
+  ]
+  return (
+    <div className="relative">
+      <Button variant="outline" size="sm" onClick={() => setOpen((value) => !value)} disabled={disabled} isLoading={isLoading} aria-haspopup="menu" aria-expanded={open}>
+        <Download className="h-3.5 w-3.5" />
+        Export CSV
+      </Button>
+      {open && (
+        <div role="menu" className="absolute right-0 z-10 mt-2 w-48 rounded-md border border-gray-200 bg-white py-1 shadow-l1">
+          {choices.map(({ kind, label }) => (
+            <button
+              key={kind}
+              role="menuitem"
+              className="block w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+              disabled={disabled}
+              onClick={() => { onExport(kind); setOpen(false) }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function DateRangePicker({ from, to, onChange }: DateRangePickerProps) {
   function handleFrom(v: string) {
     const f = new Date(v)
@@ -113,10 +158,11 @@ export function FinOpsPage() {
   const now = new Date()
   const [from, setFrom] = useState(monthStart(now))
   const [to, setTo] = useState(isoDate(now))
+  const { showToast } = useToast()
 
   const prev = useMemo(() => prevMonthRange(from, to), [from, to])
 
-  const { data: summary, isLoading: summaryLoading } = useFinOpsSummary(from, to)
+  const { data: summary, isLoading: summaryLoading, isError: summaryError } = useFinOpsSummary(from, to)
   const { data: prevSummary } = useFinOpsSummary(prev.from, prev.to)
   const { data: timeSeries, isLoading: tsLoading } = useFinOpsTimeSeries(from, to, 'day')
   const { data: prevTimeSeries } = useFinOpsTimeSeries(prev.from, prev.to, 'day')
@@ -250,20 +296,60 @@ export function FinOpsPage() {
   const unrecognizedModelCount =
     (summary as { unrecognized_model_request_count?: number } | undefined)?.unrecognized_model_request_count ?? 0
 
+  function handleExport(kind: ExportKind) {
+	    if (summaryLoading || summaryError || !summary) {
+	      showToast(summaryError ? 'FinOps data failed to load for the current range.' : 'Wait for the current date range to load before exporting.', { type: 'error' })
+      return
+    }
+    // The existing FinOps endpoint's date-only contract is [from, to) in
+    // UTC. Keep the export's filename explicit so the selected final date is
+    // never mistaken for an inclusive end-of-day boundary.
+    const filenameRange = `from-${from}-until-${to}-exclusive-utc`
+    const percent = (cost: number | null | undefined) => totalSpend && totalSpend > 0 && cost != null
+      ? (cost / totalSpend) * 100
+      : null
+    if (kind === 'agent') {
+      downloadCSV(`eami-finops-agents-${filenameRange}.csv`, buildCSV(
+        ['agent', 'input_tokens', 'output_tokens', 'requests', 'total_cost_usd', 'percent_of_total'],
+        agentSpend.map((row) => [row.agent_name, row.tokens_in, row.tokens_out, row.request_count, row.cost_usd, percent(row.cost_usd)]),
+      ))
+    } else if (kind === 'team') {
+      downloadCSV(`eami-finops-teams-${filenameRange}.csv`, buildCSV(
+        ['team', 'input_tokens', 'output_tokens', 'total_cost_usd', 'percent_of_total'],
+        teamSpend.map((row) => [row.team, row.tokens_in, row.tokens_out, row.cost_usd, percent(row.cost_usd)]),
+      ))
+    } else {
+      downloadCSV(`eami-finops-connectors-${filenameRange}.csv`, buildCSV(
+        ['connector', 'input_tokens', 'output_tokens', 'total_cost_usd', 'percent_of_total'],
+        toolSpend.map((row) => [row.tool, row.tokens_in, row.tokens_out, row.cost_usd, percent(row.cost_usd)]),
+      ))
+    }
+    showToast(`FinOps CSV downloaded for ${from} through before ${to} UTC`, { type: 'success' })
+  }
+
   return (
     <div>
       <AppTopBar
         breadcrumb={[{ label: 'FinOps' }]}
-        action={
+        action={<>
           <DateRangePicker
             from={from}
             to={to}
             onChange={(f, t) => { setFrom(f); setTo(t) }}
           />
-        }
+          <FinOpsExportMenu onExport={handleExport} disabled={summaryLoading || summaryError || !summary} isLoading={summaryLoading} />
+        </>}
       />
       <PageHeader subtitle="Token spend and ROI" />
       <div className="p-6 space-y-6">
+
+        {summaryError && (
+          <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+            FinOps data could not be loaded for the selected range. Export is unavailable until it loads successfully.
+          </div>
+        )}
+
+        <p className="text-xs text-gray-500">Reporting includes the start date and ends before the selected end date at 00:00 UTC.</p>
 
         {/* B-112: unrecognized-model warning -- total_cost_usd below is a
             silent undercount whenever this is nonzero. */}

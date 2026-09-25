@@ -3,6 +3,7 @@ package api
 import (
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -62,6 +63,13 @@ type Server struct {
 	// alone doesn't stop one IP hammering many different accounts.
 	loginIPLimiter      *rateLimiter
 	loginAccountLimiter *rateLimiter
+
+	// auditExportLimiter limits repeated starts; auditExportsInFlight admits
+	// only one active Audit export per organization. Together they bound both
+	// sustained and parallel CSV egress on the tenant boundary.
+	auditExportLimiter   *rateLimiter
+	auditExportMu        sync.Mutex
+	auditExportsInFlight map[string]struct{}
 }
 
 // NewServer creates a Server with the given dependencies. cfg may be nil
@@ -86,6 +94,8 @@ func NewServer(queries *store.Queries, authSvc *auth.Service, engine *alerting.E
 	s.provisioningLimiter = newRateLimiter(rl.Provisioning, time.Duration(rl.ProvisioningWindowSeconds)*time.Second)
 	s.loginIPLimiter = newRateLimiter(rl.LoginPerIP, time.Duration(rl.LoginPerIPWindowSeconds)*time.Second)
 	s.loginAccountLimiter = newRateLimiter(rl.LoginPerAccount, time.Duration(rl.LoginPerAccountWindowSeconds)*time.Second)
+	s.auditExportLimiter = newRateLimiter(4, time.Minute)
+	s.auditExportsInFlight = make(map[string]struct{})
 	var gwURL, gwKey string
 	if cfg != nil {
 		gwURL, gwKey = cfg.Gateway.URL, cfg.Gateway.EpisodeReadServiceKey
@@ -117,13 +127,15 @@ func NewServer(queries *store.Queries, authSvc *auth.Service, engine *alerting.E
 func NewHandler(s Store, authSvc *auth.Service) *Server {
 	rl := config.DefaultRateLimitConfig()
 	return &Server{
-		storeIface:          s,
-		authSvc:             authSvc,
-		cfg:                 &config.Config{RateLimit: rl},
-		setupLimiter:        newRateLimiter(rl.Setup, time.Duration(rl.SetupWindowSeconds)*time.Second),
-		provisioningLimiter: newRateLimiter(rl.Provisioning, time.Duration(rl.ProvisioningWindowSeconds)*time.Second),
-		loginIPLimiter:      newRateLimiter(rl.LoginPerIP, time.Duration(rl.LoginPerIPWindowSeconds)*time.Second),
-		loginAccountLimiter: newRateLimiter(rl.LoginPerAccount, time.Duration(rl.LoginPerAccountWindowSeconds)*time.Second),
+		storeIface:           s,
+		authSvc:              authSvc,
+		cfg:                  &config.Config{RateLimit: rl},
+		setupLimiter:         newRateLimiter(rl.Setup, time.Duration(rl.SetupWindowSeconds)*time.Second),
+		provisioningLimiter:  newRateLimiter(rl.Provisioning, time.Duration(rl.ProvisioningWindowSeconds)*time.Second),
+		loginIPLimiter:       newRateLimiter(rl.LoginPerIP, time.Duration(rl.LoginPerIPWindowSeconds)*time.Second),
+		loginAccountLimiter:  newRateLimiter(rl.LoginPerAccount, time.Duration(rl.LoginPerAccountWindowSeconds)*time.Second),
+		auditExportLimiter:   newRateLimiter(4, time.Minute),
+		auditExportsInFlight: make(map[string]struct{}),
 	}
 }
 

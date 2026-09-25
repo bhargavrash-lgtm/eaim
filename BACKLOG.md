@@ -2355,4 +2355,15 @@ Breadcrumb is `Workflows` (real `<Link>` to `/gateway/workflows`) → the workfl
 **Known limitations:** disclosed in-code, not a gap: shift-click only toggles/appends, no per-column removal short of a plain click elsewhere.
 **Dependencies:** `MATURITY_AUDIT.md` (item 3 of), B-217 (`AssetsPage.tsx`), B-092 (`highlightRowId`). **Status:** DONE, 2026-09-24.
 
-## Next B-ID: B-221
+### B-221 — Real CSV export for Audit and FinOps — **DONE, 2026-09-25, Codex**
+
+**Scope/result:** `MATURITY_AUDIT.md` priority 4 now has an Audit `AppTopBar` CSV action bound to the real applied five-filter query, plus FinOps top-bar table-choice CSV exports for server-filtered per-agent, per-team, and per-connector summaries. Audit datetime-local bounds now become RFC3339; malformed bounds fail closed for list and export. FinOps preserves its established `[from,to)` UTC contract explicitly in export filename, toast, and UI text; exports use raw aggregate data, not display abbreviations.
+**Audit scale/security controls:** all-or-error 10,000-row / 20 MiB CSV policy, 15-second query deadline, 1 MiB maximum text cell, formula-safe fields, and a read-only repeatable-read transaction. A lightweight preflight checks count, cell size, and a conservative serialized-byte upper bound before query rows are scanned; rows then stream into the bounded CSV buffer, so no complete row slice is retained. One active export per org plus four starts per minute prevents concurrent/repeated costly egress. The existing JWT/RBAC and SQL org predicate remain the source of authorization; `FinOps`'s team join now also requires matching agent/token org IDs.
+**Validation:** `go test ./internal/api ./internal/store`, `npx tsc --noEmit`, and `npx vite build` pass. Docker rebuilt the API successfully; the new `/v1/audit/export` route returns 401 unauthenticated, confirming it remains protected. Real-Postgres adversarial Audit and FinOps tests are included but skipped in this environment because no test DB credential was supplied; no secret was read. Browser live CSV acceptance is likewise pending an authenticated local session. Mandatory code and security reviews passed after fixes.
+**Roadmap mapping:** Horizon-0-adjacent maturity work on existing Audit/FinOps surfaces; no separately numbered roadmap item. Explicitly authorized by the supplied brief.
+
+### B-222 — Align the documented Audit export contract — **QUEUED, 2026-09-25, Architect-EAMI**
+
+**Objective:** update `api/openapi.yaml` to describe the real optional Audit export filters (`agent_name`, `tool_name`, `decision`, RFC3339 `from`/`to`) and its bounded-error responses. The generated client currently uses the documented route only through a narrow `apiFetchBlob` escape hatch because the contract is incomplete. OpenAPI ownership belongs to Architect-EAMI per `BOUNDARIES.md`.
+
+## Next B-ID: B-223

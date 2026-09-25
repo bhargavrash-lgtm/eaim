@@ -81,3 +81,27 @@ export async function apiFetch<T = unknown>(
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
 }
+
+// apiFetchBlob is the authenticated equivalent of apiFetch for non-JSON
+// responses such as CSV exports. Keeping the token injection here prevents a
+// download link from bypassing the same session boundary as every other API
+// request.
+export async function apiFetchBlob(path: string): Promise<Blob> {
+  const { accessToken } = useAuthStore.getState()
+  const headers: Record<string, string> = {}
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`
+  const res = await fetch(path, { headers })
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`
+    try {
+      const body: unknown = await res.json()
+      if (body && typeof body === 'object' && 'message' in body && typeof body.message === 'string') {
+        message = body.message
+      }
+    } catch {
+      // Keep the status message when the error response is not JSON.
+    }
+    throw new ApiFetchError(message, res.status)
+  }
+  return res.blob()
+}

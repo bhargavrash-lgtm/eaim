@@ -1,14 +1,15 @@
 // AuditPage.tsx -- Audit Log
 // Owned by FE-Ops
 import { useState } from 'react'
-import { Search, Shield, ShieldOff, ShieldAlert } from 'lucide-react'
-import { PageHeader, LoadingSpinner, EmptyState } from '@/components/common'
+import { Search, Shield, ShieldOff, ShieldAlert, Download } from 'lucide-react'
+import { PageHeader, LoadingSpinner, EmptyState, Button, useToast } from '@/components/common'
 import { AppTopBar } from '@/components/layout/AppTopBar'
 import { DataTable } from '@/components/common/DataTable'
 import type { Column } from '@/components/common/DataTable'
-import { useAudit } from '@/hooks/useAudit'
+import { useAudit, exportAuditCSV } from '@/hooks/useAudit'
 import type { AuditParams, AuditEntry } from '@/hooks/useAudit'
 import { AuditEntryDetailPanel } from './AuditEntryDetailPanel'
+import { downloadCSV } from '@/lib/csv'
 
 // Decision badge -- renders an icon alongside the label, which StatusPill
 // has no slot for, so this doesn't genuinely fit that shared component;
@@ -73,6 +74,12 @@ const EMPTY_FILTERS: Filters = { agent_name: '', tool_name: '', decision: '', fr
 
 const PAGE_SIZE = 50
 
+function toRFC3339(value: string): string | undefined {
+  if (!value) return undefined
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+}
+
 // Main page
 
 export function AuditPage() {
@@ -80,14 +87,18 @@ export function AuditPage() {
   const [applied, setApplied] = useState<AuditParams>({})
   const [page, setPage]       = useState(1)
   const [selected, setSelected] = useState<AuditEntry | null>(null)
+  const [isExporting, setIsExporting] = useState(false)
+  const { showToast } = useToast()
 
   function handleApply() {
     const params: AuditParams = { page: 1, per_page: PAGE_SIZE }
     if (filters.agent_name) params.agent_name = filters.agent_name
     if (filters.tool_name)  params.tool_name  = filters.tool_name
     if (filters.decision)   params.decision   = filters.decision as AuditParams['decision']
-    if (filters.from)       params.from       = filters.from
-    if (filters.to)         params.to         = filters.to
+    const from = toRFC3339(filters.from)
+    const to = toRFC3339(filters.to)
+    if (from) params.from = from
+    if (to) params.to = to
     setApplied(params)
     setPage(1)
   }
@@ -100,6 +111,19 @@ export function AuditPage() {
 
   function set<K extends keyof Filters>(key: K, val: Filters[K]) {
     setFilters(prev => ({ ...prev, [key]: val }))
+  }
+
+  async function handleExport() {
+    setIsExporting(true)
+    try {
+      const csv = await exportAuditCSV(applied)
+      downloadCSV('eami-audit-export.csv', csv)
+      showToast('Audit CSV downloaded', { type: 'success' })
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Could not export audit CSV', { type: 'error' })
+    } finally {
+      setIsExporting(false)
+    }
   }
 
   const { data, isLoading, isFetching, error } = useAudit({ ...applied, page, per_page: PAGE_SIZE })
@@ -170,7 +194,15 @@ export function AuditPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <AppTopBar breadcrumb={[{ label: 'Audit Log' }]} />
+      <AppTopBar
+        breadcrumb={[{ label: 'Audit Log' }]}
+        action={
+          <Button variant="outline" size="sm" onClick={handleExport} isLoading={isExporting}>
+            <Download className="h-3.5 w-3.5" />
+            Export CSV
+          </Button>
+        }
+      />
       <PageHeader
         subtitle={'Immutable hash-chained record of all gateway decisions' + (total > 0 ? ' -- ' + total.toLocaleString() + ' events' : '')}
       />

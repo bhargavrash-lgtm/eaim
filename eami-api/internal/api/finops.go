@@ -189,7 +189,7 @@ SELECT COALESCE(ga.owner, 'unknown') AS team,
   COALESCE(SUM(tu.tokens_in),  0) AS tokens_in,
   COALESCE(SUM(tu.tokens_out), 0) AS tokens_out
 FROM token_usage tu
-LEFT JOIN gateway_agents ga ON ga.id = tu.agent_id
+LEFT JOIN gateway_agents ga ON ga.id = tu.agent_id AND ga.org_id = tu.org_id
 LEFT JOIN model_pricing   mp ON mp.model = tu.model
 WHERE tu.org_id = $1
   AND tu.recorded_at >= $2
