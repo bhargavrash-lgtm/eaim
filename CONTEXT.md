@@ -2,6 +2,11 @@
 # Updated by: Claude Code (after every task) AND the PM chat (after every
 # planning decision). Read by both at the start of every session, before
 # anything else.
+ACTIVE AGENT: none — none — started none
+
+## Active decision thread (2026-09-25) — Multi-agent coordination protocol
+
+Founder-directed documentation task: saved the supplied protocol in `MULTI_AGENT_PROTOCOL.md`, referenced it as mandatory in `CLAUDE.md` Conventions, and added this file's active-agent header marker (returned to `none` at completion). Repository coordination only, no product Horizon/item or new B-ID; `BACKLOG.md` statuses and next-free B-221 remain unchanged. Existing implementation and untracked files preserved. Read-order conflict explicitly flagged: protocol §1 says CLAUDE.md first, while the existing CLAUDE.md/AGENTS.md hard rule and this header say CONTEXT.md first. Supplied protocol wording and existing rules preserved rather than silently rewritten; the founder's newly supplied protocol specifies the onboarding sequence going forward.
 
 ## Product identity (do not re-litigate without explicit founder instruction)
 EAMI = Enterprise AI Monitoring & Intelligence. Gateway, policy engine,
@@ -2052,6 +2057,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-25 by Codex — founder-directed multi-agent protocol documentation and mandatory-reading reference; active-agent marker added. No code changes. See the newest Active decision thread for the preserved read-order conflict.
+
+Prior entry:
 2026-09-24 (absolute newest) by Claude Code — B-220 DONE: real
 multi-column sort on DataTable.tsx -- MATURITY_AUDIT.md's Part A
 priority-3 item, one shared-component fix cascading across all 19 real

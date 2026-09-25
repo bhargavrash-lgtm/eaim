@@ -1,5 +1,9 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## Repository coordination — 2026-09-25
+
+Founder-directed documentation only: added `MULTI_AGENT_PROTOCOL.md` with the supplied coordination rules, one mandatory-reading reference in `CLAUDE.md` Conventions, and the active-agent marker plus completion record in `CONTEXT.md`. No runtime interfaces, application code, or backlog statuses changed; no B-ID allocated. Validation: reviewed the documentation diff and whitespace check; runtime tests do not apply. Limitation: protocol §1's CLAUDE-first sequence conflicts with the older CONTEXT-first wording; preserved both texts and flagged the conflict in CONTEXT.md rather than silently changing the supplied policy. Existing untracked files left untouched.
+
 Generated 2026-07-21 during bootstrap (B-001), from static source review (no `go`/`node` toolchain available on this machine — build/test status below is NOT from an executed run; see the note in each module). Ground truth sources: actual code, `git log`, `tasks/*-results.md`/`*-findings.md`, `schema/schema.sql`. Cross-checked against `ARCHITECTURE.md`/`ROADMAP.md`/`DECISIONS.md`, which remain accurate as design docs but are ahead-of/behind actual code in places noted below.
 
 Shipped tags: `v1.0.0-rc1` → `v1.0.0` (2026-07-01) → `v1.0.1` (2026-07-05, commit `84028bb`). Current HEAD `d8b9483` is unreleased work past v1.0.1 (endpoint scanners, alerting metrics, discover/ingest APIs, episode recorder, memory UI).

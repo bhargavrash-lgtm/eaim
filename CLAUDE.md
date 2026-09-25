@@ -20,6 +20,7 @@ Contract: `api/openapi.yaml` (owned by Architect-EAMI per `BOUNDARIES.md`). DB: 
 Go 1.25 · PostgreSQL 16 (pgvector, TimescaleDB) · SQLite (collector buffer) · React 18/TS/Vite 5 · TanStack Query · Zustand · React Hook Form + Zod · Chi router · pgx · JWT RS256 · Docker Compose · GitHub Actions.
 
 ## Conventions
+- **Multi-agent coordination:** [MULTI_AGENT_PROTOCOL.md](MULTI_AGENT_PROTOCOL.md) is mandatory reading before any task for every agent, with the same standing weight as the roadmap-discipline rule; follow its single-active-agent, onboarding, marker, assignment, and handoff requirements.
 - **Naming:** Go — standard `internal/<domain>/` package layout, one file per concern; sqlc-style `*.sql.go` in `eami-api/internal/store`. TS — `PascalCase` components, `useX.ts` resource hooks in `src/hooks/`, pages under `src/pages/<section>/`.
 - **Error handling (Go):** wrap and return errors up to the HTTP handler layer; handlers call `writeError(w, status, code, msg)`. No panics for expected failures.
 - **Frontend API access:** only through the generated client / `apiFetch()` in `src/api/client.ts` — no raw `fetch`/`axios` in components (documented escape hatch exists in `client.ts` for endpoints not yet in the OpenAPI spec).
