@@ -8,9 +8,36 @@ Added the Architect-owned OpenAPI contract and generated-client types for classi
 
 Rebuilt the Admin-mode Assets page around the shared design system: classification navigation, unified search/kind/workspace/license filters, server pagination, resolved inherited-vs-explicit classification labels, admin taxonomy management, and per-row assignment. Non-admin users receive the same inventory as read-only. Async buttons use `Button.isLoading`, notifications use `useToast`, and no new top-level navigation or identity model was introduced.
 
-Coverage includes migration upgrade/rollback and invariants; org isolation; admin/operator/viewer/workspace-role authorization; category/type validation and duplicate handling; kind-safe and cross-org assignment; default inheritance and replacement; restricted deletion; licensed endpoint inventory; filtered counts; explicit/default classification read-back; and inventory pagination beyond 200 rows. All five Go modules passed `go test ./...`, `go vet ./...`, and `go build ./...`; focused real-Postgres API and migration tests passed; `npx tsc --noEmit`, `npx vite build`, OpenAPI client generation, and `git diff --check` passed. Docker applied migration 24 and rebuilt the API/UI; final health checks returned HTTP 200 and no B-196 test organizations remained.
+Coverage includes migration upgrade and invariants (**correction 2026-09-26:** no test executes the down migration); org isolation; admin/operator/viewer authorization (**correction:** there is no workspace-role token test); category/type validation and duplicate handling; kind-safe and cross-org assignment; default inheritance and replacement; restricted deletion; licensed endpoint inventory; explicit/default classification read-back (**correction:** no test asserts the filtered `counts` field); and inventory pagination beyond 200 rows. All five Go modules passed `go test ./...`, `go vet ./...`, and `go build ./...`; focused real-Postgres API and migration tests passed; `npx tsc --noEmit`, `npx vite build`, OpenAPI client generation, and `git diff --check` passed. Docker applied migration 24 and rebuilt the API/UI; final health checks returned HTTP 200 and no B-196 test organizations remained.
 
 Review fixed org-wide type-name uniqueness, immutable tenant scope, filtered navigation counts, selected-classification context, pending-state consistency, and bounded text filters. A dedicated security subagent was unavailable because its account hit a usage limit, so the owning agent directly reviewed tenant isolation, RBAC, licensing, parameterized SQL, concurrency/default replacement, deletion behavior, and disclosure surfaces; no remaining security issue was found. Authenticated browser click-through could not run because the browser security permission was dismissed; compiled UI validation and HTTP health checks passed, but no browser acceptance is claimed. Brief 2's endpoint-centered relationship API/graph remains pending.
+
+**Verification closure, 2026-09-26 (Claude Code).** The full record, with both review reports quoted in full, is in `B-196_BRIEF1_VERIFICATION.md`.
+
+- **Security review.** Codex's security subagent was confirmed from its transcript to have failed with `usage_limit_exceeded` before producing anything. An independent security review of committed `6924729` found:
+  - no High or Medium issues;
+  - L-1: no license gate on the endpoint classification write;
+  - L-2: the shared `pagination()` overflows on a huge `page`;
+  - L-3: Go and SQL trim names differently.
+- **Code review.** An independent post-fix code review confirmed 4 of the 5 earlier fixes and found:
+  - **N1 (Medium):** navigation counts are computed with the selected category, type and kind applied, so other classifications show 0;
+  - Lows N2–N6;
+  - test-quality gaps T1/T2;
+  - the three coverage over-claims corrected above.
+- **Live acceptance.** `eami-api`/`eami-ui` were rebuilt from `6924729`, and Playwright 1.63/Chromium (scratchpad-only install) ran 59 checks against Dev Org plus a throwaway second org. All 8 Section 6 items pass:
+  - create category and type;
+  - assign endpoint, agent and tool;
+  - filter, search and page (31 = 25 + 6);
+  - blocked deletion, in the UI and with API 409s;
+  - reset to default;
+  - `Button.isLoading` spinner plus success and error toasts;
+  - operator/viewer read-only (UI plus 403 on all 5 write APIs);
+  - cross-org isolation (UI plus 10 API attempts denied or empty).
+
+  N1 was the one real failure, and it reproduced live. The earlier "no browser acceptance" limitation is closed.
+- **Cleanup.** All fixtures were removed; the before/after DB snapshot diff is identical and a residual scan finds 0.
+- **Remaining limitation.** Brief 1 is **not complete** until the N1 and Low fix-up pass lands or the Lows are waived.
+- **Live shared-DB drift.** An extra `ci_types_org_id_asset_kind_normalized_name_key` constraint from an early 000024 draft remains on the shared Postgres. It is harmless because the stricter org-wide constraint also exists, but it is not in the committed migration.
 
 ## B-196 CMDB Completion, Increment 2 Part A — 2026-09-25
 

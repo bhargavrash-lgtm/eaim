@@ -2039,7 +2039,7 @@ B-164 also flagged one adjacent-but-unrelated dormant artifact so it isn't mista
 - [ ] Do not re-litigate the fail-open/fail-closed policy itself — explicitly confirmed correct as-is by the founder during this session; the fix belongs in identifying the real process, not weakening the check.
 **Dependencies:** B-037 (the incident this recurrence traces back to; its "no intermediary" research finding is now the specific thing in question). Discovered during B-191–B-194's own live demo prep session.
 
-### B-196 — EPIC: Configuration Management Database (CMDB), broadened scope — **Increment 2 Brief 1 DONE; Brief 2 pending**
+### B-196 — EPIC: Configuration Management Database (CMDB), broadened scope — **Increment 2 Brief 1 live-verified, review fix-ups OPEN; Brief 2 pending**
 **Vision:** extend Discovery with a real Configuration Item (CI) data model — explicitly **not** a full enterprise CMDB. A scoped layer that normalizes already-discovered data into proper asset categories, positioned to **feed into** a real ITAM/CMDB system via integration, not replace one — matching the real, proven market pattern of how Device42 (now a Freshworks product) relates to full ITSM platforms like Freshservice: a focused discovery/normalization layer underneath a broader ITSM/CMDB, not a competitor to it.
 **Broadened CI taxonomy, corrected from an initial endpoint-only scope:**
 1. **End-user compute** (laptop/desktop/mobile) — what Discovery already builds today (`eami-agent`'s existing scanners); this epic's job here is normalization into a proper CI shape, not new detection.
@@ -2067,7 +2067,22 @@ B-164 also flagged one adjacent-but-unrelated dormant artifact so it isn't mista
 **Part A conflict found, not fixed and no new B-ID minted per brief:** B-200's comments claim one endpoint per gateway agent, but migration 000013 has no `UNIQUE(gateway_agent_id)` while `GetAgentEndpointConnection` uses `LIMIT 1`; multiple linked endpoints are legal and the agent graph can silently show only one. The endpoint-centered proposal is safe because each endpoint itself has at most one linked agent. Also corrected this entry's status: the former “investigation not started” wording was already stale after B-217 and is now definitively false.
 
 **Increment 2 Brief 1 (2026-09-26, DONE):** shipped org-scoped reusable CI categories/types, deterministic defaults, safe nullable assignment on endpoints/agents/tools, strict tenant/kind/default invariants, admin-only configuration and assignment APIs, a unified filtered/server-paginated Assets API, and the Admin-mode classification UI. Migration/API/UI tests and builds pass; authenticated browser click-through was unavailable because browser security permission was dismissed. Brief 2's endpoint-centered relationship API/graph remains pending.
-**Increment 2 acceptance criteria:** defined in the Part A report. Brief 1 is complete; Brief 2 remains the next B-196 slice and requires no new B-ID.
+**Increment 2 Brief 1 verification closure (2026-09-26, Claude Code):**
+- **Status correction.** "DONE" above over-stated the evidence. Codex's security subagent never ran (`usage_limit_exceeded` after 2.9 s), and no browser acceptance existed.
+- **Now done.** An independent security review (no High/Medium, 3 Low), an independent post-fix code review, and the real Section 6 Playwright acceptance: all 8 items pass across 59 checks, with cross-org isolation and operator/viewer read-only proven in the UI and the API. Fixture cleanup is proven by a DB snapshot diff. Evidence is in `B-196_BRIEF1_VERIFICATION.md`.
+- **Status: OPEN, pending a Brief 1 fix-up pass.** Items, none of which need a new B-ID:
+  - **N1 (Medium, confirmed live):** sidebar counts collapse to 0 once a category or type is selected (`cmdb.go:155`).
+  - N2/L-1: no Discovery license gate on the endpoint classification write.
+  - N3: unticking "Make default" on the default type is a silent no-op.
+  - L-3: Go and SQL trim names differently.
+  - N4: `ILIKE` wildcards are not escaped.
+  - N6: UI polish (banner flash, unlicensed Endpoints option, stale-page request, no debounce).
+  - T1/T2: tests that assert only generic errors, and the down migration is never executed.
+- **Found outside B-196, needing B-IDs confirmed with the founder before minting:**
+  - The shared `pagination()` `page` overflow returns 500.
+  - There is no durable admin audit trail.
+  - Live shared-DB drift: an extra `ci_types` `UNIQUE (org_id, asset_kind, normalized_name)` constraint.
+**Increment 2 acceptance criteria:** defined in the Part A report. Brief 1 is live-verified but not complete until the fix-up items above are resolved or explicitly waived. Brief 2 remains the next B-196 slice and requires no new B-ID.
 **Dependencies:** B-147 (training orchestration — this epic's AI Workload CI category is designed to receive its output; model-evaluation/benchmarking explicitly folds into B-147's own scope, not here), B-151 (model hosting/serving — same "designed to receive its output" relationship), B-197 (Workspaces — the Groups-vs-Workspaces primitive question is shared between both epics, unresolved in both), B-200 (`RelationshipGraph.tsx` — the reusable mechanism the Asset-perspective graph extension above builds on directly).
 **Severity/Priority:** foundational EPIC, comparable in scope to B-130/B-147/B-157/B-160 — its own dedicated investigation needed, not built casually or folded into an existing brief. Recommended to be investigated **before or alongside** B-197 (Workspaces), specifically because of the shared unresolved Groups-vs-Workspaces primitive question above — building either epic's grouping concept in isolation risks needing to rework it once the other epic's needs are actually understood.
 **Status:** Increment 1 shipped as B-217. Increment 2 Part A and Brief 1 are complete; Brief 2 is pending.
