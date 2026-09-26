@@ -36,7 +36,7 @@ This was the founder-scoped fix-up pass. Evidence is in `B-196_BRIEF1_FIXUP_VERI
   - Independent code and security reviews: no High or Medium. Their int32, ESCAPE and fingerprint notes were fixed.
 - **Open:**
   - N6 is deferred by the founder.
-  - Hand-rolled paginators outside `pagination()` (`audit.go`, `paste_events.go`, `gateway_episodes.go`, `reports.go`) still overflow. They need a founder-confirmed B-ID.
+  - Hand-rolled paginators outside `pagination()` (`audit.go`, `paste_events.go`, `gateway_episodes.go`, `reports.go`) still overflow. Now tracked as B-225 (QUEUED), minted with founder approval after the check against BACKLOG.md; the next ID is B-226.
   - Architect-EAMI should document the `counts` semantics and the new 403 in `api/openapi.yaml`.
   - L-3's trigger-level residuals and the ungated `link-agent` route are in NOTES.md.
 - **Next:** B-196 Increment 2 Brief 2.
@@ -2139,6 +2139,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-26 by Claude Code — founder approved the fix-up report. B-225 minted (QUEUED) for the hand-rolled paginators after confirming it free against BACKLOG.md; next B-ID is B-226. The founder confirmed Brief 1 complete, and accepted the OpenAPI flag for Architect-EAMI, both NOTES.md entries, and the blocked-command handling as reported. No code changed. Active marker cleared.
+
+Prior entry:
 2026-09-26 by Claude Code — B-196 Brief 1 fix-up pass complete: shared-DB drift reconciled; N1/N2/N3/L-3/N4/T1/T2 fixed; B-223 done and B-224 queued. Tests, 12 mutation checks and an 18/18 live Playwright run pass. Code and security reviews ran and are quoted in `B-196_BRIEF1_FIXUP_VERIFICATION.md`. Active marker cleared.
 
 Prior entry:

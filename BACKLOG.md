@@ -2090,7 +2090,7 @@ B-164 also flagged one adjacent-but-unrelated dormant artifact so it isn't mista
 - **Architect-EAMI follow-up (contract, no new B-ID):** `api/openapi.yaml` should document two things.
   - `GET /v1/cmdb/assets` `counts` ignore `category_id`/`type_id`/`kind` but honour workspace/search/license.
   - `PATCH /v1/cmdb/assets/{assetKind}/{assetId}/classification` can return `403 module_not_licensed` for endpoints.
-- **Still needs a founder-confirmed B-ID:** hand-rolled paginators outside `pagination()` still overflow. They are `audit.go` (which also returns `err.Error()` in 500s), `paste_events.go`, `gateway_episodes.go`, and `reports.go` `parsePage`/`parseIntParam`. Both fix-up reviews flagged them (Low).
+- **Now B-225 (founder-approved 2026-09-26):** hand-rolled paginators outside `pagination()` still overflow. They are `audit.go` (which also returns `err.Error()` in 500s), `paste_events.go`, `gateway_episodes.go`, and `reports.go` `parsePage`/`parseIntParam`. Both fix-up reviews flagged them (Low).
 **Increment 2 acceptance criteria:** defined in the Part A report. Brief 1 is complete. Brief 2 remains the next B-196 slice and requires no new B-ID.
 **Dependencies:** B-147 (training orchestration — this epic's AI Workload CI category is designed to receive its output; model-evaluation/benchmarking explicitly folds into B-147's own scope, not here), B-151 (model hosting/serving — same "designed to receive its output" relationship), B-197 (Workspaces — the Groups-vs-Workspaces primitive question is shared between both epics, unresolved in both), B-200 (`RelationshipGraph.tsx` — the reusable mechanism the Asset-perspective graph extension above builds on directly).
 **Severity/Priority:** foundational EPIC, comparable in scope to B-130/B-147/B-157/B-160 — its own dedicated investigation needed, not built casually or folded into an existing brief. Recommended to be investigated **before or alongside** B-197 (Workspaces), specifically because of the shared unresolved Groups-vs-Workspaces primitive question above — building either epic's grouping concept in isolation risks needing to rework it once the other epic's needs are actually understood.
@@ -2401,7 +2401,7 @@ Breadcrumb is `Workflows` (real `<Link>` to `/gateway/workflows`) → the workfl
 **Fix:** `pagination()` (`eami-api/internal/api/approvals.go`) bounds `page` to `min(page, 1_000_000, MaxInt32/perPage)`. Before the fix, `page=9223372036854775807` produced a negative OFFSET and a 500. It could also wrap the int32 offsets in `alerts.go`, `approvals.go` and `users.go` to arbitrary pages. Now such a request returns an empty page, with `meta.page` showing the clamped value.
 **Tests:** `pagination_internal_test.go` (table-driven, plus int32 safety for any `maxPerPage`). `TestPaginationOverflow_ReturnsEmptyPageNot500_RealDB` covers CMDB and users. Both were mutation-checked: each fails with the clamp removed.
 **Live check:** CMDB, users and alerts each returned 200 with an empty page.
-**Scope limit:** covers `pagination()` callers only. The separate hand-rolled paginators are listed under B-196's fix-up note and still need their own founder-confirmed B-ID.
+**Scope limit:** covers `pagination()` callers only. The separate hand-rolled paginators are tracked as B-225.
 
 ### B-224 — Durable admin-write audit trail — **QUEUED, 2026-09-26**
 **Origin:** B-196 Brief 1 security review (informational). Minted at founder direction as a tracked future item, after confirming it free against BACKLOG.md directly.
@@ -2412,4 +2412,19 @@ Breadcrumb is `Workflows` (real `<Link>` to `/gateway/workflows`) → the workfl
 - mandatory reviewer and security passes.
 **Status:** QUEUED, not investigated.
 
-## Next B-ID: B-225
+### B-225 — Hand-rolled paginators outside `pagination()` still overflow — **QUEUED, 2026-09-26**
+**Origin:** found by both independent reviews of the B-196 Brief 1 fix-up pass (Low); see `B-196_BRIEF1_FIXUP_VERIFICATION.md` §5 and §7. The founder approved minting this ID. It was confirmed free against BACKLOG.md directly: the counter read B-225 and no open item used that number or covered this scope.
+**Problem:** these handlers parse `page` themselves, so B-223's `pagination()` clamp does not reach them.
+- `audit.go` (~76–95): its own `strconv.Atoi`, then `int32((page-1)*perPage)`. Its 500 response also returns `err.Error()`, the raw database message.
+- `paste_events.go` (~83–119): the same pattern.
+- `gateway_episodes.go` (~245–258): an unbounded int offset forwarded to the gateway.
+- `reports.go` `parsePage`/`parseIntParam` (~240–270), used by `ListEndpoints` and `discover.go`'s `ListAgentEndpoints`. `parseIntParam` has no overflow check and wraps silently.
+
+For example, `GET /v1/audit?page=4294967297&per_page=100` wraps the offset to 0 and returns page 1's rows labelled as page 4294967297. Other values give a negative OFFSET and a 500. Every query stays org-scoped, so nothing crosses tenants.
+**Suggested fix:**
+- Route these through `pagination()` (or a shared checked-offset helper), keeping each route's existing `per_page` caps and defaults.
+- Replace `err.Error()` in `audit.go`'s 500s with a generic message.
+- Add unit and real-DB overflow tests per route, mutation-checked as B-223's were.
+**Status:** QUEUED, not started.
+
+## Next B-ID: B-226

@@ -320,7 +320,7 @@ The residual scan for `b196fix` across orgs, users, endpoints, tools, categories
    - `audit.go` also returns `err.Error()` in its 500 responses.
    - `paste_events.go`, `gateway_episodes.go`, and `reports.go` `parsePage`/`parseIntParam` (`parseIntParam` has no overflow check).
 
-   They are outside B-223 as the founder defined it ("the shared `pagination()` overflow fix") and need a **founder-confirmed B-ID**. They were not minted here.
+   They are outside B-223 as the founder defined it ("the shared `pagination()` overflow fix"). The founder later approved a separate ID, and they are now tracked as **B-225** (QUEUED).
 2. **OpenAPI contract (Architect-EAMI).** Two gaps need documenting:
    - the `counts` semantics, which ignore category/type/kind but honour workspace, search and license;
    - the new PATCH classification `403 module_not_licensed`.

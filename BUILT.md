@@ -58,7 +58,7 @@ Founder-scoped fix-up of the review findings in `B-196_BRIEF1_VERIFICATION.md`. 
 **Limitations and open items**
 - **N3's actual fix is UI-only.** `eami-ui` has no UI test framework, so it is verified live, not by an automated test.
 - **L-3 is fixed at the API layer only.** The trigger still uses ASCII `btrim`, and zero-width characters are not trimmed (NOTES.md).
-- **Unminted paginators.** The hand-rolled paginators in `audit.go`, `paste_events.go`, `gateway_episodes.go` and `reports.go` bypass `pagination()` and still overflow. They need a founder-confirmed B-ID.
+- **Unminted paginators.** The hand-rolled paginators in `audit.go`, `paste_events.go`, `gateway_episodes.go` and `reports.go` bypass `pagination()` and still overflow. They are now tracked as B-225 (QUEUED).
 - **OpenAPI.** The `counts` semantics and the new 403 need documenting by Architect-EAMI.
 - **Deferred.** N6 was deferred by the founder. B-224, the durable admin audit trail, is QUEUED.
 
