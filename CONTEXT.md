@@ -2,7 +2,13 @@
 # Updated by: Claude Code (after every task) AND the PM chat (after every
 # planning decision). Read by both at the start of every session, before
 # anything else.
-ACTIVE AGENT: none — none — started none
+ACTIVE AGENT: none
+
+## Active decision thread (2026-09-26, newest) — B-196 Increment 2 Brief 1 complete; Brief 2 pending
+
+Horizon 1 “CMDB completion” now has its classification foundation. Migration 24 and the canonical schema add org-scoped categories/types, deterministic defaults, nullable overrides on endpoints/agents/tools, composite tenant foreign keys, immutable scope, kind checks, restricted deletion, and one default per org/kind. The OpenAPI contract, generated client surface, store, and handlers provide admin taxonomy/assignment writes plus admin/operator/viewer classification and unified paginated asset reads with org/kind/category/type/workspace/license/search filtering and filtered counts.
+
+The Admin-mode Assets page now uses the shared classification-navigation and management patterns, preserves read-only access for non-admin roles, and follows the shared loading/toast rules. Review corrections tightened type-name uniqueness to the whole org, prevented org-scope mutation, fixed filtered counts and selected-classification context, and bounded request text. Focused real-Postgres migration/API tests, all five Go module test/vet/build passes, generated-client/type/build checks, Docker migration/rebuild, HTTP health checks, and cleanup verification passed. A security subagent hit an account usage limit; the owning agent completed the tenant/RBAC/license/SQL/concurrency/deletion review directly with no remaining finding. Authenticated browser click-through was blocked after the browser security permission was dismissed, so no browser acceptance is claimed. Brief 2 remains the endpoint-centered relationship API and reusable graph extraction described in Part A.
 
 ## Active decision thread (2026-09-25, newest) — B-196 Increment 2 Part A complete; founder scope approval required before implementation
 
@@ -2087,6 +2093,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-26 by Codex — B-196 Increment 2 Brief 1 complete: classification schema/API/Admin UI shipped and verified; Brief 2 relationship graph pending. Browser acceptance unavailable after security permission dismissal; active marker cleared.
+
+Prior entry:
 2026-09-25 by Codex — B-196 CMDB Increment 2 Part A investigation and plan complete; report committed with current-state evidence, schema/API/UI proposal, security/migration/tests, and a two-brief recommendation. No product implementation or new B-ID; awaiting founder scope approval. Active marker cleared.
 
 Prior entry:

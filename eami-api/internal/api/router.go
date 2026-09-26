@@ -264,6 +264,15 @@ func (s *Server) Handler() http.Handler {
 			// is irreversible/cascading, not a workspace_admin's call).
 			r.Post("/v1/workspaces", s.CreateWorkspace)
 			r.Delete("/v1/workspaces/{workspaceId}", s.DeleteWorkspace)
+			// CMDB taxonomy and per-asset classification are organization-wide
+			// governance writes. Workspace roles deliberately have no access.
+			r.Post("/v1/cmdb/categories", s.CreateCMDBCategory)
+			r.Patch("/v1/cmdb/categories/{categoryId}", s.UpdateCMDBCategory)
+			r.Delete("/v1/cmdb/categories/{categoryId}", s.DeleteCMDBCategory)
+			r.Post("/v1/cmdb/types", s.CreateCMDBType)
+			r.Patch("/v1/cmdb/types/{typeId}", s.UpdateCMDBType)
+			r.Delete("/v1/cmdb/types/{typeId}", s.DeleteCMDBType)
+			r.Patch("/v1/cmdb/assets/{assetKind}/{assetId}/classification", s.SetCMDBAssetClassification)
 		})
 
 		// ── Workspaces: workspace-scoped RBAC (B-197 increment 3) ─────────────
@@ -372,6 +381,8 @@ func (s *Server) Handler() http.Handler {
 			r.Use(s.requireRole("admin", "operator", "viewer"))
 			r.Use(s.viewerReadOnly)
 			r.Get("/v1/gateway/agents", s.ListAgents)
+			r.Get("/v1/cmdb/classifications", s.ListCMDBClassifications)
+			r.Get("/v1/cmdb/assets", s.ListCMDBAssets)
 			r.Get("/v1/gateway/agents/{agentId}", s.GetAgent)
 			r.Get("/v1/gateway/agents/{agentId}/config", s.GetAgentConfig)
 			// Workspaces (B-197 increment 3): names/existence are

@@ -32,6 +32,8 @@ tags:
     description: Endpoint agent data ingestion (collector → SaaS)
   - name: endpoints
     description: Discovered endpoint inventory
+  - name: cmdb
+    description: Organization-scoped CMDB taxonomy and unified asset inventory
   - name: gateway-agents
     description: AI agent registry (gateway configuration)
   - name: gateway-policies
@@ -93,6 +95,107 @@ components:
         total:    { type: integer, example: 142 }
         page:     { type: integer, example: 1 }
         per_page: { type: integer, example: 25 }
+
+    CMDBAssetKind:
+      type: string
+      enum: [endpoint, agent, tool]
+
+    CMDBClassification:
+      type: object
+      required: [category_id, category_name, type_id, type_name, classification_source]
+      properties:
+        category_id: { type: string, format: uuid }
+        category_name: { type: string }
+        type_id: { type: string, format: uuid }
+        type_name: { type: string }
+        classification_source: { type: string, enum: [default, explicit] }
+
+    CMDBType:
+      type: object
+      required: [id, category_id, asset_kind, name, is_default, asset_count, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        category_id: { type: string, format: uuid }
+        asset_kind: { $ref: '#/components/schemas/CMDBAssetKind' }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        is_default: { type: boolean }
+        asset_count: { type: integer, minimum: 0 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CMDBCategory:
+      type: object
+      required: [id, name, sort_order, asset_count, types, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        sort_order: { type: integer }
+        asset_count: { type: integer, minimum: 0 }
+        types: { type: array, items: { $ref: '#/components/schemas/CMDBType' } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CMDBCategoryWrite:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, nullable: true, maxLength: 500 }
+        sort_order: { type: integer }
+
+    CMDBTypeWrite:
+      type: object
+      required: [category_id, asset_kind, name]
+      properties:
+        category_id: { type: string, format: uuid }
+        asset_kind: { $ref: '#/components/schemas/CMDBAssetKind' }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, nullable: true, maxLength: 500 }
+        is_default: { type: boolean, default: false }
+
+    CMDBAsset:
+      type: object
+      required: [id, asset_kind, name, status, workspace_label, classification]
+      properties:
+        id: { type: string, format: uuid }
+        asset_kind: { $ref: '#/components/schemas/CMDBAssetKind' }
+        name: { type: string }
+        detail: { type: string, nullable: true }
+        status: { type: string }
+        risk_tier: { type: string, nullable: true }
+        workspace_id: { type: string, format: uuid, nullable: true }
+        workspace_name: { type: string, nullable: true }
+        workspace_label: { type: string, enum: [workspace, global_floor, not_workspace_scoped] }
+        classification: { $ref: '#/components/schemas/CMDBClassification' }
+
+    CMDBAssetList:
+      type: object
+      required: [data, meta, counts, endpoint_inventory_available]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/CMDBAsset' } }
+        meta: { $ref: '#/components/schemas/PaginationMeta' }
+        counts:
+          type: array
+          items:
+            type: object
+            required: [type_id, category_id, count]
+            properties:
+              type_id: { type: string, format: uuid }
+              category_id: { type: string, format: uuid }
+              count: { type: integer, minimum: 0 }
+        endpoint_inventory_available: { type: boolean }
+
+    CMDBClassificationAssignment:
+      type: object
+      required: [ci_type_id]
+      properties:
+        ci_type_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Explicit type override; null resets the asset to its kind default.
 
     # ── Error ────────────────────────────────────────────
     Error:
@@ -985,6 +1088,129 @@ paths:
                   errors:   { type: array, items: { type: string } }
 
   # ── Endpoints ─────────────────────────────────────────
+  /v1/cmdb/classifications:
+    get:
+      tags: [cmdb]
+      summary: List the organization CMDB taxonomy with resolved asset counts
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Classification hierarchy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, endpoint_inventory_available]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/CMDBCategory' } }
+                  endpoint_inventory_available: { type: boolean }
+
+  /v1/cmdb/categories:
+    post:
+      tags: [cmdb]
+      summary: Create an organization CMDB category
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CMDBCategoryWrite' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/CMDBCategory' } } } }
+        '400': { description: Invalid request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Normalized name conflict, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/cmdb/categories/{categoryId}:
+    parameters:
+      - { name: categoryId, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      tags: [cmdb]
+      summary: Update an organization CMDB category
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CMDBCategoryWrite' } } }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/CMDBCategory' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Normalized name conflict, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      tags: [cmdb]
+      summary: Delete an unused CMDB category
+      security: [{ BearerAuth: [] }]
+      responses:
+        '204': { description: Deleted }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Category still has types, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/cmdb/types:
+    post:
+      tags: [cmdb]
+      summary: Create an organization CMDB type
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CMDBTypeWrite' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/CMDBType' } } } }
+        '400': { description: Invalid request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Normalized name conflict, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/cmdb/types/{typeId}:
+    parameters:
+      - { name: typeId, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      tags: [cmdb]
+      summary: Update a CMDB type or atomically make it the kind default
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CMDBTypeWrite' } } }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/CMDBType' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Name conflict or type is assigned/default, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      tags: [cmdb]
+      summary: Delete an unused non-default CMDB type
+      security: [{ BearerAuth: [] }]
+      responses:
+        '204': { description: Deleted }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Type is assigned or is the default, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/cmdb/assets:
+    get:
+      tags: [cmdb]
+      summary: List endpoint, governed-agent, and tool assets using server-side pagination
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1, minimum: 1 } }
+        - { name: per_page, in: query, schema: { type: integer, default: 25, minimum: 1, maximum: 100 } }
+        - { name: kind, in: query, schema: { $ref: '#/components/schemas/CMDBAssetKind' } }
+        - { name: category_id, in: query, schema: { type: string, format: uuid } }
+        - { name: type_id, in: query, schema: { type: string, format: uuid } }
+        - { name: workspace_id, in: query, schema: { type: string, format: uuid } }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 } }
+      responses:
+        '200': { description: Unified asset page, content: { application/json: { schema: { $ref: '#/components/schemas/CMDBAssetList' } } } }
+        '400': { description: Invalid filter, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Endpoint-only request without Discovery entitlement, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/cmdb/assets/{assetKind}/{assetId}/classification:
+    patch:
+      tags: [cmdb]
+      summary: Assign an explicit CMDB type or reset an asset to its kind default
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: assetKind, in: path, required: true, schema: { $ref: '#/components/schemas/CMDBAssetKind' } }
+        - { name: assetId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CMDBClassificationAssignment' } } }
+      responses:
+        '200': { description: Resolved classification, content: { application/json: { schema: { $ref: '#/components/schemas/CMDBClassification' } } } }
+        '400': { description: Invalid kind/type combination, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Asset or type not found in this organization, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /v1/endpoints:
     get:
       tags: [endpoints]

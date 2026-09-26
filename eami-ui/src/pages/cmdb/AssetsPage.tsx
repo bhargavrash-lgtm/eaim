@@ -1,239 +1,98 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { ChevronRight, FolderTree, Search, Settings2, X } from 'lucide-react'
 import { AppTopBar } from '@/components/layout/AppTopBar'
-import { PageHeader } from '@/components/common/PageHeader'
-import { DataTable } from '@/components/common/DataTable'
-import type { Column } from '@/components/common/DataTable'
-import { EmptyState } from '@/components/common/EmptyState'
-import { StatusPill } from '@/components/common/StatusPill'
-import { RiskPill } from '@/components/common/RiskPill'
 import { AssetWorkspaceBadge } from '@/components/cmdb/AssetWorkspaceBadge'
-import { AgentAssetPanel } from '@/components/cmdb/AgentAssetPanel'
-import { ToolAssetPanel } from '@/components/cmdb/ToolAssetPanel'
-import { EndpointDrawer } from '@/pages/discover/DiscoverPage'
-import { useEndpoints } from '@/hooks/useEndpoints'
-import type { EndpointWithWorkspace } from '@/hooks/useEndpoints'
-import { useAgents } from '@/hooks/useAgents'
-import type { AgentWithWorkspace } from '@/hooks/useAgents'
-import { useTools } from '@/hooks/useTools'
-import type { ToolWithActions } from '@/hooks/useTools'
+import { Button, DataTable, EmptyState, SlideOverPanel, useToast } from '@/components/common'
+import type { Column } from '@/components/common/DataTable'
+import { PageHeader } from '@/components/common/PageHeader'
+import { RiskPill } from '@/components/common/RiskPill'
+import { StatusPill } from '@/components/common/StatusPill'
+import {
+  type CMDBAsset, type CMDBAssetKind, type CMDBCategory, type CMDBType,
+  useCMDBAssets, useCMDBClassifications, useCreateCMDBCategory, useCreateCMDBType,
+  useDeleteCMDBCategory, useDeleteCMDBType, useSetCMDBAssetClassification,
+  useUpdateCMDBCategory, useUpdateCMDBType, useCMDBWorkspaces,
+} from '@/hooks/useCMDB'
+import { useAuthStore } from '@/stores/authStore'
 
-// AssetsPage -- B-196 increment 1: a real CMDB list, built only on what
-// this brief's own Part A/B/C investigation confirmed is genuinely real
-// today (BACKLOG.md's B-196 entry) -- endpoints + gateway_agents +
-// gateway_tools, static category tags (not the admin-configurable
-// classification panel DESIGN_SYSTEM.md §7.2 describes -- that's real,
-// separate, unbuilt future work per Part C), real workspace badges where
-// the schema actually supports it (endpoints/agents), and an honest
-// "Not workspace-scoped" label where it structurally doesn't
-// (gateway_tools -- see AssetWorkspaceBadge's own doc comment for why
-// that's a distinct state, not the same "Global floor" gray).
-//
-// Explicitly NOT here, disclosed not silently dropped (BACKLOG.md B-196):
-// the AI Workload CI category (blocked on B-151/B-147, no real backend
-// yet), true multi-hop CI relationships beyond what B-200 already proved
-// (agent<->tool/policy/workflow/endpoint, reused directly below), and
-// gateway_nodes (zero real rows in this deployment today, and -- like
-// gateway_tools -- has no workspace_id column; out of this increment's
-// named scope, B-218 logged for the schema gap).
-
-type CIType = 'endpoint' | 'agent' | 'tool'
-
-type AssetRow = {
-  ciType: CIType
-  id: string
-  name: string
-  category: string
-  scoped: boolean
-  workspaceName?: string | null
-  statusValue: string
-  riskTier?: string | null
-  detail: string
-  raw: EndpointWithWorkspace | AgentWithWorkspace | ToolWithActions
-}
-
-const CATEGORY_LABEL: Record<CIType, string> = {
-  endpoint: 'End-user compute',
-  agent: 'AI Agent',
-  tool: 'Connector',
-}
-
-const TYPE_TABS: { key: CIType | 'all'; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'endpoint', label: 'Endpoints' },
-  { key: 'agent', label: 'Agents' },
-  { key: 'tool', label: 'Tools' },
-]
+const KIND_LABEL: Record<CMDBAssetKind, string> = { endpoint: 'Endpoint', agent: 'Agent', tool: 'Tool' }
+function errorMessage(error: unknown) { return error && typeof error === 'object' && 'message' in error && typeof error.message === 'string' ? error.message : 'The request could not be completed.' }
 
 export function AssetsPage() {
-  const [typeFilter, setTypeFilter] = useState<CIType | 'all'>('all')
-  const [selected, setSelected] = useState<AssetRow | null>(null)
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
+  const [page, setPage] = useState(1); const [search, setSearch] = useState('')
+  const [kind, setKind] = useState<CMDBAssetKind>(); const [categoryId, setCategoryId] = useState<string>(); const [typeId, setTypeId] = useState<string>(); const [workspaceId, setWorkspaceId] = useState<string>()
+  const [manageOpen, setManageOpen] = useState(false); const [selected, setSelected] = useState<CMDBAsset | null>(null)
+  const filters = { page, per_page: 25, kind, category_id: categoryId, type_id: typeId, workspace_id: workspaceId, q: search || undefined }
+  const classifications = useCMDBClassifications(); const assets = useCMDBAssets(filters)
+  const workspaces = useCMDBWorkspaces()
+  const categories = classifications.data?.data ?? []; const rows = assets.data?.data ?? []; const total = assets.data?.meta.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / 25)); const filtered = Boolean(kind || categoryId || typeId || workspaceId || search)
+  const filteredCountByType = new Map((assets.data?.counts ?? []).map((count) => [count.type_id, count.count]))
+  const selectedCategory = categories.find((category) => category.id === categoryId)
+  const selectedType = selectedCategory?.types.find((type) => type.id === typeId)
+  const heading = selectedType?.name ?? selectedCategory?.name ?? (kind ? `${KIND_LABEL[kind]}s` : 'Assets')
+  const breadcrumb = heading === 'Assets' ? [{ label: 'Assets' }] : [{ label: 'Assets', href: '/assets' }, { label: heading }]
+  const scopedSubtitle = selectedType
+    ? `${selectedType.asset_kind} assets classified as ${selectedCategory?.name} / ${selectedType.name}`
+    : selectedCategory ? `Assets classified under ${selectedCategory.name}` : 'Organization CMDB inventory with governed classification for endpoints, agents, and tools'
+  useEffect(() => setPage(1), [kind, categoryId, typeId, workspaceId, search])
 
-  const { data: endpointsData, isLoading: endpointsLoading, error: endpointsError } = useEndpoints({ per_page: 200 })
-  const { data: agentsData, isLoading: agentsLoading, error: agentsError } = useAgents()
-  const { data: toolsData, isLoading: toolsLoading, error: toolsError } = useTools()
-
-  const isLoading = endpointsLoading || agentsLoading || toolsLoading
-  // Endpoints require the Discovery module license (router.go) --
-  // distinct from a real network/server error, and the one real reason
-  // this specific fetch can fail while the other two succeed. Reported
-  // honestly rather than folded into one generic "failed to load" banner.
-  const endpointsUnlicensed =
-    !!endpointsError && (endpointsError as { code?: string })?.code === 'module_not_licensed'
-  const hasOtherError = !!agentsError || !!toolsError || (!!endpointsError && !endpointsUnlicensed)
-
-  // Code-review finding: per_page: 200 below is a real, hardcoded cap, not
-  // full pagination -- this page has no "load more"/page-through affordance
-  // the way DiscoverPage.tsx does. Silently dropping rows past 200 on a
-  // page whose whole premise is being an honest, complete inventory would
-  // be exactly the kind of "incomplete data presented as complete" this
-  // session's own DESIGN_SYSTEM.md §7.4 rule exists to prevent -- so the
-  // real total (endpointsData.meta.total, already returned by the existing
-  // API) is compared against what actually rendered and surfaced instead
-  // of just quietly dropped.
-  const endpointsTotal = endpointsData?.meta?.total ?? 0
-  const endpointsShown = endpointsData?.data?.length ?? 0
-  const endpointsTruncated = endpointsTotal > endpointsShown
-
-  const rows: AssetRow[] = [
-    ...((endpointsData?.data ?? []) as EndpointWithWorkspace[]).map(
-      (e): AssetRow => ({
-        ciType: 'endpoint',
-        id: e.id,
-        name: e.hostname,
-        category: CATEGORY_LABEL.endpoint,
-        scoped: true,
-        workspaceName: e.workspace_name,
-        statusValue: e.os ?? '—',
-        detail: e.agent_version ?? '—',
-        raw: e,
-      }),
-    ),
-    ...((agentsData?.data ?? []) as AgentWithWorkspace[]).map(
-      (a): AssetRow => ({
-        ciType: 'agent',
-        id: a.id,
-        name: a.name,
-        category: CATEGORY_LABEL.agent,
-        scoped: true,
-        workspaceName: a.workspace_name,
-        statusValue: a.status,
-        riskTier: a.risk_tier,
-        detail: a.model,
-        raw: a,
-      }),
-    ),
-    ...((toolsData?.data ?? []) as ToolWithActions[]).map(
-      (t): AssetRow => ({
-        ciType: 'tool',
-        id: t.id,
-        name: t.name,
-        category: CATEGORY_LABEL.tool,
-        scoped: false,
-        statusValue: t.status,
-        detail: t.type,
-        raw: t,
-      }),
-    ),
+  const columns: Column<CMDBAsset>[] = [
+    { key: 'name', header: 'Name', render: (r) => <span className="font-medium text-ink">{r.name}</span> },
+    { key: 'asset_kind', header: 'Kind', render: (r) => <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">{KIND_LABEL[r.asset_kind]}</span> },
+    { key: 'classification', header: 'Classification', render: (r) => <div><div className="text-sm text-gray-700">{r.classification.type_name}</div><div className="text-xs text-gray-400">{r.classification.category_name} · {r.classification.classification_source}</div></div> },
+    { key: 'status', header: 'Status', render: (r) => r.asset_kind === 'endpoint' ? <span className="capitalize text-gray-500">{r.status}</span> : <StatusPill status={r.status as 'active' | 'suspended' | 'revoked' | 'connected' | 'degraded' | 'disconnected'} /> },
+    { key: 'risk_tier', header: 'Risk', render: (r) => r.risk_tier ? <RiskPill tier={r.risk_tier as 'low' | 'medium' | 'high' | 'critical'} /> : <span className="text-gray-400">—</span> },
+    { key: 'workspace_label', header: 'Workspace', render: (r) => <AssetWorkspaceBadge scoped={r.workspace_label !== 'not_workspace_scoped'} workspaceName={r.workspace_name} /> },
   ]
+  function clearFilters() { setKind(undefined); setCategoryId(undefined); setTypeId(undefined); setWorkspaceId(undefined); setSearch('') }
 
-  const filteredRows = typeFilter === 'all' ? rows : rows.filter((r) => r.ciType === typeFilter)
-
-  const columns: Column<AssetRow>[] = [
-    { key: 'name', header: 'Name', sortable: true, render: (r) => <span className="font-medium text-gray-900">{r.name}</span> },
-    {
-      key: 'category',
-      header: 'Type',
-      sortable: true,
-      render: (r) => (
-        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
-          {r.category}
-        </span>
-      ),
-    },
-    {
-      key: 'statusValue',
-      header: 'Status',
-      render: (r) =>
-        r.ciType === 'endpoint' ? (
-          <span className="text-gray-500 capitalize">{r.statusValue}</span>
-        ) : r.ciType === 'agent' ? (
-          <div className="flex items-center gap-1.5">
-            <StatusPill status={r.statusValue as 'active' | 'suspended' | 'revoked'} />
-            {r.riskTier && <RiskPill tier={r.riskTier as 'low' | 'medium' | 'high' | 'critical'} />}
-          </div>
-        ) : (
-          <StatusPill status={r.statusValue as 'connected' | 'degraded' | 'disconnected'} />
-        ),
-    },
-    { key: 'detail', header: 'Detail', render: (r) => <span className="text-xs text-gray-500">{r.detail}</span> },
-    {
-      key: 'workspace',
-      header: 'Workspace',
-      render: (r) => <AssetWorkspaceBadge scoped={r.scoped} workspaceName={r.workspaceName} />,
-    },
-  ]
-
-  return (
-    <div className="flex flex-col h-full">
-      <AppTopBar breadcrumb={[{ label: 'Assets' }]} />
-      <PageHeader subtitle="Endpoints, agents, and connectors normalized into one real asset list" />
-
-      <div className="flex-1 overflow-auto p-6 space-y-4">
-        <div className="flex items-center gap-1 border-b border-gray-200">
-          {TYPE_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setTypeFilter(tab.key)}
-              className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${
-                typeFilter === tab.key
-                  ? 'border-brand-600 text-brand-700'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {endpointsUnlicensed && (
-          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-            Endpoints aren't shown -- this organization isn't licensed for the Discovery module. Agents and tools below are unaffected.
-          </p>
-        )}
-        {endpointsTruncated && (
-          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-            Showing {endpointsShown} of {endpointsTotal} real endpoints -- this list doesn't yet page through the rest. Agents and tools below are complete.
-          </p>
-        )}
-        {hasOtherError && (
-          <p className="text-sm text-red-600">Failed to load some real asset data. Try again.</p>
-        )}
-
-        <DataTable
-          columns={columns}
-          data={filteredRows}
-          loading={isLoading}
-          pageSize={50}
-          getRowId={(r) => `${r.ciType}-${r.id}`}
-          onRowClick={(r) => setSelected(r)}
-          renderEmpty={() => (
-            <EmptyState
-              title="No assets found"
-              description="Endpoints, agents, and tools discovered or configured for this org will appear here."
-            />
-          )}
-        />
-      </div>
-
-      {selected?.ciType === 'endpoint' && (
-        <EndpointDrawer endpointId={selected.id} onClose={() => setSelected(null)} />
-      )}
-      {selected?.ciType === 'agent' && (
-        <AgentAssetPanel agent={selected.raw as AgentWithWorkspace} onClose={() => setSelected(null)} />
-      )}
-      {selected?.ciType === 'tool' && (
-        <ToolAssetPanel tool={selected.raw as ToolWithActions} onClose={() => setSelected(null)} />
-      )}
+  return <div className="flex h-full flex-col">
+    <AppTopBar breadcrumb={breadcrumb} action={isAdmin ? <Button size="sm" variant="outline" onClick={() => setManageOpen(true)}><Settings2 className="h-4 w-4" />Manage</Button> : undefined} />
+    <PageHeader subtitle={scopedSubtitle} />
+    <div className="flex min-h-0 flex-1 bg-gray-50">
+      <aside className="w-72 shrink-0 overflow-y-auto border-r border-gray-200 bg-white p-4">
+        <div className="mb-3 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-semibold text-ink"><FolderTree className="h-4 w-4" />Classifications</div>{filtered && <button className="text-xs text-brand-700 hover:underline" onClick={clearFilters}>Clear</button>}</div>
+        <button onClick={() => { setKind(undefined); setCategoryId(undefined); setTypeId(undefined) }} className={`mb-2 flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm ${!kind && !categoryId && !typeId ? 'bg-brand-50 font-medium text-brand-700' : 'text-gray-600 hover:bg-gray-50'}`}><span>All assets</span><span>{total}</span></button>
+        <div className="space-y-1">{categories.map((category) => <div key={category.id}>
+          <button onClick={() => { setKind(undefined); setCategoryId(category.id); setTypeId(undefined) }} className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm ${categoryId === category.id && !typeId ? 'bg-brand-50 font-medium text-brand-700' : 'text-gray-700 hover:bg-gray-50'}`}><span className="flex items-center gap-1.5"><ChevronRight className="h-3.5 w-3.5" />{category.name}</span><span className="text-xs text-gray-400">{category.types.reduce((sum, type) => sum + (filteredCountByType.get(type.id) ?? 0), 0)}</span></button>
+          <div className="ml-5 border-l border-gray-200 pl-2">{category.types.map((type) => <button key={type.id} onClick={() => { setCategoryId(category.id); setTypeId(type.id); setKind(type.asset_kind) }} className={`flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs ${typeId === type.id ? 'bg-brand-50 font-medium text-brand-700' : 'text-gray-500 hover:bg-gray-50'}`}><span>{type.name}{type.is_default ? ' · default' : ''}</span><span>{filteredCountByType.get(type.id) ?? 0}</span></button>)}</div>
+        </div>)}</div>
+      </aside>
+      <main className="min-w-0 flex-1 overflow-y-auto p-6">
+        {!classifications.data?.endpoint_inventory_available && <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">Endpoint inventory requires a Discovery license. Governed agents and tools remain visible.</div>}
+        <div className="mb-4 flex flex-wrap items-center gap-3"><div className="relative min-w-64 flex-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search this classification" className="w-full rounded-md border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm outline-none focus:border-brand-500" />{search && <button onClick={() => setSearch('')} className="absolute right-3 top-2.5 text-gray-400"><X className="h-4 w-4" /></button>}</div><select value={kind ?? ''} onChange={(e) => { const next = e.target.value as CMDBAssetKind | ''; setKind(next || undefined); setCategoryId(undefined); setTypeId(undefined) }} className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"><option value="">All kinds</option><option value="endpoint">Endpoints</option><option value="agent">Agents</option><option value="tool">Tools</option></select><select value={workspaceId ?? ''} onChange={(e) => setWorkspaceId(e.target.value || undefined)} className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"><option value="">All workspaces</option>{(workspaces.data?.data ?? []).map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select><span className="text-sm text-gray-500">{total} assets</span></div>
+        {assets.isError ? <div className="rounded-lg border border-red-200 bg-white p-8 text-center"><p className="mb-3 text-sm text-red-700">{errorMessage(assets.error)}</p><Button variant="outline" isLoading={assets.isFetching} onClick={() => assets.refetch()}>Retry</Button></div> : <DataTable columns={columns} data={rows} loading={assets.isLoading} pageSize={25} getRowId={(r) => `${r.asset_kind}-${r.id}`} onRowClick={setSelected} renderEmpty={() => <EmptyState title={filtered ? 'No assets match these filters' : 'No CMDB assets yet'} description={filtered ? 'Clear or change the current classification and search filters.' : 'Discovered endpoints and configured agents or tools will appear here.'} />} />}
+        {!assets.isError && totalPages > 1 && <div className="mt-4 flex items-center justify-between text-sm text-gray-500"><span>Page {page} of {totalPages}</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>Previous</Button><Button size="sm" variant="outline" disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button></div></div>}
+      </main>
     </div>
-  )
+    {manageOpen && <ManageClassificationsPanel categories={categories} onClose={() => setManageOpen(false)} />}
+    {selected && <AssetClassificationPanel asset={selected} categories={categories} canEdit={isAdmin} onClose={() => setSelected(null)} />}
+  </div>
+}
+
+function ManageClassificationsPanel({ categories, onClose }: { categories: CMDBCategory[]; onClose: () => void }) {
+  const { showToast } = useToast(); const createCategory = useCreateCMDBCategory(); const updateCategory = useUpdateCMDBCategory(); const deleteCategory = useDeleteCMDBCategory()
+  const createType = useCreateCMDBType(); const updateType = useUpdateCMDBType(); const deleteType = useDeleteCMDBType()
+  const [editingCategory, setEditingCategory] = useState<CMDBCategory | null>(null); const [categoryName, setCategoryName] = useState(''); const [categoryDescription, setCategoryDescription] = useState('')
+  const [editingType, setEditingType] = useState<CMDBType | null>(null); const [typeName, setTypeName] = useState(''); const [typeDescription, setTypeDescription] = useState(''); const [typeCategory, setTypeCategory] = useState(categories[0]?.id ?? ''); const [typeKind, setTypeKind] = useState<CMDBAssetKind>('endpoint'); const [makeDefault, setMakeDefault] = useState(false)
+  const pending = createCategory.isPending || updateCategory.isPending || deleteCategory.isPending || createType.isPending || updateType.isPending || deleteType.isPending
+  useEffect(() => { if (!typeCategory && categories[0]) setTypeCategory(categories[0].id) }, [categories, typeCategory])
+  function fail(error: unknown) { showToast(errorMessage(error), { type: 'error' }) }
+  async function saveCategory() { try { const body = { name: categoryName, description: categoryDescription || null, sort_order: editingCategory?.sort_order ?? categories.length * 10 + 10 }; if (editingCategory) await updateCategory.mutateAsync({ id: editingCategory.id, body }); else await createCategory.mutateAsync(body); showToast(editingCategory ? 'Category updated.' : 'Category created.', { type: 'success' }); setEditingCategory(null); setCategoryName(''); setCategoryDescription('') } catch (e) { fail(e) } }
+  async function saveType() { try { const body = { category_id: typeCategory, asset_kind: typeKind, name: typeName, description: typeDescription || null, is_default: makeDefault }; if (editingType) await updateType.mutateAsync({ id: editingType.id, body }); else await createType.mutateAsync(body); showToast(editingType ? 'Type updated.' : 'Type created.', { type: 'success' }); setEditingType(null); setTypeName(''); setTypeDescription(''); setMakeDefault(false) } catch (e) { fail(e) } }
+  function editCategory(c: CMDBCategory) { setEditingCategory(c); setCategoryName(c.name); setCategoryDescription(c.description ?? '') }
+  function editType(t: CMDBType) { setEditingType(t); setTypeName(t.name); setTypeDescription(t.description ?? ''); setTypeCategory(t.category_id); setTypeKind(t.asset_kind); setMakeDefault(t.is_default) }
+  return <SlideOverPanel onClose={onClose}><div className="flex items-center justify-between border-b border-gray-200 px-6 py-4"><div><h2 className="font-semibold text-ink">Manage classifications</h2><p className="text-xs text-gray-500">Organization-wide categories and asset-kind types</p></div><button disabled={pending} onClick={onClose}><X className="h-5 w-5 text-gray-400" /></button></div><div className="flex-1 space-y-8 overflow-y-auto p-6">
+    <section><h3 className="mb-3 text-sm font-semibold text-ink">Categories</h3><div className="space-y-2">{categories.map((c) => <div key={c.id} className="flex items-center justify-between rounded-md border border-gray-200 p-3"><div><div className="text-sm font-medium text-gray-800">{c.name}</div><div className="text-xs text-gray-400">{c.asset_count} assets · {c.types.length} types</div></div><div className="flex gap-2"><Button size="sm" variant="secondary" disabled={pending} onClick={() => editCategory(c)}>Edit</Button><Button size="sm" variant="secondary" isLoading={deleteCategory.isPending && deleteCategory.variables === c.id} disabled={pending || c.types.length > 0} onClick={async () => { try { await deleteCategory.mutateAsync(c.id); showToast('Category deleted.', { type: 'success' }) } catch (e) { fail(e) } }}>Delete</Button></div></div>)}</div><div className="mt-3 space-y-2 rounded-md bg-gray-50 p-3"><input value={categoryName} onChange={(e) => setCategoryName(e.target.value)} placeholder="Category name" className="w-full rounded border border-gray-300 px-3 py-2 text-sm" /><textarea value={categoryDescription} onChange={(e) => setCategoryDescription(e.target.value)} placeholder="Description (optional)" className="w-full rounded border border-gray-300 px-3 py-2 text-sm" /><div className="flex justify-end gap-2"><Button variant="secondary" disabled={pending} onClick={() => { setEditingCategory(null); setCategoryName(''); setCategoryDescription('') }}>Cancel</Button><Button isLoading={createCategory.isPending || updateCategory.isPending} disabled={!categoryName.trim()} onClick={saveCategory}>{editingCategory ? 'Save category' : 'Add category'}</Button></div></div></section>
+    <section><h3 className="mb-3 text-sm font-semibold text-ink">Types</h3><div className="space-y-2">{categories.flatMap((c) => c.types.map((t) => <div key={t.id} className="flex items-center justify-between rounded-md border border-gray-200 p-3"><div><div className="text-sm font-medium text-gray-800">{t.name}{t.is_default && <span className="ml-2 rounded bg-brand-50 px-1.5 py-0.5 text-2xs text-brand-700">Default</span>}</div><div className="text-xs text-gray-400">{KIND_LABEL[t.asset_kind]} · {c.name} · {t.asset_count} assets</div></div><div className="flex gap-2"><Button size="sm" variant="secondary" disabled={pending} onClick={() => editType(t)}>Edit</Button><Button size="sm" variant="secondary" isLoading={deleteType.isPending && deleteType.variables === t.id} disabled={pending || t.is_default || t.asset_count > 0} onClick={async () => { try { await deleteType.mutateAsync(t.id); showToast('Type deleted.', { type: 'success' }) } catch (e) { fail(e) } }}>Delete</Button></div></div>))}</div><div className="mt-3 space-y-2 rounded-md bg-gray-50 p-3"><input value={typeName} onChange={(e) => setTypeName(e.target.value)} placeholder="Type name" className="w-full rounded border border-gray-300 px-3 py-2 text-sm" /><textarea value={typeDescription} onChange={(e) => setTypeDescription(e.target.value)} placeholder="Description (optional)" className="w-full rounded border border-gray-300 px-3 py-2 text-sm" /><div className="grid grid-cols-2 gap-2"><select value={typeCategory} onChange={(e) => setTypeCategory(e.target.value)} className="rounded border border-gray-300 px-3 py-2 text-sm">{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select><select value={typeKind} disabled={Boolean(editingType)} onChange={(e) => setTypeKind(e.target.value as CMDBAssetKind)} className="rounded border border-gray-300 px-3 py-2 text-sm"><option value="endpoint">Endpoint</option><option value="agent">Agent</option><option value="tool">Tool</option></select></div><label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={makeDefault} onChange={(e) => setMakeDefault(e.target.checked)} />Make default for this asset kind</label><div className="flex justify-end gap-2"><Button variant="secondary" disabled={pending} onClick={() => { setEditingType(null); setTypeName(''); setTypeDescription(''); setMakeDefault(false) }}>Cancel</Button><Button isLoading={createType.isPending || updateType.isPending} disabled={!typeName.trim() || !typeCategory} onClick={saveType}>{editingType ? 'Save type' : 'Add type'}</Button></div></div></section>
+  </div></SlideOverPanel>
+}
+
+function AssetClassificationPanel({ asset, categories, canEdit, onClose }: { asset: CMDBAsset; categories: CMDBCategory[]; canEdit: boolean; onClose: () => void }) {
+  const { showToast } = useToast(); const mutation = useSetCMDBAssetClassification(); const [value, setValue] = useState(asset.classification.classification_source === 'explicit' ? asset.classification.type_id : '')
+  const types = useMemo(() => categories.flatMap((c) => c.types).filter((t) => t.asset_kind === asset.asset_kind), [categories, asset.asset_kind])
+  async function save() { try { await mutation.mutateAsync({ kind: asset.asset_kind, id: asset.id, ciTypeId: value || null }); showToast(value ? 'Asset classification updated.' : 'Asset reset to its default classification.', { type: 'success' }); onClose() } catch (e) { showToast(errorMessage(e), { type: 'error' }) } }
+  return <SlideOverPanel onClose={onClose}><div className="flex items-center justify-between border-b border-gray-200 px-6 py-4"><div><h2 className="font-semibold text-ink">{asset.name}</h2><p className="text-xs text-gray-500">{KIND_LABEL[asset.asset_kind]} classification</p></div><button disabled={mutation.isPending} onClick={onClose}><X className="h-5 w-5 text-gray-400" /></button></div><div className="flex-1 space-y-5 overflow-y-auto p-6"><div className="rounded-md border border-gray-200 p-4"><div className="text-xs uppercase tracking-wide text-gray-400">Resolved classification</div><div className="mt-1 font-medium text-gray-800">{asset.classification.category_name} / {asset.classification.type_name}</div><div className="mt-1 text-xs text-gray-500">Source: {asset.classification.classification_source}</div></div>{canEdit ? <label className="block text-sm text-gray-700">Type<select value={value} onChange={(e) => setValue(e.target.value)} className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2"><option value="">Use {KIND_LABEL[asset.asset_kind]} default</option>{types.map((t) => <option key={t.id} value={t.id}>{categories.find((c) => c.id === t.category_id)?.name} / {t.name}{t.is_default ? ' (default)' : ''}</option>)}</select></label> : <p className="text-sm text-gray-500">Your role has read-only access to CMDB classifications.</p>}</div><div className="flex justify-end gap-2 border-t border-gray-200 px-6 py-4"><Button variant="secondary" disabled={mutation.isPending} onClick={onClose}>Cancel</Button>{canEdit && <Button isLoading={mutation.isPending} onClick={save}>Save classification</Button>}</div></SlideOverPanel>
 }
