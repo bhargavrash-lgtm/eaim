@@ -2091,6 +2091,11 @@ B-164 also flagged one adjacent-but-unrelated dormant artifact so it isn't mista
   - `GET /v1/cmdb/assets` `counts` ignore `category_id`/`type_id`/`kind` but honour workspace/search/license.
   - `PATCH /v1/cmdb/assets/{assetKind}/{assetId}/classification` can return `403 module_not_licensed` for endpoints.
 - **Now B-225 (founder-approved 2026-09-26):** hand-rolled paginators outside `pagination()` still overflow. They are `audit.go` (which also returns `err.Error()` in 500s), `paste_events.go`, `gateway_episodes.go`, and `reports.go` `parsePage`/`parseIntParam`. Both fix-up reviews flagged them (Low).
+**Unrecorded Brief 1 side effect (found 2026-09-26 by `IA_CONSOLIDATION_INVESTIGATION.md` §A2/§A3):** Brief 1 replaced the Assets page's row click with the classification panel. As a result:
+- B-217's `AgentAssetPanel`/`ToolAssetPanel` now have zero importers (they are orphaned).
+- The Assets page shows no agent or tool detail content, and offers no handoff to Agent Detail or Tools.
+
+This is for Brief 2 or the IA consolidation to resolve. No B-ID was minted.
 **Increment 2 acceptance criteria:** defined in the Part A report. Brief 1 is complete. Brief 2 remains the next B-196 slice and requires no new B-ID.
 **Dependencies:** B-147 (training orchestration — this epic's AI Workload CI category is designed to receive its output; model-evaluation/benchmarking explicitly folds into B-147's own scope, not here), B-151 (model hosting/serving — same "designed to receive its output" relationship), B-197 (Workspaces — the Groups-vs-Workspaces primitive question is shared between both epics, unresolved in both), B-200 (`RelationshipGraph.tsx` — the reusable mechanism the Asset-perspective graph extension above builds on directly).
 **Severity/Priority:** foundational EPIC, comparable in scope to B-130/B-147/B-157/B-160 — its own dedicated investigation needed, not built casually or folded into an existing brief. Recommended to be investigated **before or alongside** B-197 (Workspaces), specifically because of the shared unresolved Groups-vs-Workspaces primitive question above — building either epic's grouping concept in isolation risks needing to rework it once the other epic's needs are actually understood.

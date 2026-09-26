@@ -10,6 +10,13 @@
 
 **Status update (2026-09-24, B-220):** priority-order item 3 below (real multi-column sort on `DataTable.tsx`) is now DONE, live-verified — see `BUILT.md`/`BACKLOG.md`'s B-220 entries. One real correction to Part A's own findings, made during B-220's investigation: the cross-page summary line below reads as if single-column sort was broadly reachable before this fix ("DataTable.tsx only supports single-column sort") — direct grepping found it was actually reachable on exactly 1 of 11 audited pages (`AssetsPage.tsx`) before B-220, not broadly. Left uncorrected in the findings below as the historical record of what this audit originally said; the accurate version is in B-220's own `BUILT.md`/`BACKLOG.md` entries.
 
+**Correction (2026-09-26, IA consolidation investigation):** the Discover row below and the "Real search exists on exactly 2 of 11 pages" line are wrong about Discover.
+- **Search is ignored.** `GET /v1/endpoints` (`discover.go` `ListAgentEndpoints`) ignores `search`. Live-confirmed: a nonsense search term returned all 5 of 5 endpoints.
+- **Only 25 endpoints are reachable.** The page only ever fetches the first 25, with no pager.
+- **The OS filter is client-side** over those 25 rows.
+
+Discover therefore has no working search. Details are in `IA_CONSOLIDATION_INVESTIGATION.md` §A1. The historical text below is left unchanged.
+
 **Method:** direct file reads of every page's real source (`eami-ui/src/pages/...`), plus targeted grep across the whole `eami-ui/src/pages` tree for export/download/CSV/tooltip/help patterns. All findings below are cited to file:line. No assumptions from page names.
 
 **Status update (2026-09-25, B-221):** priority item 4 is now built for Audit and FinOps. Audit exports the exact applied five filters through a bounded, org-scoped backend CSV; FinOps exports its three real, server-date-filtered tables. The original Audit date-filter defect is fixed by RFC3339 serialization, and the former 100,000-row buffered/truncating export is replaced by an all-or-error 10,000-row / 20 MiB / 15-second, formula-safe streaming policy with per-org concurrency protection. FinOps's existing `[from,to)` UTC boundary is explicit in the export UI. Automated API/UI validation and Docker rebuild pass; authenticated browser acceptance remains pending a supplied local test session. Historical findings below are retained.

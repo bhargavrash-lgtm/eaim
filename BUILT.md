@@ -1,5 +1,25 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## IA consolidation investigation (Discover/Agents/Tools vs Assets, step-up auth, config forms) — 2026-09-26 (Claude Code)
+
+Investigation only: no application code changed and no B-ID was minted. Report: `IA_CONSOLIDATION_INVESTIGATION.md` (Parts A–D).
+
+**Roadmap mapping:** Parts A/B are adjacent to Horizon 1 "CMDB completion", and Part D to Horizon 0 maturity. Part C (step-up auth) has no roadmap item, which is flagged.
+
+**Verification:** a static source trace. The one headline correction was also live-checked with a throwaway fixture admin; the DB snapshot diff before and after was identical.
+
+**Headline findings**
+- **Discover search is non-functional.** `/v1/endpoints` ignores `search` (live-confirmed), and the page reaches only the first 25 endpoints. This corrects MATURITY_AUDIT.md.
+- **Discover's endpoint drawer holds the only control that sets the endpoint↔governed-agent link.**
+- **B-196 Brief 1 orphaned B-217's agent/tool asset panels.** The Assets page currently hands off to nothing.
+- **Agent Detail is read-only.** All agent actions exist only as Agents-list row buttons.
+- **The UI cannot edit an agent's scope, risk tier or TTL**, even though the API supports it.
+- **No step-up/re-auth mechanism exists.** Refresh tokens last 30 days.
+- **Editing a credentialed REST tool's `base_url` re-points its stored bearer credential.**
+- **Semantic policy conditions are a stub that never matches**, and the UI does not disclose it.
+- **OAuth2/Basic tool auth has no credential input.**
+- **Changing policy priority takes one full-list round trip per step.**
+
 ## B-196 Increment 2 Brief 1 fix-up pass + B-223 — 2026-09-26 (Claude Code)
 
 Founder-scoped fix-up of the review findings in `B-196_BRIEF1_VERIFICATION.md`. The full evidence record is `B-196_BRIEF1_FIXUP_VERIFICATION.md`; it quotes test output, the mutation log, the live run and both review reports verbatim. Horizon 1, "CMDB completion".

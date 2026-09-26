@@ -4,7 +4,36 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-26, newest) — B-196 Increment 2 Brief 1 fix-up pass DONE; Brief 1 complete; B-223 done, B-224 queued
+## Active decision thread (2026-09-26, newest) — IA consolidation investigation (Parts A–D) reported; awaiting founder decisions
+
+This was an investigation only; no code changed and no B-ID was minted. Report: `IA_CONSOLIDATION_INVESTIGATION.md`.
+
+**Roadmap mapping.** Parts A/B are adjacent to Horizon 1 "CMDB completion", and Part D to Horizon 0 maturity; neither is itemized. Part C (step-up auth) has no roadmap item, which is flagged; placement must be confirmed before any build.
+
+**Verdict on the proposed IA model (CMDB = canonical browse/classify; Discover detail merges into the CMDB endpoint detail; Agents/Tools are config destinations):** the direction is correct, but three corrections apply.
+1. **The Discover merge must carry the endpoint↔agent link control.** It is the only place the link is set, and B-165 remote config plus Agent Detail's endpoint node depend on it. The merge must also carry all 8 raw-report domains (5 have no normalized table) and relocate `EndpointDrawer`, which `AgentDetailPage` imports from `DiscoverPage.tsx`.
+2. **The Agents handoff target doesn't exist yet.** The Assets page has had no agent/tool detail or handoff since B-196 Brief 1 orphaned B-217's panels. Agent Detail is read-only; add, configure, suspend and delete live only on the Agents list.
+3. **Tools has no per-tool destination to hand off to.**
+
+**Also found:**
+- One endpoint+agent pair is configured in 4 places (Discover link, Agents "Configure" scanner settings, Settings API keys, Assets classification).
+- Discover search is broken (live-confirmed) and capped at 25 rows; this corrects MATURITY_AUDIT.md.
+
+**Part C.**
+- **No step-up mechanism exists**; refresh tokens last 30 days.
+- **The strongest candidate** is changing a credentialed REST tool's `base_url`, which re-points its stored bearer credential.
+- **Recommendation:** a server-enforced, absolute 5-minute recent-auth window (`POST /v1/auth/step-up` plus `requireRecentAuth` on specific routes only). It must allow IdP re-auth later, because SSO users have no password.
+
+**Part D.**
+- **Semantic policy conditions never match** (the stub returns false), and the UI doesn't disclose it.
+- **Agent scope/risk tier/TTL cannot be edited** in the UI, although the API supports it.
+- **OAuth2/Basic tools have no credential field.**
+- **The connection test is buried**, and may disagree with dispatch for internal targets.
+- **Changing priority** mixes a free numeric field with chevrons, each step costing one full-list round trip.
+
+**Next:** founder decisions on the consolidation shape, Part C placement and phasing, and which Part D items become B-IDs.
+
+## Active decision thread (2026-09-26) — B-196 Increment 2 Brief 1 fix-up pass DONE; Brief 1 complete; B-223 done, B-224 queued
 
 This was the founder-scoped fix-up pass. Evidence is in `B-196_BRIEF1_FIXUP_VERIFICATION.md`, which quotes the tests, mutation log, live run and both review reports verbatim. Horizon 1, "CMDB completion".
 
@@ -2139,6 +2168,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-26 by Claude Code — IA consolidation investigation (Parts A–D) reported in `IA_CONSOLIDATION_INVESTIGATION.md`. Investigation only: no code, no B-ID. The Discover-search claim was live-confirmed and its fixture cleaned up (snapshot diff identical). MATURITY_AUDIT.md correction noted. Active marker cleared.
+
+Prior entry:
 2026-09-26 by Claude Code — founder approved the fix-up report. B-225 minted (QUEUED) for the hand-rolled paginators after confirming it free against BACKLOG.md; next B-ID is B-226. The founder confirmed Brief 1 complete, and accepted the OpenAPI flag for Architect-EAMI, both NOTES.md entries, and the blocked-command handling as reported. No code changed. Active marker cleared.
 
 Prior entry:
