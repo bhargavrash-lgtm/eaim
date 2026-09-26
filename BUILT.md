@@ -1,5 +1,67 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-196 Increment 2 Brief 1 fix-up pass + B-223 — 2026-09-26 (Claude Code)
+
+Founder-scoped fix-up of the review findings in `B-196_BRIEF1_VERIFICATION.md`. The full evidence record is `B-196_BRIEF1_FIXUP_VERIFICATION.md`; it quotes test output, the mutation log, the live run and both review reports verbatim. Horizon 1, "CMDB completion".
+
+**Operational, first: shared-stack schema drift reconciled.**
+- **Method.** A throwaway DB was migrated from the committed files and schema-dumped, then diffed block-by-block against the shared `eami` DB.
+- **Drift found.** Two items:
+  - the known extra `ci_types_org_id_asset_kind_normalized_name_key` constraint;
+  - a live `seed_default_ci_taxonomy()` whose `ON CONFLICT` still targeted that constraint. Dropping the constraint alone would have broken every org insert.
+- **Fix.** Both functions were re-created from committed 000024 text and the constraint was dropped, all in one transaction.
+- **Result.** The re-diff shows only pg_dump's per-dump nonce. A rolled-back probe org still seeds 3 categories and 3 defaults.
+
+**Files changed**
+- `eami-api/internal/api/cmdb.go`:
+  - **N1:** navigation `counts` ignore the category/type/kind selection but keep the workspace, search and license filters.
+  - **N2:** the endpoint classification write is Discovery-license-gated, returning 403 `module_not_licensed` before the body is decoded.
+  - **L-3:** `normalizeCMDBName` trims with Unicode-aware `TrimSpace` before validation and storage.
+- `eami-api/internal/store/cmdb.sql.go`:
+  - **N4:** `likeEscaper` plus `ESCAPE E'\\'` make search a literal substring match.
+- `eami-api/internal/api/approvals.go`:
+  - **B-223:** `pagination()` bounds `page` to `min(page, 1_000_000, MaxInt32/perPage)`. Offsets can no longer overflow into a negative OFFSET (a 500) or wrap the int32 casts in `alerts.go`, `approvals.go` and `users.go`, whatever the `maxPerPage`.
+- `eami-ui/src/pages/cmdb/AssetsPage.tsx`:
+  - **N1:** "All assets" is the sum of the navigation counts.
+  - **N3:** when editing the current default type, the "Make default" checkbox is disabled and a hint says to promote another type. The API's no-op semantics are kept deliberately, because a default is replaced, never unset.
+
+**Tests**
+- New `eami-api/internal/api/cmdb_fixup_pg_test.go` (7 real-Postgres tests) covers:
+  - N1 counts under selection, search, workspace and license;
+  - N2 unlicensed/licensed/nonexistent-endpoint;
+  - L-3 with TAB, NBSP and whitespace-only names;
+  - N4 with `_`, `%` and `\`;
+  - N3 API semantics;
+  - workspace_admin/workspace_member × operator/viewer → 403 on all CMDB writes;
+  - B-223 on CMDB and users.
+- New `pagination_internal_test.go` (table-driven, plus int32 safety for any `maxPerPage`).
+- `schema/migrationtest/cmdb_classification_test.go` was rewritten for T1 and T2:
+  - `assertPgError` checks the exact SQLSTATE plus the constraint name or message.
+  - New cases: an org+category move stopped only by the trigger, the deferred zero-default check at COMMIT, and deleting an org that has explicit classifications.
+  - A new down→re-up test runs the real `000024…down.sql` and compares a full schema fingerprint (columns and defaults, constraint, index and trigger definitions, function-body hashes) against version 23.
+  - The migration version is pinned to 24.
+
+**Verification**
+- **API module:** `go build`/`go vet` pass, and `go test ./...` gives PASS=474, FAIL=0, SKIP=0 against the reconciled shared DB.
+- **Migration suite:** 6/6 pass.
+- **UI and repo checks:** `npx tsc --noEmit`, `npx vite build` and `git diff --check` are clean.
+- **Mutation check:** 12 re-broken fixes, each caught by its test.
+- **Live acceptance:** Playwright against the rebuilt API/UI containers ran 18/18 checks:
+  - N1 in the UI and the API, N2, L-3, N4 in the UI and the API, N3 in the UI;
+  - B-223 on CMDB, users and alerts;
+  - zero console errors.
+- **Cleanup:** the fixture snapshot diff is identical and the residual scan finds 0.
+- **Reviews:** independent code and security reviews found no High or Medium issues. Their int32-bound, ESCAPE and fingerprint notes were fixed in this pass.
+
+**This makes the earlier over-claims true.** The 2026-09-26 Brief 1 entry below said coverage included migration rollback, workspace-role authorization and filtered counts, and was corrected to say none of it existed. All three are now real tests: the down migration runs, workspace-role tokens are tested, and `counts` is asserted.
+
+**Limitations and open items**
+- **N3's actual fix is UI-only.** `eami-ui` has no UI test framework, so it is verified live, not by an automated test.
+- **L-3 is fixed at the API layer only.** The trigger still uses ASCII `btrim`, and zero-width characters are not trimmed (NOTES.md).
+- **Unminted paginators.** The hand-rolled paginators in `audit.go`, `paste_events.go`, `gateway_episodes.go` and `reports.go` bypass `pagination()` and still overflow. They need a founder-confirmed B-ID.
+- **OpenAPI.** The `counts` semantics and the new 403 need documenting by Architect-EAMI.
+- **Deferred.** N6 was deferred by the founder. B-224, the durable admin audit trail, is QUEUED.
+
 ## B-196 CMDB Completion, Increment 2 Brief 1 — 2026-09-26
 
 Implemented Horizon 1's CMDB classification foundation for the three authoritative asset kinds: endpoints, gateway agents, and gateway tools. Migration `000024_cmdb_classification` adds org-scoped reusable categories and types, deterministic defaults, nullable per-asset type overrides, composite tenant foreign keys, immutable type scope, kind enforcement, exactly one default per org/kind, restricted deletion, and automatic default seeding for future organizations. `schema.sql` is aligned with the migration.

@@ -4,7 +4,44 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-26, newest) — B-196 Increment 2 Brief 1: live-verified but NOT complete (review fix-ups open); Brief 2 pending
+## Active decision thread (2026-09-26, newest) — B-196 Increment 2 Brief 1 fix-up pass DONE; Brief 1 complete; B-223 done, B-224 queued
+
+This was the founder-scoped fix-up pass. Evidence is in `B-196_BRIEF1_FIXUP_VERIFICATION.md`, which quotes the tests, mutation log, live run and both review reports verbatim. Horizon 1, "CMDB completion".
+
+- **Drift reconciled first** (operational). The shared DB had two drift items, one more than known:
+  - the extra `ci_types_org_id_asset_kind_normalized_name_key` constraint;
+  - a stale `seed_default_ci_taxonomy()` whose `ON CONFLICT` still targeted that constraint. Dropping the constraint alone would have broken every org insert.
+
+  Both were fixed from committed 000024 text in one transaction. A schema-dump diff against a DB freshly migrated from the committed files now differs only in pg_dump's nonce.
+- **Fixed:**
+  - **N1:** navigation counts ignore the selection.
+  - **N2:** endpoint classification write is Discovery-gated.
+  - **N3:** UI checkbox disabled on the default. The API no-op semantics are kept deliberately.
+  - **L-3:** Unicode-aware trim at the API layer.
+  - **N4:** literal ILIKE search.
+  - **T1:** exact-SQLSTATE invariants, plus the org+category move, the deferred zero-default check, and org deletion.
+  - **T2:** the real down migration runs, with full-fingerprint equality to v23, then a re-up.
+
+  BUILT.md's three former over-claims (rollback, workspace roles, filtered counts) are now real tests.
+- **B-223 (minted, DONE):** `pagination()` bounds `page` to `min(page, 1e6, MaxInt32/perPage)`.
+- **B-224 (minted, QUEUED):** durable admin-write audit trail.
+- **B-ID check:** both IDs were confirmed free against BACKLOG.md directly. The next ID is B-225.
+- **Verification:**
+  - API tests: PASS=474, FAIL=0, SKIP=0.
+  - Migration suite: 6/6.
+  - `tsc`, `vite build` and `git diff --check` are clean.
+  - Mutation check: 12 re-broken fixes, each caught.
+  - Live Playwright on the rebuilt stack: 18/18.
+  - Fixture cleanup: snapshot diff identical, 0 residual rows.
+  - Independent code and security reviews: no High or Medium. Their int32, ESCAPE and fingerprint notes were fixed.
+- **Open:**
+  - N6 is deferred by the founder.
+  - Hand-rolled paginators outside `pagination()` (`audit.go`, `paste_events.go`, `gateway_episodes.go`, `reports.go`) still overflow. They need a founder-confirmed B-ID.
+  - Architect-EAMI should document the `counts` semantics and the new 403 in `api/openapi.yaml`.
+  - L-3's trigger-level residuals and the ungated `link-agent` route are in NOTES.md.
+- **Next:** B-196 Increment 2 Brief 2.
+
+## Active decision thread (2026-09-26) — B-196 Increment 2 Brief 1: live-verified but NOT complete (review fix-ups open); Brief 2 pending (historical, superseded by the fix-up pass above)
 
 **Correction to the entry below (Claude Code, 2026-09-26, founder verification challenge).** The "complete" claim was stronger than the evidence. Full record: `B-196_BRIEF1_VERIFICATION.md`.
 - **Reviews.** Codex's general review subagent did run, on a pre-fix snapshot. Its security subagent never ran: it failed after 2.9 s with `usage_limit_exceeded` and produced no report. This session ran an independent security review and an independent post-fix code review on committed `6924729`. The security review found no High or Medium issues and 3 Lows. The code review confirmed 4 of the 5 earlier fixes and found **N1 (Medium)**: sidebar classification counts collapse to 0 once a category or type is selected (`cmdb.go:155`), confirmed live. It also found Lows N2–N6, T1/T2, and BUILT.md over-claims.
@@ -2102,6 +2139,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-26 by Claude Code — B-196 Brief 1 fix-up pass complete: shared-DB drift reconciled; N1/N2/N3/L-3/N4/T1/T2 fixed; B-223 done and B-224 queued. Tests, 12 mutation checks and an 18/18 live Playwright run pass. Code and security reviews ran and are quoted in `B-196_BRIEF1_FIXUP_VERIFICATION.md`. Active marker cleared.
+
+Prior entry:
 2026-09-26 by Claude Code — B-196 Brief 1 verification-gap closure. The security subagent is confirmed never to have run under Codex (usage limit), and independent security and code reviews were run now; both reports are in B-196_BRIEF1_VERIFICATION.md word for word. The real Section 6 Playwright acceptance passed all 8 items, including cross-org and operator/viewer read-only. Fixture cleanup is proven by snapshot diff. Status downgraded from "complete" to "live-verified, review fix-ups open" (N1 Medium plus Lows; BUILT.md over-claims corrected). No application code changed. Active marker cleared.
 
 Prior entry:

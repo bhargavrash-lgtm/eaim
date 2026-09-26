@@ -52,3 +52,14 @@ silently edited by the wrong role).
 `ErrorResponse`/equivalent shape, `code: "conflict"`), then notifies
 FE-Dashboard to regenerate `eami-ui/src/api/schema.ts` so the typed
 client knows about it.
+
+## 2026-09-26 — B-196 Brief 1 fix-up: L-3 residuals and an ungated endpoint write (not fixed; out of scope)
+
+**L-3 residuals.** `cmdb.go`'s `normalizeCMDBName` now trims with Go's Unicode-aware `TrimSpace`, but only on the API path. Three residual cases remain:
+- The `normalize_ci_name` trigger (migration 000024) still uses ASCII-only `btrim`. A writer that bypasses the API (direct SQL, a future importer) can still store `"Connector\t"` and get normalized name `"connector "`.
+- Zero-width characters such as U+200B are not whitespace to Go or Postgres. `"Connector​"` is therefore not treated as a duplicate of `"Connector"`.
+- Whether the trigger's internal `regexp_replace('\s+', ' ')` collapses NBSP depends on the database locale.
+
+The live DB has 0 rows with trailing tab, NBSP or newline (security review, 2026-09-26). **Suggested fix:** a new migration that makes `normalize_ci_name` trim and collapse Unicode whitespace, and strips zero-width format characters, before lowercasing. Then renormalize existing rows with a conflict check.
+
+**`PATCH /v1/endpoints/{endpointId}/link-agent` (`LinkEndpointAgent`) has no Discovery-license gate.** It is admin-only and stays within one org. The B-196 fix-up gated only `SetCMDBAssetClassification`; this route was noted in both B-196 security reviews as pre-existing precedent. **Suggested fix:** the same `discoveryLicensed` check and 403 `module_not_licensed`, when a brief covers the endpoint-link surface.

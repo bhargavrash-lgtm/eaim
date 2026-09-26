@@ -152,7 +152,13 @@ func (s *Server) ListCMDBAssets(w http.ResponseWriter, r *http.Request) {
 	if assets == nil {
 		assets = []store.CMDBAsset{}
 	}
-	counts, err := s.queries.CountCMDBAssetsByType(r.Context(), f)
+	// Navigation counts drive the classification sidebar, so they must not be
+	// narrowed by the sidebar's own selection (category/type/kind) — otherwise
+	// every unselected classification reads 0. Workspace, search, and license
+	// filters still apply.
+	nav := f
+	nav.CategoryID, nav.TypeID, nav.Kind = nil, nil, ""
+	counts, err := s.queries.CountCMDBAssetsByType(r.Context(), nav)
 	if err != nil {
 		writeError(w, 500, "internal_error", "failed to count CMDB assets")
 		return
@@ -170,8 +176,14 @@ func decodeCMDBWrite(w http.ResponseWriter, r *http.Request, dst any) bool {
 	}
 	return true
 }
-func validateCMDBName(w http.ResponseWriter, name string) bool {
-	if strings.TrimSpace(name) == "" || len(name) > 120 {
+
+// normalizeCMDBName trims in place with Go's Unicode-aware TrimSpace before
+// validating. The normalize_ci_name trigger's btrim strips ASCII spaces only,
+// so an untrimmed "Connector\t" would otherwise store a normalized name of
+// "connector " and slip past the (org_id, normalized_name) uniqueness check.
+func normalizeCMDBName(w http.ResponseWriter, name *string) bool {
+	*name = strings.TrimSpace(*name)
+	if *name == "" || len(*name) > 120 {
 		writeError(w, 400, "bad_request", "name must be between 1 and 120 characters")
 		return false
 	}
@@ -210,7 +222,7 @@ func cmdbWriteError(w http.ResponseWriter, err error) {
 
 func (s *Server) CreateCMDBCategory(w http.ResponseWriter, r *http.Request) {
 	var b cmdbCategoryWrite
-	if !decodeCMDBWrite(w, r, &b) || !validateCMDBName(w, b.Name) || !validateCMDBDescription(w, b.Description) {
+	if !decodeCMDBWrite(w, r, &b) || !normalizeCMDBName(w, &b.Name) || !validateCMDBDescription(w, b.Description) {
 		return
 	}
 	uc := claimsFromContext(r)
@@ -230,7 +242,7 @@ func (s *Server) UpdateCMDBCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var b cmdbCategoryWrite
-	if !decodeCMDBWrite(w, r, &b) || !validateCMDBName(w, b.Name) || !validateCMDBDescription(w, b.Description) {
+	if !decodeCMDBWrite(w, r, &b) || !normalizeCMDBName(w, &b.Name) || !validateCMDBDescription(w, b.Description) {
 		return
 	}
 	uc := claimsFromContext(r)
@@ -258,8 +270,8 @@ func (s *Server) DeleteCMDBCategory(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 
-func validateCMDBType(w http.ResponseWriter, b cmdbTypeWrite) bool {
-	if !validateCMDBName(w, b.Name) {
+func validateCMDBType(w http.ResponseWriter, b *cmdbTypeWrite) bool {
+	if !normalizeCMDBName(w, &b.Name) {
 		return false
 	}
 	if !validateCMDBDescription(w, b.Description) {
@@ -278,7 +290,7 @@ func validateCMDBType(w http.ResponseWriter, b cmdbTypeWrite) bool {
 
 func (s *Server) CreateCMDBType(w http.ResponseWriter, r *http.Request) {
 	var b cmdbTypeWrite
-	if !decodeCMDBWrite(w, r, &b) || !validateCMDBType(w, b) {
+	if !decodeCMDBWrite(w, r, &b) || !validateCMDBType(w, &b) {
 		return
 	}
 	uc := claimsFromContext(r)
@@ -298,7 +310,7 @@ func (s *Server) UpdateCMDBType(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var b cmdbTypeWrite
-	if !decodeCMDBWrite(w, r, &b) || !validateCMDBType(w, b) {
+	if !decodeCMDBWrite(w, r, &b) || !validateCMDBType(w, &b) {
 		return
 	}
 	uc := claimsFromContext(r)
@@ -355,6 +367,11 @@ func (s *Server) SetCMDBAssetClassification(w http.ResponseWriter, r *http.Reque
 		writeError(w, 400, "bad_request", "invalid assetId")
 		return
 	}
+	uc := claimsFromContext(r)
+	if kind == "endpoint" && !s.discoveryLicensed(r, uc.OrgID) {
+		writeError(w, 403, "module_not_licensed", "your organization is not licensed for the discovery module")
+		return
+	}
 	var raw map[string]json.RawMessage
 	if !decodeCMDBWrite(w, r, &raw) {
 		return
@@ -378,7 +395,6 @@ func (s *Server) SetCMDBAssetClassification(w http.ResponseWriter, r *http.Reque
 		}
 		typeID = &v
 	}
-	uc := claimsFromContext(r)
 	c, err := s.queries.SetCMDBAssetType(r.Context(), uc.OrgID, kind, id, typeID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

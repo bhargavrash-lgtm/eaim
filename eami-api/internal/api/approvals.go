@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -399,17 +400,24 @@ func timePtrFromQuery(v string) *time.Time {
 	return &t
 }
 
+// maxPaginationPage bounds `page` so (page-1)*perPage can neither overflow
+// int64 into a negative OFFSET nor wrap the int32 offsets that several
+// callers (alerts.go, approvals.go, users.go) cast it to. The page is also
+// capped at math.MaxInt32/perPage, so the offset stays int32-safe for any
+// maxPerPage a future caller passes. A clamped request reads an empty page (B-223).
+const maxPaginationPage = 1_000_000
+
 func pagination(pageStr, perPageStr string, defaultPerPage, maxPerPage int) (page, perPage int) {
 	page = 1
 	perPage = defaultPerPage
-	if n, err := strconv.Atoi(pageStr); err == nil && n > 0 {
-		page = n
-	}
 	if n, err := strconv.Atoi(perPageStr); err == nil && n > 0 {
 		if n > maxPerPage {
 			n = maxPerPage
 		}
 		perPage = n
+	}
+	if n, err := strconv.Atoi(pageStr); err == nil && n > 0 {
+		page = min(n, maxPaginationPage, math.MaxInt32/perPage)
 	}
 	return
 }

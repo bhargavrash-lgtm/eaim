@@ -227,6 +227,8 @@ FROM gateway_tools t
 JOIN ci_types d ON d.org_id=t.org_id AND d.asset_kind='tool' AND d.is_default
 WHERE t.org_id=$1`
 
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
 func cmdbFilteredSQL(f CMDBAssetFilter) (string, []any) {
 	args := []any{f.OrgID, f.IncludeEndpoints}
 	where := []string{"TRUE"}
@@ -247,8 +249,10 @@ func cmdbFilteredSQL(f CMDBAssetFilter) (string, []any) {
 		add("a.workspace_id=$%d", *f.WorkspaceID)
 	}
 	if strings.TrimSpace(f.Query) != "" {
-		args = append(args, strings.TrimSpace(f.Query))
-		where = append(where, fmt.Sprintf("(a.name ILIKE '%%' || $%d || '%%' OR COALESCE(a.detail,'') ILIKE '%%' || $%d || '%%')", len(args), len(args)))
+		// Search is a literal substring match: escape ILIKE's own metacharacters
+		// so "_" or "%" in a hostname matches only itself, not everything.
+		args = append(args, likeEscaper.Replace(strings.TrimSpace(f.Query)))
+		where = append(where, fmt.Sprintf(`(a.name ILIKE '%%' || $%d || '%%' ESCAPE E'\\' OR COALESCE(a.detail,'') ILIKE '%%' || $%d || '%%' ESCAPE E'\\')`, len(args), len(args)))
 	}
 	return `WITH a AS (` + cmdbAssetUnion + `), filtered AS (
 SELECT a.*,ct.category_id,ct.name type_name,cc.name category_name

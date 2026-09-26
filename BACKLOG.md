@@ -2039,7 +2039,7 @@ B-164 also flagged one adjacent-but-unrelated dormant artifact so it isn't mista
 - [ ] Do not re-litigate the fail-open/fail-closed policy itself — explicitly confirmed correct as-is by the founder during this session; the fix belongs in identifying the real process, not weakening the check.
 **Dependencies:** B-037 (the incident this recurrence traces back to; its "no intermediary" research finding is now the specific thing in question). Discovered during B-191–B-194's own live demo prep session.
 
-### B-196 — EPIC: Configuration Management Database (CMDB), broadened scope — **Increment 2 Brief 1 live-verified, review fix-ups OPEN; Brief 2 pending**
+### B-196 — EPIC: Configuration Management Database (CMDB), broadened scope — **Increment 2 Brief 1 COMPLETE (fix-up pass 2026-09-26; N6 founder-deferred); Brief 2 pending**
 **Vision:** extend Discovery with a real Configuration Item (CI) data model — explicitly **not** a full enterprise CMDB. A scoped layer that normalizes already-discovered data into proper asset categories, positioned to **feed into** a real ITAM/CMDB system via integration, not replace one — matching the real, proven market pattern of how Device42 (now a Freshworks product) relates to full ITSM platforms like Freshservice: a focused discovery/normalization layer underneath a broader ITSM/CMDB, not a competitor to it.
 **Broadened CI taxonomy, corrected from an initial endpoint-only scope:**
 1. **End-user compute** (laptop/desktop/mobile) — what Discovery already builds today (`eami-agent`'s existing scanners); this epic's job here is normalization into a proper CI shape, not new detection.
@@ -2082,10 +2082,19 @@ B-164 also flagged one adjacent-but-unrelated dormant artifact so it isn't mista
   - The shared `pagination()` `page` overflow returns 500.
   - There is no durable admin audit trail.
   - Live shared-DB drift: an extra `ci_types` `UNIQUE (org_id, asset_kind, normalized_name)` constraint.
-**Increment 2 acceptance criteria:** defined in the Part A report. Brief 1 is live-verified but not complete until the fix-up items above are resolved or explicitly waived. Brief 2 remains the next B-196 slice and requires no new B-ID.
+**Increment 2 Brief 1 fix-up pass (2026-09-26, Claude Code): DONE.** Evidence: `B-196_BRIEF1_FIXUP_VERIFICATION.md`.
+- **Fixed:** N1, N2, N3 (UI-only, live-verified), L-3 (API layer), N4, T1, T2. BUILT.md's three former coverage over-claims are now real tests.
+- **Deferred:** N6, by the founder.
+- **Shared-DB drift reconciled** (operational, no B-ID). The extra constraint was dropped, and `seed_default_ci_taxonomy()` was re-created from committed 000024; its `ON CONFLICT` still targeted the dropped constraint. Live schema now equals the committed migrations.
+- **Outside-B-196 items now minted:** B-223 (`pagination()` overflow, DONE) and B-224 (admin audit trail, QUEUED).
+- **Architect-EAMI follow-up (contract, no new B-ID):** `api/openapi.yaml` should document two things.
+  - `GET /v1/cmdb/assets` `counts` ignore `category_id`/`type_id`/`kind` but honour workspace/search/license.
+  - `PATCH /v1/cmdb/assets/{assetKind}/{assetId}/classification` can return `403 module_not_licensed` for endpoints.
+- **Still needs a founder-confirmed B-ID:** hand-rolled paginators outside `pagination()` still overflow. They are `audit.go` (which also returns `err.Error()` in 500s), `paste_events.go`, `gateway_episodes.go`, and `reports.go` `parsePage`/`parseIntParam`. Both fix-up reviews flagged them (Low).
+**Increment 2 acceptance criteria:** defined in the Part A report. Brief 1 is complete. Brief 2 remains the next B-196 slice and requires no new B-ID.
 **Dependencies:** B-147 (training orchestration — this epic's AI Workload CI category is designed to receive its output; model-evaluation/benchmarking explicitly folds into B-147's own scope, not here), B-151 (model hosting/serving — same "designed to receive its output" relationship), B-197 (Workspaces — the Groups-vs-Workspaces primitive question is shared between both epics, unresolved in both), B-200 (`RelationshipGraph.tsx` — the reusable mechanism the Asset-perspective graph extension above builds on directly).
 **Severity/Priority:** foundational EPIC, comparable in scope to B-130/B-147/B-157/B-160 — its own dedicated investigation needed, not built casually or folded into an existing brief. Recommended to be investigated **before or alongside** B-197 (Workspaces), specifically because of the shared unresolved Groups-vs-Workspaces primitive question above — building either epic's grouping concept in isolation risks needing to rework it once the other epic's needs are actually understood.
-**Status:** Increment 1 shipped as B-217. Increment 2 Part A and Brief 1 are complete; Brief 2 is pending.
+**Status:** Increment 1 shipped as B-217. Increment 2 Part A and Brief 1, including its 2026-09-26 fix-up pass, are complete. Brief 2 is pending.
 
 ### B-197 — EPIC: Workspaces — delegated sub-organization administration — **logged, investigation not started**
 **Vision:** a genuine new organizational tier — **Org → Workspace → Agent/Endpoint** — enabling delegated administration (e.g. an HR workspace-admin managing their own policies/workflows/spend visibility) without compromising IT's universal governance floor. **This is the concrete architectural mechanism realizing B-160's Enterprise AI Operating System vision — not a separate idea, the same vision's real implementation**, specifically the structural piece that would let B-160's per-persona workflows (Finance, HR, Compliance, etc.) actually scope to "their own" slice of the org rather than seeing everything or nothing.
@@ -2387,4 +2396,20 @@ Breadcrumb is `Workflows` (real `<Link>` to `/gateway/workflows`) → the workfl
 
 **Objective:** update `api/openapi.yaml` to describe the real optional Audit export filters (`agent_name`, `tool_name`, `decision`, RFC3339 `from`/`to`) and its bounded-error responses. The generated client currently uses the documented route only through a narrow `apiFetchBlob` escape hatch because the contract is incomplete. OpenAPI ownership belongs to Architect-EAMI per `BOUNDARIES.md`.
 
-## Next B-ID: B-223
+### B-223 — Shared `pagination()` page overflow returns 500 / wraps int32 offsets — **DONE, 2026-09-26**
+**Origin:** B-196 Brief 1 security review L-2 / code review N5. Minted at founder direction after confirming it free against BACKLOG.md directly (counter at B-223; no overlapping open item).
+**Fix:** `pagination()` (`eami-api/internal/api/approvals.go`) bounds `page` to `min(page, 1_000_000, MaxInt32/perPage)`. Before the fix, `page=9223372036854775807` produced a negative OFFSET and a 500. It could also wrap the int32 offsets in `alerts.go`, `approvals.go` and `users.go` to arbitrary pages. Now such a request returns an empty page, with `meta.page` showing the clamped value.
+**Tests:** `pagination_internal_test.go` (table-driven, plus int32 safety for any `maxPerPage`). `TestPaginationOverflow_ReturnsEmptyPageNot500_RealDB` covers CMDB and users. Both were mutation-checked: each fails with the clamp removed.
+**Live check:** CMDB, users and alerts each returned 200 with an empty page.
+**Scope limit:** covers `pagination()` callers only. The separate hand-rolled paginators are listed under B-196's fix-up note and still need their own founder-confirmed B-ID.
+
+### B-224 — Durable admin-write audit trail — **QUEUED, 2026-09-26**
+**Origin:** B-196 Brief 1 security review (informational). Minted at founder direction as a tracked future item, after confirming it free against BACKLOG.md directly.
+**Problem:** admin writes leave no durable, queryable audit record. This covers CMDB taxonomy and classification changes, users, settings and licenses. CMDB writes emit only `slog.Info` lines with IDs. Users, settings and license writes do not log at all. `audit_log` is the gateway tool-call audit, partitioned and insert-only, and is not a fit.
+**Needs before building:**
+- a Part A investigation: schema, tenancy, retention, UI surface under the existing Audit page per the one-spine rule, and export;
+- a roadmap mapping;
+- mandatory reviewer and security passes.
+**Status:** QUEUED, not investigated.
+
+## Next B-ID: B-225
