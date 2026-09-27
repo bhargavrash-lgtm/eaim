@@ -2,9 +2,27 @@
 # Updated by: Claude Code (after every task) AND the PM chat (after every
 # planning decision). Read by both at the start of every session, before
 # anything else.
-ACTIVE AGENT: none
+ACTIVE AGENT: Code — org-branch sweep resume (27/69), after B-237 closed — started 2026-09-27T12:09:40Z
 
-## Active decision thread (2026-09-27, newest) — B-233 DONE: cross-org workspace-membership mutation closed
+## Active decision thread (2026-09-27, newest) — B-237 DONE: cross-org approval references closed; the sweep resumes at 27/69
+
+**The bug.** The org-branch sweep (endpoint 23, `CreateApproval`) found that `POST /v1/approvals` stored the body's `agent_id` and `policy_rule_id` without an org check. Another org could create approvals pointing at a victim's agent or policy; the NO ACTION FKs then blocked the victim from deleting them. A nonexistent id returned a 500 echoing the FK text, which is an existence oracle.
+
+**Part A.** No service calls this route. The gateway inserts its own approvals directly, from server-resolved identity.
+
+**The fix.** Two layers, each caught separately by mutation:
+- a handler ownership check (identical 404s for foreign and nonexistent ids);
+- an org-scoped `INSERT … SELECT`.
+
+**Verification.** Tests 486/0/0. Live-verified, including the gateway's own escalate→deny path. Cleanup snapshot identical. Evidence: `B-237_VERIFICATION.md`.
+
+**Open for the founder.**
+- The route has no legitimate caller; the choices are to remove it, or to derive its descriptive fields from the agent row.
+- The sweep continues from 27/69 in `ORG_BRANCH_ASYMMETRY_SWEEP.md`.
+
+The next B-ID is B-238.
+
+## Active decision thread (2026-09-27) — B-233 DONE: cross-org workspace-membership mutation closed
 
 **The bug.** `requireWorkspaceRole` let any org admin through before checking the workspace's org, and the membership UPDATE/DELETE had no org predicate. It was reproduced live: another org's admin promoted, demoted and removed a Dev Org fixture workspace's members.
 
@@ -2243,6 +2261,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-27 by Claude Code — B-237 (cross-org approval references) fixed and verified: two layers, each proven by its own mutation check; live check including the gateway escalation path; tests 486/0/0; both reviews completed. The sweep is resuming at 27/69, and the active marker stays set for it.
+
+Prior entry:
 2026-09-27 by Claude Code — the founder confirmed B-233 closed and approved minting three items: B-234 (raw DB error text in 500s, app-wide), B-235 (SPA HTML frame protection / clickjacking) and B-236 (agent-config reads fail open to defaults on DB errors). All three are QUEUED, confirmed free against BACKLOG.md; the next B-ID is B-237. No code changed. Active marker cleared.
 
 Prior entry:

@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -178,7 +180,11 @@ func (s *Server) GetApproval(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, storeApprovalToResp(sa))
 }
 
-// CreateApproval handles POST /v1/approvals (called by the gateway on ESCALATE).
+// CreateApproval handles POST /v1/approvals. Note: the gateway does NOT call
+// this route -- it inserts its own escalations directly
+// (eami-gateway/internal/approval/router.go Submit), with a server-resolved
+// agent identity. This route takes agent_id/policy_rule_id from the request
+// body, so both are org-validated here (B-237).
 func (s *Server) CreateApproval(w http.ResponseWriter, r *http.Request) {
 	uc := claimsFromContext(r)
 	var req CreateApprovalRequest
@@ -235,16 +241,54 @@ func (s *Server) CreateApproval(w http.ResponseWriter, r *http.Request) {
 		p.Environment = pgtype.Text{String: *req.Environment, Valid: true}
 	}
 	if req.PolicyRuleID != nil {
+		// Previously an unparseable id was silently dropped (stored as no
+		// policy); reject it like agent_id instead.
 		id, err := uuid.Parse(*req.PolicyRuleID)
-		if err == nil {
-			p.PolicyID = pgtype.UUID{Bytes: id, Valid: true}
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "invalid policy_rule_id")
+			return
 		}
+		p.PolicyID = pgtype.UUID{Bytes: id, Valid: true}
 	}
 
 	if s.queries != nil {
+		// B-237: the referenced agent (and policy, if given) must belong to
+		// the caller's org. Another org's id gets the same 404 as a
+		// nonexistent one, so neither existence nor ownership leaks.
+		if _, err := s.queries.GetAgent(r.Context(), agentID, uc.OrgID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "not_found", "agent not found")
+				return
+			}
+			slog.Error("create approval: agent ownership check failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to create approval")
+			return
+		}
+		if p.PolicyID.Valid {
+			if _, err := s.queries.GetPolicy(r.Context(), uuid.UUID(p.PolicyID.Bytes), uc.OrgID); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					writeError(w, http.StatusNotFound, "not_found", "policy not found")
+					return
+				}
+				slog.Error("create approval: policy ownership check failed", "err", err)
+				writeError(w, http.StatusInternalServerError, "internal_error", "failed to create approval")
+				return
+			}
+		}
+		// The insert is itself org-scoped (defense in depth): ErrNoRows
+		// means the agent or policy is not this org's -- reachable only if
+		// the checks above were bypassed or raced (e.g. a delete between
+		// check and insert). Its distinct message keeps the two layers
+		// separately testable; it is the same for foreign and nonexistent
+		// references, so it reveals nothing either.
 		a, err := s.queries.CreateApproval(r.Context(), p)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "not_found", "approval references not found")
+				return
+			}
+			slog.Error("create approval failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to create approval")
 			return
 		}
 		writeJSON(w, http.StatusCreated, approvalToResp(*a))

@@ -1,5 +1,37 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-237 — Cross-org approval references fixed — 2026-09-27 (Claude Code)
+
+This was an urgent tenant-isolation fix, found by the org-ownership branch-asymmetry sweep. The evidence record (Part A answer, live attack before and after, per-layer mutation log, gateway end-to-end run, both reviews verbatim) is `B-237_VERIFICATION.md`.
+
+**Files changed**
+- **`eami-api/internal/api/approvals.go`** (`CreateApproval`):
+  - `GetAgent(agent_id, uc.OrgID)` and, when a policy is given, `GetPolicy(policy_rule_id, uc.OrgID)` run before the insert, giving 404 "agent not found" / "policy not found", identical for foreign and nonexistent ids;
+  - an unparseable `policy_rule_id` now gets 400 instead of being silently dropped;
+  - generic 500s are logged with `slog`, with no `err.Error()` echo;
+  - the false "called by the gateway" comment is corrected.
+- **`eami-api/internal/store/approvals.sql.go`** and **`store/query/approvals.sql`**: `CreateApproval` is now `INSERT … SELECT … FROM gateway_agents WHERE id AND org_id AND (policy NULL OR EXISTS policy in org)`. A foreign or nonexistent reference returns `pgx.ErrNoRows`, never an FK error.
+- **`eami-api/internal/api/approval_org_pg_test.go`** (new, real Postgres): three tests.
+  - **Cross-org:** operator and admin attackers; the byte-identical foreign-vs-nonexistent 404s are pinned; the victim can still delete its agent and policy.
+  - **Same-org:** 201 with and without a policy; a viewer gets 403.
+  - **Store layer alone.**
+- **Not changed:** `eami-gateway`. It never calls this route, and its approval suite passes 26/0/0.
+
+**Verification**
+- `go build`, `go vet` and gofmt are clean. `go test ./...` in eami-api gives PASS=486, FAIL=0, SKIP=0.
+- **Mutations:** the handler agent check, the handler policy check and the SQL scoping are each broken separately, and each removal is caught.
+- **Live:** reproduced on the pre-fix stack (201 cross-org; 500 FK oracle; the victim could not delete). On the final build:
+  - every probe gets an identical 404 and no rows are written;
+  - same-org creation gets 201;
+  - the gateway's real escalation (key, token, SSE, `tool_call`, gateway-inserted approval, deny, SSE denial) works.
+- **Cleanup:** snapshot identical, twice. The deliberate residue is +2 hash-chained `audit_log` rows per E2E cycle.
+- **Reviews:** code and security both completed.
+
+**Limitations / recorded**
+- The route has no legitimate caller, and same-org spoofing of descriptive fields remains (founder decision).
+- Bad `risk_level`/`environment` returns 500; `EstimatedRecords` has an int32 overflow.
+- `DecideApproval`'s `err.Error()` echo was added to B-234.
+
 ## B-233 — Cross-org workspace-membership mutation fixed — 2026-09-27 (Claude Code)
 
 This was an urgent tenant-isolation fix. The evidence record, quoting the live attack before and after, the per-layer mutation log and both reviews verbatim, is `B-233_VERIFICATION.md`.

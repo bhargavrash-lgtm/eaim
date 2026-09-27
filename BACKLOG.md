@@ -2573,7 +2573,8 @@ Minted at founder direction. It was confirmed free against BACKLOG.md directly: 
 - `UpdatePolicy`, and `ReorderPolicies`' exhausted-retry path (B-117);
 - `AddWorkspaceMember`, `ListWorkspaceMembers`, `UpdateWorkspace` and `CreateWorkspacePolicy`;
 - `ListAlerts` (`alerts.go`);
-- `audit.go`'s list path (also noted in B-225).
+- `audit.go`'s list path (also noted in B-225);
+- `DecideApproval`'s 500 path (`approvals.go`) and `CreateAPIKey`'s 500 path (`auth.go`), both from the B-237 security review.
 
 B-232 and B-233 already fixed the handlers they touched: `UpdateAgentConfig`, and the workspace member PATCH/DELETE.
 **Exposure:** only authenticated callers see these messages, and only when a real DB fault occurs. They are same-org, so there is no cross-tenant data. It is still information disclosure and inconsistent hygiene.
@@ -2611,7 +2612,7 @@ B-232 and B-233 already fixed the handlers they touched: `UpdateAgentConfig`, an
 - Add tests that force a DB error on each path.
 **Status:** QUEUED.
 
-### B-237 — `POST /v1/approvals` stores unvalidated cross-org agent/policy references (cross-tenant delete-blocking + existence oracle) — **OPEN, 2026-09-27, found by the org-branch-asymmetry sweep**
+### B-237 — `POST /v1/approvals` stores unvalidated cross-org agent/policy references (cross-tenant delete-blocking + existence oracle) — **DONE, 2026-09-27** (found by the org-branch-asymmetry sweep; evidence: `B-237_VERIFICATION.md`)
 **Origin:** the org-ownership branch-asymmetry sweep (`ORG_BRANCH_ASYMMETRY_SWEEP.md`), reported immediately per its brief. The brief pre-authorizes a B-ID for any real finding. B-237 was confirmed free against BACKLOG.md directly: the counter read B-237, and no open item overlapped.
 **Problem:** `CreateApproval` writes the approval with the caller's `org_id` but inserts the body's `agent_id`/`policy_rule_id` unvalidated. Both are FKs with NO ACTION on delete.
 **Live-confirmed on the running stack** (fixtures only, cleaned, snapshot identical): an operator in a throwaway org created an approval referencing a Dev Org agent and policy (201). The Dev Org admin then could **not** delete its own agent (409) or policy (500). A nonexistent agent ID returns 500 with the FK error text, which is an existence oracle.
@@ -2621,6 +2622,11 @@ B-232 and B-233 already fixed the handlers they touched: `UpdateAgentConfig`, an
 - SQL: org-scope the insert.
 - Tests: a cross-org adversarial real-Postgres test plus per-layer mutation checks.
 - Decide whether this JWT route is needed at all, since the gateway doesn't call it.
-**Status:** OPEN, awaiting the founder's go to fix now (the sweep is paused at 26 of 69 endpoints).
+**Status:** DONE 2026-09-27.
+- **Part A answer:** no service calls `POST /v1/approvals`. The gateway inserts its escalations directly, using server-resolved identity, so its path is untouched. That path was live-verified end to end.
+- **Fix:** a handler ownership check on the agent and policy (identical 404 for foreign and nonexistent ids; an unparseable `policy_rule_id` gets 400), plus an org-scoped `INSERT … SELECT` in the store.
+- **Verification:** each layer's removal is caught separately. Tests 486/0/0. Both reviews: no High or Medium findings.
+- **Recorded for a founder decision:** the route has no legitimate caller and still allows **same-org** spoofed descriptive fields. Remove it, or derive those fields from the agent row.
+- **Pre-existing, not fixed:** invalid `risk_level`/`environment` returns 500 instead of 400; `EstimatedRecords` has an int32 overflow.
 
 ## Next B-ID: B-238

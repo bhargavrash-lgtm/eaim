@@ -19,7 +19,11 @@ Started 2026-09-27 by Claude Code, from a founder brief.
 
 ## Findings (reported immediately, per the brief)
 
-### B-237 — `POST /v1/approvals` (`CreateApproval`) stores unvalidated cross-org agent and policy references — **FAIL, live-confirmed**
+> **Status note (2026-09-27):**
+> - **B-237 is FIXED and verified.** Handler ownership checks plus an org-scoped insert. Each layer's removal is caught by its own test. It was live-verified on the final build, including the gateway's own escalation path. See `B-237_VERIFICATION.md`.
+> - **The sweep resumed at endpoint 27.**
+
+### B-237 — `POST /v1/approvals` (`CreateApproval`) stores unvalidated cross-org agent and policy references — **FAIL, live-confirmed → FIXED 2026-09-27**
 
 **The problem**
 - The handler writes the approval with the caller's `org_id`.
@@ -48,7 +52,7 @@ It does **not** read or modify the victim's rows. Proposed severity: **Medium**,
 - **Tests:** a cross-org adversarial test (real-Postgres) and per-layer mutation checks.
 - **Open question:** whether this JWT route should exist at all. No gateway code calls it; the gateway creates approvals itself.
 
-## Endpoint ledger (audited so far — the sweep is paused here to report B-237)
+## Endpoint ledger
 
 | # | Endpoint | Handler | Verdict | Evidence |
 |---|---|---|---|---|
@@ -74,7 +78,7 @@ It does **not** read or modify the victim's rows. Proposed severity: **Medium**,
 | 20 | POST /v1/alerts/rules/{ruleId}/test | TestAlertRule | PASS | an org-scoped read, then a dry run only (no write) |
 | 21 | POST /v1/alerts/{alertId}/acknowledge | AcknowledgeAlert | PASS | `UpdateAlertStatus … WHERE id AND org_id` |
 | 22 | POST /v1/alerts/{alertId}/resolve | ResolveAlert | PASS | the same |
-| 23 | POST /v1/approvals | CreateApproval | **FAIL → B-237** | see above |
+| 23 | POST /v1/approvals | CreateApproval | **FAIL → B-237 (FIXED 2026-09-27)** | see above; `B-237_VERIFICATION.md` |
 | 24 | PUT /v1/gateway/agents/{agentId}/config | UpdateAgentConfig | PASS (fixed by B-232) | `B-232_VERIFICATION.md` |
 | 25 | PATCH /v1/workspaces/{id}/members/{userId} | UpdateWorkspaceMemberRole | PASS (fixed by B-233) | `B-233_VERIFICATION.md` |
 | 26 | DELETE /v1/workspaces/{id}/members/{userId} | RemoveWorkspaceMember | PASS (fixed by B-233) | `B-233_VERIFICATION.md` |

@@ -143,13 +143,22 @@ INSERT INTO approval_requests (
     org_id, agent_id, agent_name, tool_name, action, parameters,
     justification, risk_level, estimated_records, reversible, environment,
     data_types, policy_id, expires_at, gateway_session_id, gateway_node_address
-) VALUES (
+)
+SELECT
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10, $11,
     $12, $13, $14, $15, $16
-)
+FROM gateway_agents a
+WHERE a.id = $2 AND a.org_id = $1
+  AND ($13::uuid IS NULL OR EXISTS (SELECT 1 FROM policies p WHERE p.id = $13 AND p.org_id = $1))
 RETURNING ` + approvalCols
 
+// CreateApproval inserts an approval only when agent_id (and policy_id, if
+// set) belong to p.OrgID (B-237): the org check is part of the statement, so
+// another org's agent or policy yields no row, nothing is written, and
+// pgx.ErrNoRows is returned. approval_requests' agent_id/policy_id FKs are
+// NO ACTION, so an unchecked foreign reference would block that org from
+// deleting its own agent or policy.
 func (q *Queries) CreateApproval(ctx context.Context, p CreateApprovalParams) (*ApprovalRequest, error) {
 	dataTypes := p.DataTypes
 	if dataTypes == nil {
