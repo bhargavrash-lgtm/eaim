@@ -1,6 +1,22 @@
-# Org-Ownership Branch-Asymmetry Sweep (in progress)
+# Org-Ownership Branch-Asymmetry Sweep — COMPLETE (69/69)
 
-Started 2026-09-27 by Claude Code, from a founder brief.
+Started 2026-09-27 by Claude Code, from a founder brief. **Completed 2026-09-27.**
+
+## Result
+
+| | Count | Endpoints |
+|---|---|---|
+| **PASS** | 67 | everything not listed below |
+| **FAIL** | 2 | **B-237** (`CreateApproval`: cross-org references), **FIXED** 2026-09-27; **B-238** (webhook SSRF: the dial guard on one path is missing on its sibling), **OPEN**, awaiting the founder |
+
+The two FAILs are counted by finding, not by row: B-238's source is shared between rows 54 and 55. Rows 24–26 PASS only because of B-232/B-233, which were fixed before this sweep.
+
+**No other org check was found that runs on one branch only.**
+
+**Info items recorded, not minted.** Each is a founder or design decision, not a branch asymmetry:
+- **#46 InviteUser:** `users.email` is globally unique, which tells an admin whether an email has an account in any org.
+- **#67/#69:** the single global service key trusts a body `org_id`.
+- **#23 (post-fix):** `POST /v1/approvals` has no legitimate caller.
 
 **Question asked of every mutation endpoint in eami-api:** is org-ownership validation guaranteed on **every** code path that can reach a DB write? Or can a branch skip it — a "no existing row" case, a route bypassing shared middleware, or a fallback? That is the shape B-232 and B-233 shared.
 
@@ -129,8 +145,22 @@ Full detail and the proposed fix are in BACKLOG.md B-238. The severity proposed 
 | 53 | POST /v1/settings/license | UploadLicense | PASS | the signed license's `org_id` must equal `uc.OrgID`; the transaction is locked and scoped to `uc.OrgID` |
 | 54 | PUT /v1/settings/notifications | UpdateNotificationConfig | PASS (org) | the upsert is keyed on `uc.OrgID`. It stores `slack_webhook_url` unvalidated, which feeds B-238 |
 | 55 | POST /v1/settings/notifications/test | TestNotificationChannel | PASS (org) / **FAIL → B-238** | the config is read by `uc.OrgID`. The unguarded `http.Post` to the stored URL is an SSRF (see above) |
+| 56 | POST /v1/admin/model-pricing | CreateModelPricing | PASS (N/A: global) | `model_pricing` is a deliberately global table with no `org_id`, gated to `platform_admin`. That role cannot be granted through invite or role-update (#46/#47), only at provisioning |
+| 57 | PATCH /v1/admin/model-pricing/{model} | UpdateModelPricing | PASS (N/A: global) | the same |
+| 58 | DELETE /v1/admin/model-pricing/{model} | DeleteModelPricing | PASS (N/A: global) | the same |
+| 59 | POST /v1/gateway/openapi/discover | DiscoverOpenAPI | PASS | no DB write (parse only); the `spec_url` fetch uses `safeDialContext` |
+| 60 | POST /v1/auth/login | Login | PASS | org is taken from the user row (`GetUserByEmail … deleted_at IS NULL`), never from the request; the refresh token is keyed on that user; the `storeIface` branch is test-only |
+| 61 | POST /v1/auth/refresh | Refresh | PASS | the token is looked up by sha256 hash; org is re-derived from the DB user; the old token is revoked by its own id |
+| 62 | POST /v1/auth/accept-invite | AcceptInvite | PASS | in a transaction, the token row is locked (`FOR UPDATE`), so the user comes from the token; the password write and token consume are keyed on those ids; deleted users are refused |
+| 63 | POST /v1/auth/request-reset | RequestPasswordReset | PASS | no DB write; log only |
+| 64 | POST /v1/auth/reset-password | ResetPassword | PASS | the same token→user pattern as #62 |
+| 65 | POST /v1/setup/token/validate | ValidateSetupToken | PASS | read only |
+| 66 | POST /v1/setup/bootstrap | Bootstrap | PASS | an advisory lock, then a locked setup-token row; it runs only when `count(orgs)=0` and creates its own org and admin |
+| 67 | POST /v1/reports | IngestReports | PASS (by design) | `requireServiceKey` runs on every path, so there is no branch asymmetry. **Info:** `org_id` comes from the event body, and one global service key authorizes any org. There is no current caller (the collector uses #68). This is safe only while every key holder is platform-operated |
+| 68 | POST /v1/ingest/batch | IngestBatch | PASS | the service key; org is server-resolved (`GetDefaultOrgID`), and no item field can influence it (B-033/B-034 note) |
+| 69 | POST /v1/internal/token-usage | IngestTokenUsage | PASS (by design) | the service key; body `org_id`/`agent_id`; the only caller is eami-gateway, with its server-resolved org. **Info:** the same global-key trust as #67 (also noted in B-237's security review) |
 
-**Remaining, not yet audited** (as of the B-238 report): 14 endpoints, #56–69, listed below. Rows 27–55 are done; the stale bucket list is kept for reference.
+**Original bucket list** (all now audited; kept for reference):
 - **Approvals, nodes, API keys:** DecideApproval, DeleteNode, CreateAPIKey, RevokeAPIKey.
 - **Agents:** CreateAgent, UpdateAgent, DeleteAgent.
 - **Endpoints, CMDB, workspaces:**

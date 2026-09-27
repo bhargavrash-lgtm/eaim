@@ -2,9 +2,22 @@
 # Updated by: Claude Code (after every task) AND the PM chat (after every
 # planning decision). Read by both at the start of every session, before
 # anything else.
-ACTIVE AGENT: Code — org-branch sweep resume (27/69), after B-237 closed — started 2026-09-27T12:09:40Z
+ACTIVE AGENT: none
 
-## Active decision thread (2026-09-27, newest) — B-237 DONE: cross-org approval references closed; the sweep resumes at 27/69
+## Active decision thread (2026-09-27, newest) — Org-branch sweep COMPLETE 69/69: 67 PASS, 2 FAIL (B-237 fixed, B-238 open)
+
+**Result.** `ORG_BRANCH_ASYMMETRY_SWEEP.md` now has the literal pass/fail ledger for all 69 eami-api mutation endpoints. Only two real findings:
+- **B-237** (cross-org approval references): FIXED.
+- **B-238** (Medium, proposed): the Slack webhook senders (`TestNotificationChannel` and the alert engine's `SendSlack`) use a bare `http.Post` with no `safeDialContext` and no timeout, to an unvalidated admin-set URL. It was live-confirmed that an admin can make internal POSTs, and the error text works as a port-scan oracle. Fixture cleaned, snapshot identical. **OPEN, awaiting the founder's go.** The founder should also confirm B-238 isn't reserved in conversation.
+
+**Info items for the founder (not minted).**
+- Global `users.email` uniqueness is a cross-org existence signal on invite.
+- The global service key trusts a body `org_id` on `/v1/reports` and `/v1/internal/token-usage`.
+- `POST /v1/approvals` has no legitimate caller.
+
+No code changed in the sweep. The next B-ID is B-239.
+
+## Active decision thread (2026-09-27) — B-237 DONE: cross-org approval references closed; the sweep resumes at 27/69
 
 **The bug.** The org-branch sweep (endpoint 23, `CreateApproval`) found that `POST /v1/approvals` stored the body's `agent_id` and `policy_rule_id` without an org check. Another org could create approvals pointing at a victim's agent or policy; the NO ACTION FKs then blocked the victim from deleting them. A nonexistent id returned a 500 echoing the FK text, which is an existence oracle.
 
@@ -2261,6 +2274,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-27 by Claude Code — the org-branch sweep is complete: 69/69, 67 PASS, 2 FAIL (B-237 fixed in 1f33bf6; B-238 webhook SSRF OPEN, logged in 75bb867). The active marker is cleared.
+
+Prior entry:
 2026-09-27 by Claude Code — B-237 (cross-org approval references) fixed and verified: two layers, each proven by its own mutation check; live check including the gateway escalation path; tests 486/0/0; both reviews completed. The sweep is resuming at 27/69, and the active marker stays set for it.
 
 Prior entry:
