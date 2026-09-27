@@ -2432,4 +2432,34 @@ For example, `GET /v1/audit?page=4294967297&per_page=100` wraps the offset to 0 
 - Add unit and real-DB overflow tests per route, mutation-checked as B-223's were.
 **Status:** QUEUED, not started.
 
-## Next B-ID: B-226
+### B-226 — `GET /v1/endpoints` ignored its documented `search` parameter — **DONE, 2026-09-27**
+**Origin:** `IA_CONSOLIDATION_INVESTIGATION.md` §A1, live-confirmed: a nonsense search returned all 5 of 5 endpoints. Minted at founder direction after confirming it free against BACKLOG.md directly: the counter read B-226, and no open item used B-226/227/228 or covered this scope.
+**Cause:** `ListAgentEndpoints` never read `search`, and neither the store params nor the SQL had a filter. The count was also unfiltered. The contract already documented `search`, so this was a backend-only fix with no Architect involvement.
+**Fix:**
+- One shared SQL fragment (`agentEndpointSearchSQL`) for both list and count: a case-insensitive literal hostname substring match (`ILIKE`, `likeEscaper`, `ESCAPE E'\\'`).
+- `ORDER BY last_seen DESC, id` for stable pages.
+- 400 for NUL, invalid UTF-8, or more than 200 characters (counted as runes).
+**Verification:**
+- **Tests:** real-Postgres tests cover search/count parity, literal `_%\`, trimming, tenant isolation, and validation.
+- **Mutation check:** list, count, escaping, the UTF-8 guard and the rune limit are each caught. The `id` tie-breaker is **not** reliably caught; it is review-verified.
+- **Live:** 18/18 checks passed.
+- **Reviews:** security review (first pass plus delta) and code review both completed and are quoted verbatim in `B-226_B-227_VERIFICATION.md`.
+**Follow-ups, not fixed here:**
+- `has_ai`/`has_local_model` are documented but still ignored. This is the same bug class and **needs a founder-confirmed B-ID**.
+- Architect-EAMI contract note: `search` is described as "hostname **or username**", but `endpoints` has no username column; and `per_page` is documented as max 100, while the server allows 200.
+- `parsePage` page overflow is still tracked under B-225.
+- Malformed `%zz` escapes silently drop the parameter, which is shared `url.Query()` behaviour (security review, Info).
+
+### B-227 — Discover could only ever reach the first 25 endpoints — **DONE, 2026-09-27**
+**Origin:** same investigation. Minted at founder direction, with the same free-ID check. It has a distinct root cause from B-226: the server paged correctly, and the page never asked for more.
+**Fix** (`DiscoverPage.tsx`):
+- **Paging:** server page state with a Previous/Next pager, following the Assets page's pattern. The page is clamped when the matching set shrinks.
+- **Search:** a 250 ms debounce that commits the trimmed search and page 1 together. The input has `maxLength=200`.
+- **Honest labels:** "Loading…" replaces a false "0 endpoints" while loading, and a failed request shows an error plus Retry. The platform filter is labelled "applies to this page only" (founder-chosen option (c)).
+**Verification:** live paging past 25, both unfiltered (37 endpoints) and filtered (30 matches). No endpoint ID repeats across pages, and one debounced request goes out per search. The page clamp is review-verified only, because focus-refetch is disabled app-wide.
+
+### B-228 — Server-side OS/platform filter for `GET /v1/endpoints` — **QUEUED, 2026-09-27**
+**Origin:** B-227's founder-approved option (c). The Discover platform filter is client-side and only narrows the current page, and it is now honestly labelled that way. A real fix needs an `os` query parameter in `api/openapi.yaml`, which Architect-EAMI owns, plus a handler/store filter on `os_info`. Minted at founder direction after the same free-ID check.
+**Status:** QUEUED.
+
+## Next B-ID: B-229

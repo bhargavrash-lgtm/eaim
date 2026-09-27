@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AppTopBar } from '@/components/layout/AppTopBar'
 import { PageHeader } from '@/components/common/PageHeader'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { DataTable } from '@/components/common/DataTable'
+import { Button } from '@/components/common/Button'
 import type { Column } from '@/components/common/DataTable'
 import { SlideOverPanel } from '@/components/common/SlideOverPanel'
 import { useEndpoints, useEndpoint, useLinkEndpointAgent } from '@/hooks/useEndpoints'
@@ -318,19 +319,53 @@ export function EndpointDrawer({ endpointId, onClose }: { endpointId: string; on
   )
 }
 
+function requestErrorMessage(error: unknown): string {
+  return error && typeof error === 'object' && 'message' in error && typeof error.message === 'string'
+    ? error.message
+    : 'The endpoint inventory could not be loaded.'
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+const PER_PAGE = 25
+
 export function DiscoverPage() {
+  const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [osFilter, setOsFilter] = useState<string>('')
+  const [page, setPage] = useState(1)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
-  const { data, isLoading } = useEndpoints({
-    search: search || undefined,
-    per_page: 25,
-  })
+  // Debounced: the query and the page reset change together once typing
+  // pauses, so no request goes out per keystroke or with a stale page.
+  useEffect(() => {
+    const next = searchInput.trim()
+    if (next === search) return
+    const id = setTimeout(() => {
+      setSearch(next)
+      setPage(1)
+    }, 250)
+    return () => clearTimeout(id)
+  }, [searchInput, search])
 
-  const endpoints: Endpoint[] = (data?.data ?? []).filter((ep) =>
+  // B-226/B-227: search and paging are server-side. Before this, the page
+  // only ever fetched the first 25 endpoints and the API ignored search.
+  const { data, isLoading, isError, error, isFetching, refetch } = useEndpoints({
+    search: search || undefined,
+    page,
+    per_page: PER_PAGE,
+  })
+  const total = data?.meta?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
+  useEffect(() => {
+    if (data && page > totalPages) setPage(totalPages)
+  }, [data, page, totalPages])
+
+  // The platform filter stays client-side (the API has no OS parameter), so
+  // it can only narrow the endpoints already loaded for this page -- said so
+  // in the UI rather than implying it filters the whole inventory.
+  const pageEndpoints: Endpoint[] = data?.data ?? []
+  const endpoints: Endpoint[] = pageEndpoints.filter((ep) =>
     osFilter ? (ep.os ?? '').toLowerCase().includes(osFilter.toLowerCase()) : true,
   )
 
@@ -369,13 +404,15 @@ export function DiscoverPage() {
             <input
               type="text"
               placeholder="Search hostname…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              value={searchInput}
+              maxLength={200}
+              onChange={(e) => setSearchInput(e.target.value)}
               className="pl-8 pr-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500 w-56"
             />
           </div>
           <select
             value={osFilter}
+            title="Filters the endpoints on the current page only"
             onChange={(e) => setOsFilter(e.target.value)}
             className="px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
           >
@@ -384,16 +421,27 @@ export function DiscoverPage() {
             <option value="darwin">macOS</option>
             <option value="linux">Linux</option>
           </select>
-          <span className="text-xs text-gray-500">{data?.meta?.total ?? 0} endpoints</span>
+          <span className="text-xs text-gray-500">{isLoading ? 'Loading…' : isError ? 'Endpoints unavailable' : `${total} endpoints`}</span>
+          {osFilter && (
+            <span className="text-xs text-gray-500">
+              Platform filter applies to this page only — showing {endpoints.length} of {pageEndpoints.length} on this page
+            </span>
+          )}
         </div>
 
         {/* Table */}
         <div className="mt-4">
+          {isError ? (
+            <div className="rounded-lg border border-red-200 bg-white p-8 text-center">
+              <p className="mb-3 text-sm text-red-700">{requestErrorMessage(error)}</p>
+              <Button variant="outline" isLoading={isFetching} onClick={() => refetch()}>Retry</Button>
+            </div>
+          ) : (
           <DataTable
             columns={endpointColumns}
             data={endpoints}
             loading={isLoading}
-            pageSize={1000}
+            pageSize={PER_PAGE}
             getRowId={(ep) => ep.id}
             onRowClick={(ep) => setSelectedId(ep.id)}
             renderEmpty={() => (
@@ -404,6 +452,16 @@ export function DiscoverPage() {
               />
             )}
           />
+          )}
+          {!isError && totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
+              <span>Page {page} of {totalPages}</span>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>Previous</Button>
+                <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

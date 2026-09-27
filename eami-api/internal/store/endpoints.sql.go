@@ -398,12 +398,20 @@ func (q *Queries) InsertEndpointMCPServer(ctx context.Context, p InsertEndpointM
 
 // ── Agent endpoint read queries (Discover page) ───────────────────────────────
 
-// ListAgentEndpointsParams holds pagination params for ListAgentEndpoints.
+// ListAgentEndpointsParams holds pagination and filter params for
+// ListAgentEndpoints. Search is a literal, case-insensitive hostname
+// substring; empty means no filter (B-226).
 type ListAgentEndpointsParams struct {
 	OrgID  uuid.UUID
+	Search string
 	Limit  int32
 	Offset int32
 }
+
+// agentEndpointSearchSQL is the one filter shared by ListAgentEndpoints and
+// CountAgentEndpoints, so meta.total always counts exactly the rows the list
+// pages through. $2 is the likeEscaper-escaped search (empty = no filter).
+const agentEndpointSearchSQL = `($2::text = '' OR e.hostname ILIKE '%' || $2 || '%' ESCAPE E'\\')`
 
 const listAgentEndpointsSQL = `
 SELECT
@@ -422,14 +430,14 @@ SELECT
 	e.gateway_agent_id, ga.name
 FROM endpoints e
 LEFT JOIN gateway_agents ga ON ga.id = e.gateway_agent_id
-WHERE e.org_id = $1
-ORDER BY e.last_seen DESC
-LIMIT $2 OFFSET $3`
+WHERE e.org_id = $1 AND ` + agentEndpointSearchSQL + `
+ORDER BY e.last_seen DESC, e.id
+LIMIT $3 OFFSET $4`
 
 // ListAgentEndpoints returns a paginated list of agent machines for an org.
 func (q *Queries) ListAgentEndpoints(ctx context.Context, p ListAgentEndpointsParams) ([]AgentEndpoint, error) {
 	rows, err := q.db.Query(ctx, listAgentEndpointsSQL,
-		toPgtypeUUID(p.OrgID), p.Limit, p.Offset)
+		toPgtypeUUID(p.OrgID), likeEscaper.Replace(p.Search), p.Limit, p.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -445,11 +453,13 @@ func (q *Queries) ListAgentEndpoints(ctx context.Context, p ListAgentEndpointsPa
 	return out, rows.Err()
 }
 
-// CountAgentEndpoints returns total agent machine rows for an org.
-func (q *Queries) CountAgentEndpoints(ctx context.Context, orgID uuid.UUID) (int64, error) {
+// CountAgentEndpoints returns the org's agent machine rows matching search
+// (the same filter ListAgentEndpoints applies; empty counts every row).
+func (q *Queries) CountAgentEndpoints(ctx context.Context, orgID uuid.UUID, search string) (int64, error) {
 	var n int64
 	return n, q.db.QueryRow(ctx,
-		`SELECT COUNT(*) FROM endpoints WHERE org_id = $1`, toPgtypeUUID(orgID),
+		`SELECT COUNT(*) FROM endpoints e WHERE e.org_id = $1 AND `+agentEndpointSearchSQL,
+		toPgtypeUUID(orgID), likeEscaper.Replace(search),
 	).Scan(&n)
 }
 

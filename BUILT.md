@@ -1,5 +1,29 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-226 / B-227 — `/v1/endpoints` search + Discover paging — 2026-09-27 (Claude Code)
+
+The evidence record, quoting tests, the mutation log, the live run and all three completed reviews verbatim, is `B-226_B-227_VERIFICATION.md`.
+
+**Files changed**
+- **`eami-api/internal/store/endpoints.sql.go`**
+  - `ListAgentEndpointsParams.Search`, plus `agentEndpointSearchSQL`, which list and count share. The filter is a literal case-insensitive hostname substring match (`ILIKE` with `likeEscaper`, `ESCAPE E'\\'`).
+  - `CountAgentEndpoints(ctx, orgID, search)`.
+  - `ORDER BY last_seen DESC, id`.
+- **`eami-api/internal/api/discover.go`**: reads `search`, trims it, and returns 400 on NUL, invalid UTF-8, or more than 200 runes.
+- **`eami-ui/src/pages/discover/DiscoverPage.tsx`**: server paging and pager; debounced, trimmed search with `maxLength`; "Loading…" and error+Retry states; page clamp; platform filter labelled "applies to this page only".
+- **`MATURITY_AUDIT.md`**: Discover row and summary corrected in place, with the original struck through and marked incorrect.
+- **New tests:** `eami-api/internal/api/endpoints_search_pg_test.go`, containing 2 real-Postgres tests.
+
+**Verification**
+- **Build and tests:** `go build`/`go vet` pass. `go test ./...` gives PASS=476, FAIL=0, SKIP=0. `tsc`, `vite build` and `git diff --check` are clean.
+- **Mutation check:** 5 of the 6 mutations are caught. The `id` tie-breaker is not reliably detectable (disclosed).
+- **Live:** 18/18 checks on the rebuilt stack. Fixture cleanup was proven by an identical snapshot diff, with 0 residual rows.
+- **Reviews:** a security first pass (2 Lows, both fixed), a security delta re-review (resolved, Info only), and a fresh full code review (3 Lows, all fixed). A first code-review attempt was stopped before reporting; it is not counted.
+
+**Limitations**
+- The UI fixes are covered live, not by automated tests (no UI test framework). The page clamp is review-verified only.
+- Follow-ups: B-228 (server-side OS filter); `has_ai`/`has_local_model` still ignored (needs a founder-confirmed B-ID); Architect contract notes on "or username" and `per_page` max; B-225 (`parsePage` overflow).
+
 ## IA consolidation investigation (Discover/Agents/Tools vs Assets, step-up auth, config forms) — 2026-09-26 (Claude Code)
 
 Investigation only: no application code changed and no B-ID was minted. Report: `IA_CONSOLIDATION_INVESTIGATION.md` (Parts A–D).

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -61,10 +63,25 @@ func (s *Server) ListAgentEndpoints(w http.ResponseWriter, r *http.Request) {
 	uc := claimsFromContext(r)
 	q := r.URL.Query()
 	page, perPage := parsePage(q.Get("page"), q.Get("per_page"))
+	// search (B-226): documented in api/openapi.yaml but previously never
+	// read, so every query returned the whole inventory. Hostname only --
+	// endpoints has no username column.
+	search := strings.TrimSpace(q.Get("search"))
+	// Postgres rejects NUL and invalid UTF-8 in a text parameter, which would
+	// otherwise surface as a 500 rather than a client error.
+	if !utf8.ValidString(search) || strings.ContainsRune(search, 0) {
+		writeError(w, http.StatusBadRequest, "bad_request", "search must be valid UTF-8 text")
+		return
+	}
+	if utf8.RuneCountInString(search) > 200 {
+		writeError(w, http.StatusBadRequest, "bad_request", "search must be at most 200 characters")
+		return
+	}
 
 	ctx := r.Context()
 	p := store.ListAgentEndpointsParams{
 		OrgID:  uc.OrgID,
+		Search: search,
 		Limit:  int32(perPage),
 		Offset: int32((page - 1) * perPage),
 	}
@@ -75,7 +92,7 @@ func (s *Server) ListAgentEndpoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	total, err := s.queries.CountAgentEndpoints(ctx, uc.OrgID)
+	total, err := s.queries.CountAgentEndpoints(ctx, uc.OrgID, search)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to count endpoints")
 		return

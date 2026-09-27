@@ -4,7 +4,28 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-26, newest) — IA consolidation investigation (Parts A–D) reported; awaiting founder decisions
+## Active decision thread (2026-09-27, newest) — B-226/B-227 DONE (endpoint search + Discover paging); B-228 queued
+
+**What was built.**
+- **B-226:** `/v1/endpoints` now honours its documented `search`. It is a literal, case-insensitive hostname match, the count uses the same filter, and invalid input returns 400.
+- **B-227:** Discover pages through the server beyond the first 25 endpoints. It also gained a debounced search, honest loading and error states, and a platform filter labelled page-only (founder option (c)).
+- **B-228** is QUEUED for a server-side OS filter, which needs Architect-EAMI to add the contract parameter.
+- MATURITY_AUDIT.md's Discover claims are corrected in place, with the originals struck through and marked incorrect.
+
+**Evidence** (`B-226_B-227_VERIFICATION.md`, all verbatim):
+- **Tests:** PASS=476, FAIL=0, SKIP=0. 5 of 6 mutations were caught; the `id` tie-breaker is not reliably detectable, which is disclosed.
+- **Live:** 18/18 checks. Fixture cleanup was proven by an identical snapshot, with 0 residual rows.
+- **Reviews:** security first pass and delta, plus a fresh full code review, all completed. A first code-review attempt was stopped before reporting and is not counted. All Lows were fixed.
+
+**Open:**
+- `has_ai`/`has_local_model` are still ignored. This is the same bug class and needs a founder-confirmed B-ID.
+- Architect contract notes: "hostname or username" (there is no username column), and `per_page` max 100 vs 200 in code.
+- B-225 still covers `parsePage` overflow.
+- IA consolidation decisions (previous thread) are still pending.
+
+**Next:** founder decisions from `IA_CONSOLIDATION_INVESTIGATION.md`.
+
+## Active decision thread (2026-09-26) — IA consolidation investigation (Parts A–D) reported; awaiting founder decisions
 
 This was an investigation only; no code changed and no B-ID was minted. Report: `IA_CONSOLIDATION_INVESTIGATION.md`.
 
@@ -2168,6 +2189,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-27 by Claude Code — B-226/B-227 done and B-228 queued. Endpoint search is fixed and Discover pages past 25 endpoints; MATURITY_AUDIT.md is corrected. Tests 476/0/0, live checks 18/18, fixture cleanup proven, and both mandatory reviews completed (quoted verbatim in `B-226_B-227_VERIFICATION.md`). Active marker cleared.
+
+Prior entry:
 2026-09-26 by Claude Code — IA consolidation investigation (Parts A–D) reported in `IA_CONSOLIDATION_INVESTIGATION.md`. Investigation only: no code, no B-ID. The Discover-search claim was live-confirmed and its fixture cleaned up (snapshot diff identical). MATURITY_AUDIT.md correction noted. Active marker cleared.
 
 Prior entry:

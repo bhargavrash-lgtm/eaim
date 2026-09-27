@@ -10,12 +10,13 @@
 
 **Status update (2026-09-24, B-220):** priority-order item 3 below (real multi-column sort on `DataTable.tsx`) is now DONE, live-verified — see `BUILT.md`/`BACKLOG.md`'s B-220 entries. One real correction to Part A's own findings, made during B-220's investigation: the cross-page summary line below reads as if single-column sort was broadly reachable before this fix ("DataTable.tsx only supports single-column sort") — direct grepping found it was actually reachable on exactly 1 of 11 audited pages (`AssetsPage.tsx`) before B-220, not broadly. Left uncorrected in the findings below as the historical record of what this audit originally said; the accurate version is in B-220's own `BUILT.md`/`BACKLOG.md` entries.
 
-**Correction (2026-09-26, IA consolidation investigation):** the Discover row below and the "Real search exists on exactly 2 of 11 pages" line are wrong about Discover.
-- **Search is ignored.** `GET /v1/endpoints` (`discover.go` `ListAgentEndpoints`) ignores `search`. Live-confirmed: a nonsense search term returned all 5 of 5 endpoints.
-- **Only 25 endpoints are reachable.** The page only ever fetches the first 25, with no pager.
-- **The OS filter is client-side** over those 25 rows.
+**Status update (2026-09-26, B-226/B-227):** this audit's Discover findings were found incorrect and are now corrected in place, in the Part A table and the cross-page summary below.
+- **What was wrong.** Discover's search never worked: `GET /v1/endpoints` ignored `search` (live-confirmed by `IA_CONSOLIDATION_INVESTIGATION.md` §A1). The page also reached only the first 25 endpoints.
+- **The fixes.**
+  - B-226 makes the API filter by hostname, with `meta.total` counting the same filter.
+  - B-227 adds server paging to Discover and labels its client-side platform filter as "this page only".
 
-Discover therefore has no working search. Details are in `IA_CONSOLIDATION_INVESTIGATION.md` §A1. The historical text below is left unchanged.
+Each correction shows the original wording, marked incorrect, rather than removing it.
 
 **Method:** direct file reads of every page's real source (`eami-ui/src/pages/...`), plus targeted grep across the whole `eami-ui/src/pages` tree for export/download/CSV/tooltip/help patterns. All findings below are cited to file:line. No assumptions from page names.
 
@@ -35,7 +36,7 @@ For each page, checked against 5 standard, well-established enterprise-SaaS capa
 | Page | Real search | Real multi-field filter | Bulk actions | Export | Multi-column sort |
 |---|---|---|---|---|---|
 | **Audit** | Partial — field-scoped (agent/tool text inputs → real API query params) | **Yes** — 5 real dimensions (agent, tool, decision, from, to), all combined into one `AuditParams` object and applied together | No | No | No |
-| **Discover** | **Yes** — real, API-backed hostname search (`useEndpoints({ search, ... })`) | **Yes** — 2 dimensions (hostname search, API-side + OS/platform dropdown, client-side), genuinely combinable | No | No | No |
+| **Discover** | ~~**Yes** — real, API-backed hostname search (`useEndpoints({ search, ... })`)~~ **Found incorrect (2026-09-26):** the UI sent `search`, but `GET /v1/endpoints` never read it, so every query returned the whole inventory (live-confirmed: a nonsense term returned all 5 of 5 endpoints). **Now Yes, fixed by B-226:** a server-side hostname substring match, with a count that matches. | ~~**Yes** — 2 dimensions (hostname search, API-side + OS/platform dropdown, client-side), genuinely combinable~~ **Found incorrect (2026-09-26):** search was non-functional (see previous column), and the platform filter was client-side over only the first 25 endpoints the page ever loaded. **Now Partial (B-226/B-227):** search is real and paging is real. The platform filter remains client-side and is labelled "applies to this page only"; a server-side OS filter is a separate follow-up. | No | No | No |
 | **FinOps** | No | Partial — 1 dimension only (date range picker) | No | **No — notably absent; this is cost data**, the page most likely to need export | No |
 | **Alerts** | No | No — Active Alerts tab hardcodes `useAlerts({ resolved: false })`, no user-facing controls; Alert Rules tab has none either | No | No | No |
 | **Policies** | No | No — manual priority reorder (up/down chevrons) is not a filter | No | No | No — no column is even marked `sortable` |
@@ -55,7 +56,9 @@ For each page, checked against 5 standard, well-established enterprise-SaaS capa
   - `eami-ui/src/components/layout/AppTopBar.tsx:66`: `title="Global search — not built yet (chrome only, not wired to a real search endpoint)"`
   - `eami-ui/src/components/layout/AppTopBar.tsx:73`: `title="Notifications — not built yet (chrome only, no real feed exists)"`
   This isn't a silent gap — it's a component that visually promises a capability it doesn't have (a styled search box with "Search…" placeholder text, a bell icon), present on every admin page. In tension with `DESIGN_SYSTEM.md` §7.4's own "never imply a capability that isn't real" honest-data principle.
-- **Real multi-field filtering exists on exactly 2 of 11 pages** (Audit, Discover). **Real search exists on exactly 2 of 11 pages** (Audit — field-scoped, Discover — real hostname search). The other 9 pages have zero of either.
+- ~~**Real multi-field filtering exists on exactly 2 of 11 pages** (Audit, Discover). **Real search exists on exactly 2 of 11 pages** (Audit — field-scoped, Discover — real hostname search). The other 9 pages have zero of either.~~
+- **Found incorrect (2026-09-26):** Discover's search never worked, so at audit time real search and real multi-field filtering each existed on **1 of 11 pages** (Audit only).
+- **Corrected by B-226/B-227:** Discover's search is now real (B-226) and paged (B-227). Its multi-field filtering is still partial, because the platform filter is page-local (server-side OS filter: B-228). Evidence: `B-226_B-227_VERIFICATION.md`.
 
 ---
 
