@@ -4,7 +4,20 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-27, newest) — B-238 DONE: Slack webhook SSRF closed
+## Active decision thread (2026-09-27, newest) — Follow-up B-IDs minted: B-239–B-243
+
+The founder directed closing out the B-237/B-238 carried-over items. All are **QUEUED**, and no code changed.
+- **B-239:** hooks.slack.com-only webhook allowlist.
+- **B-240:** bounded/async alert dispatch.
+- **B-241:** remove the dead `POST /v1/approvals` (not in openapi.yaml, so no contract change).
+- **B-242:** `InviteUser` cross-org email enumeration.
+- **B-243:** a single global service key allows writes into any org.
+
+**SMTP-through-netguard was deliberately not minted.** No SMTP sending exists in the codebase today (confirmed by a repo-wide grep); only config storage exists.
+
+The next B-ID is B-244.
+
+## Active decision thread (2026-09-27) — B-238 DONE: Slack webhook SSRF closed
 
 **The bug.** The test-notification route and the alert engine POSTed to the admin-set Slack webhook URL through an unguarded client. It was live-confirmed that this reached internal addresses, with the echoed error text working as a port-scan oracle.
 
@@ -2299,6 +2312,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-27 by Claude Code — minted B-239–B-243 (B-238/B-237 follow-ups, all QUEUED). SMTP follow-up not minted, because no SMTP sending exists. Docs only.
+
+Prior entry:
 2026-09-27 by Claude Code — B-238 (Slack webhook SSRF) fixed and verified: one shared hardened guard; the route and alert engine both guarded; save-time validation; the oracle closed; 8 mutations caught; tests 499/0/0; both reviews plus a re-review completed; live-verified on both paths. Active marker cleared.
 
 Prior entry:

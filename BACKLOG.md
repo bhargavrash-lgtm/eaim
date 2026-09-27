@@ -2667,6 +2667,80 @@ webhook=http://169.254.169.254/latest/meta-data/           save=200 test=200 9ms
 - **Verification:**
   - 8 separate mutations, all caught; tests 499/0/0; both reviews plus a security re-review of the delta.
   - **Live:** the pre-fix engine path was reproduced (a real alert POSTed to a private host), then the final build refused every target on both paths with byte-identical responses. Snapshot identical, including audit_log.
-- **Proposed follow-ups, not minted** (see `B-238_VERIFICATION.md` §6): internal-DNS timing residue / webhook host allowlist; sequential alert dispatch stall; SMTP must use netguard when built; UI/contract `{success,error}` vs `{sent,reason}` drift.
+- **Follow-ups** (see `B-238_VERIFICATION.md` §6):
+  - minted **B-239** (hooks.slack.com allowlist, which also closes the internal-DNS timing residue) and **B-240** (bounded/async alert dispatch);
+  - **SMTP-through-netguard not minted:** confirmed 2026-09-27 that no SMTP sending exists anywhere in the repo (only `email_smtp_*` config storage; the test route returns `smtp_not_configured`). Re-raise when email sending is built;
+  - UI/contract `{success,error}` vs `{sent,reason}` drift is still unminted (Architect-owned).
 
-## Next B-ID: B-239
+### B-239 — Restrict Slack webhook URLs to `hooks.slack.com` (allowlist) — **QUEUED, 2026-09-27**
+**Origin:** B-238 follow-up (`B-238_VERIFICATION.md` §6, security review Low). Minted at founder direction 2026-09-27. The ID was confirmed free against BACKLOG.md directly: the counter read B-239, and a grep found no open item covering this scope.
+**Problem:** `alerting.ValidateWebhookURL` accepts any public https URL. Two consequences:
+- the test route can still send blind POSTs to arbitrary public hosts and ports from EAMI's egress IP;
+- save and send resolve attacker-chosen hostnames, which leaves a small timing difference that reveals which internal DNS names exist (not ports or content).
+**Fix:**
+- Accept only `https://hooks.slack.com/services/…` on port 443, at save time **and** send time; send time covers rows saved earlier.
+- Add `hooks.slack-gov.com` if GovSlack is in scope.
+- The netguard dial guard stays as the backstop.
+- Tests: table cases for the allowlist, plus a send-time rejection of a planted non-Slack row.
+**Status:** QUEUED.
+
+### B-240 — Bounded / asynchronous alert notification dispatch — **QUEUED, 2026-09-27**
+**Origin:** B-238 follow-up (security review Low). Minted at founder direction 2026-09-27. The ID was confirmed free against BACKLOG.md directly: the counter read B-239, and a grep found no open item covering this scope.
+**Problem:** `alerting.Engine.evaluateRules` evaluates rules and dispatches their Slack sends **sequentially, for all orgs, in one goroutine**. One tenant whose webhook is a slow or blackholed public host costs up to `WebhookTimeout` (10 s) per firing rule, which delays every other tenant's alert evaluation in the same tick. Before B-238 there was no timeout at all, so this is bounded now but still shared.
+**Fix:**
+- Dispatch notifications off the evaluation loop through a bounded worker pool, with a per-org concurrency cap and a per-tick dispatch budget.
+- Keep `MarkAlertNotified` only on real success.
+- Test: one org with a blackholed webhook doesn't delay another org's alert creation or notification.
+**Status:** QUEUED.
+
+### B-241 — Remove the dead `POST /v1/approvals` route — **QUEUED, 2026-09-27**
+**Origin:** B-237 carried-over item. The founder decided on removal rather than hardening the descriptive fields. Minted at founder direction 2026-09-27. The ID was confirmed free against BACKLOG.md directly: the counter read B-239, and a grep found no open item covering this scope.
+**Problem:** nothing calls this route: no service, no UI, no script (B-237 Part A). The gateway inserts its own approvals directly. B-237 closed its cross-org hole, but it still lets any admin or operator create inert **same-org** approvals whose descriptive fields (`agent_name`, `tool_name`, `justification`, …) are free text and can mislead approvers. Such approvals also make the org's own agent or policy undeletable, because the FKs are NO ACTION.
+**Scope confirmed:** the route is **not** in `api/openapi.yaml` (only `GET /v1/approvals` is), so removing it doesn't touch the Architect-owned contract.
+
+To remove:
+- `router.go` `r.Post("/v1/approvals", …)`;
+- the handler `CreateApproval` and its request type (`approvals.go`);
+- `queriesAdapter.CreateApproval` / `MockStore.CreateApproval` / the `storeIface` method, if no other caller remains;
+- the HTTP tests in `approvals_test.go` and `approval_org_pg_test.go`.
+
+Keep `store.CreateApproval` (with B-237's org-scoped SQL) only if a caller remains; otherwise remove it too. The gateway has its own insert.
+**Verification:** `POST /v1/approvals` returns 405 or 404; the approvals list and decide flows are unchanged; the gateway escalate→approve/deny round trip is unchanged live.
+**Status:** QUEUED.
+
+### B-242 — `InviteUser` reveals whether an email has an account in any org — **QUEUED, 2026-09-27**
+**Origin:** B-237-era carried-over item (org-branch sweep #46, Info). Minted at founder direction 2026-09-27. The ID was confirmed free against BACKLOG.md directly: the counter read B-239, and a grep found no open item covering this scope.
+**Problem:**
+- `users.email` is **globally** UNIQUE.
+- When an org admin invites an email that belongs to a user in *another* org, the insert fails, and the 500 echoes the unique-violation text (`users_email_key`, including the email).
+- So any org admin can learn whether an address has an EAMI account anywhere: cross-tenant user enumeration.
+- The raw error text itself is B-234's class; the existence signal survives even a generic message, because the invite fails instead of succeeding.
+
+**Fix options (a founder or architecture choice):**
+- **(a)** A uniform response: return the same 201-shaped "invite sent" for an existing email, and send nothing, or notify the existing account instead.
+- **(b)** Per-org email uniqueness `(org_id, email)`. That is a bigger change, touching login (email → org resolution), resets and bootstrap.
+- In either case, stop echoing the DB error.
+- Test: an invite for an email in another org is indistinguishable from an invite for a new email.
+**Status:** QUEUED.
+
+### B-243 — Single global service key authorizes writes into any org — **QUEUED, 2026-09-27**
+**Origin:** B-237-era carried-over item (org-branch sweep #67/#69, Info; also the B-237 security review's Info). Minted at founder direction 2026-09-27. The ID was confirmed free against BACKLOG.md directly: the counter read B-239, and a grep found no open item covering this scope.
+**Problem:**
+- `requireServiceKey` compares `X-Service-Key` against one platform-wide `cfg.ServiceKey`.
+- `POST /v1/reports` and `POST /v1/internal/token-usage` take `org_id` (and `agent_id`) from the request body.
+- So **any holder of the key can write endpoint reports or token-usage and FinOps rows into any org**.
+- This is safe only while every key holder is platform-operated. Once a customer runs an on-prem collector or gateway holding that key, it becomes a cross-tenant write.
+- Current callers:
+  - `/v1/reports` has **no caller**; the collector uses `/v1/ingest/batch`, which resolves org server-side via `GetDefaultOrgID`.
+  - `/v1/internal/token-usage` is called only by eami-gateway, with its own server-resolved org.
+- `AgentRemoteConfig` shares the same key.
+
+**Fix direction:**
+- Per-org or per-node service credentials (a key → org binding stored server-side, hashed), with org derived from the credential, never the body.
+- Remove `/v1/reports` if it stays caller-less.
+- Rotation and revocation.
+- This overlaps the multi-tenant-ingest work noted in B-033/B-034; check the roadmap's Horizon 3 (enterprise scale-readiness) placement at kickoff.
+- Tests: a key for org A cannot write to org B.
+**Status:** QUEUED.
+
+## Next B-ID: B-244
