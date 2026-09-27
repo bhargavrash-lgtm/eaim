@@ -2476,4 +2476,44 @@ For example, `GET /v1/audit?page=4294967297&per_page=100` wraps the offset to 0 
 - Add real-Postgres parity tests and mutation checks, and verify live.
 **Status:** QUEUED, not investigated.
 
-## Next B-ID: B-230
+### B-230 — Agent status transitions are not enforced (a revoked agent can be suspended, then reactivated) — **QUEUED, 2026-09-27**
+**Origin:** Agent Detail Actions-tab Part A, confirmed by its security review. The founder approved minting this ID and keeping the tab's behaviour identical to the list page. It was confirmed free against BACKLOG.md directly: the counter read B-230, and no open item overlapped.
+**Problem:**
+- The UI toggle (both surfaces) sends `suspended` for any non-suspended agent, including `revoked`.
+- `UpdateAgent` (`agents.go`) accepts any status the DB CHECK allows and validates no transitions. So `revoked → suspended → active` takes two clicks, and is logged as "suspended" then "reactivated".
+- Revocation itself is not lifecycle-audited.
+- **Reachability today:** low. Nothing writes `status='revoked'` except a raw API PATCH or a direct DB write, and there are 0 revoked agents live. The same role could already PATCH `active` directly.
+**Suggested fix:**
+- Server-side: make `revoked` terminal (reject any transition out of it with 409) and audit revocation.
+- UI: don't offer suspend/reactivate for revoked agents.
+- Add real-Postgres transition tests.
+**Status:** QUEUED.
+
+### B-231 — Step-up authentication for sensitive actions — **QUEUED, 2026-09-27**
+**Origin:** `IA_CONSOLIDATION_INVESTIGATION.md` Part C, which was previously only a proposal with no record. Minted at founder direction with the same free-ID check. **Roadmap:** intended placement is Horizon 1, per the founder. **`rheoARC_Roadmap_Enterprise_AI_Platform.md` has no step-up entry yet** (0 matches, checked 2026-09-27). That is flagged here rather than edited.
+**Evidence summary** (from the investigation):
+- No step-up or re-auth mechanism exists. The only password re-entry is on the user's own password change.
+- Refresh tokens last 30 days.
+- Admin routes are JWT-only, so an API key cannot bypass a step-up check.
+- SSO-only users have no password (`password_hash` is NULL), so the design must allow IdP re-authentication later.
+**Recommended mechanism (not built):**
+- Server-enforced recent-authentication: `POST /v1/auth/step-up`, which returns a short-lived proof bound to the user and session.
+- An absolute 5-minute window, following sudo's convention, not extended by activity.
+- A `requireRecentAuth` middleware on specific routes only, returning `403 step_up_required`.
+- A UI re-prompt modal that retries the original request.
+- Rate-limited, and audited (ties to B-224).
+**Phase 1 actions:**
+- tool credential rotation;
+- a `base_url` change on a credentialed REST tool;
+- agent delete and reactivate;
+- agent API-key minting;
+- policy delete;
+- user role elevation;
+- admin reset-link generation.
+
+**Phase 2:** policy disable, and policy action changed to allow.
+
+**Explicitly not built** by the Agent Detail Actions tab, which keeps today's authentication unchanged.
+**Status:** QUEUED.
+
+## Next B-ID: B-232

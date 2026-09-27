@@ -1,5 +1,43 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## Agent Detail Actions tab + DESIGN_SYSTEM.md §7.7 — 2026-09-27 (Claude Code)
+
+The evidence record, quoting the live runs and all five review passes verbatim, is `AGENT_ACTIONS_TAB_VERIFICATION.md`.
+
+**Part 0.** DESIGN_SYSTEM.md §7.7 "Unified Entity Detail Pages" was added verbatim, with an attributed verification note, in its own commit `8840335`. The Actions row is now marked Built.
+
+**Files changed**
+- `eami-ui/src/components/agents/AgentConfigPanel.tsx` (new): the verbatim move of AgentsPage's `ConfigPanel`, plus save-error display.
+- `eami-ui/src/components/agents/AgentActionsTab.tsx` (new): Configure, Suspend/Reactivate and Delete, using the same hooks, toggle rule, confirmation and error handling as the list. It redirects to the list after a delete, is read-only for viewers, and uses the shared `Button` with `isLoading`.
+- `eami-ui/src/pages/gateway/AgentDetailPage.tsx`: Overview, Connections and Actions tabs in `?tab=`, with full WAI-ARIA tab semantics and arrow keys. The Actions panel stays mounted while hidden. The dead "More actions" button is removed.
+- `eami-ui/src/pages/gateway/AgentsPage.tsx`: uses the moved panel. The list buttons are otherwise unchanged (code review confirmed).
+- `eami-ui/src/hooks/useAgents.ts`:
+  - **Configure had been broken everywhere**, because the hooks read a `localStorage` token key that nothing writes, so every request got a 401. They now use `apiFetch`.
+  - `useDeleteAgent` marks the deleted agent's detail entry stale without refetching it, so there is no 404 delay and no cached ghost.
+
+**Verification**
+- `tsc`, `vite build` and `git diff --check` are clean.
+- **Live, 23/23 checks:**
+  - all 4 actions from the new tab and from the unchanged list page, each confirmed by an API read;
+  - identical lifecycle audit events on both surfaces;
+  - a deep link to `?tab=actions` fires no write;
+  - viewers get a read-only tab;
+  - no cached ghost after a list delete;
+  - no regression on Overview or Connections, including graph node panels.
+- **Fixture cleanup:** proven by an identical snapshot twice, with 0 residual rows.
+- **Reviews:** code (initial, delta, final confirmation) and security (initial, delta) all completed. All in-scope findings were fixed.
+
+**Limitations**
+- There is no UI test framework, so coverage is live only.
+- `AgentConfigPanel` keeps its page-local success message (pre-existing, moved verbatim).
+
+**Open items**
+- B-230 and B-231 are QUEUED.
+- **Three pre-existing findings need founder-confirmed B-IDs:**
+  - H-1 (High, recommended urgent): a cross-tenant `PUT /v1/gateway/agents/{id}/config` write.
+  - M-1 (Medium): nginx `X-Frame-Options` is not applied to `index.html`.
+  - The app-wide raw `err.Error()` echo in 500 responses.
+
 ## B-226 / B-227 — `/v1/endpoints` search + Discover paging — 2026-09-27 (Claude Code)
 
 The evidence record, quoting tests, the mutation log, the live run and all three completed reviews verbatim, is `B-226_B-227_VERIFICATION.md`.

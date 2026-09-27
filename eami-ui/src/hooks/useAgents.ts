@@ -120,7 +120,16 @@ export function useDeleteAgent() {
       })
       if (error) throw error
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
+    // Refresh every agents query except the deleted agent's own detail query,
+    // which is only marked stale: refetching it can only 404 (and retry),
+    // delaying Agent Detail's post-delete redirect, while marking it stale
+    // means a later visit to that URL refetches instead of showing a cached
+    // ghost of the deleted agent (whichever page did the delete).
+    onSuccess: (_data, id) =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ['agents'], predicate: (q) => q.queryKey[1] !== id }),
+        qc.invalidateQueries({ queryKey: ['agents', id], exact: true, refetchType: 'none' }),
+      ]),
   })
 }
 
@@ -146,13 +155,10 @@ export function useAgentConfig(agentId: string | null) {
   return useQuery({
     queryKey: ['agent-config', agentId],
     enabled: !!agentId,
-    queryFn: async (): Promise<AgentConfig> => {
-      const res = await fetch(`/v1/gateway/agents/${agentId}/config`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}` },
-      })
-      if (!res.ok) throw new Error(`GET /config: ${res.status}`)
-      return res.json()
-    },
+    // apiFetch injects the real session token. These hooks previously read a
+    // localStorage 'access_token' key that nothing writes, so every config
+    // request went out with an empty bearer and got a 401.
+    queryFn: (): Promise<AgentConfig> => apiFetch<AgentConfig>(`/v1/gateway/agents/${agentId}/config`),
     staleTime: 30_000,
   })
 }
@@ -160,18 +166,8 @@ export function useAgentConfig(agentId: string | null) {
 export function useUpdateAgentConfig() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async ({ id, body }: { id: string; body: AgentConfigUpdate }): Promise<AgentConfig> => {
-      const res = await fetch(`/v1/gateway/agents/${id}/config`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}`,
-        },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) throw new Error(`PUT /config: ${res.status}`)
-      return res.json()
-    },
+    mutationFn: ({ id, body }: { id: string; body: AgentConfigUpdate }): Promise<AgentConfig> =>
+      apiFetch<AgentConfig>(`/v1/gateway/agents/${id}/config`, { method: 'PUT', body }),
     onSuccess: (_data, { id }) => {
       qc.invalidateQueries({ queryKey: ['agent-config', id] })
     },

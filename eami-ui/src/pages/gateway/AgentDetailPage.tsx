@@ -7,8 +7,8 @@
 // Tool/Workflow/Endpoint connections (Focused Mode only, never an
 // org-wide graph).
 import { useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { MoreVertical, ShieldCheck, Wrench, Workflow as WorkflowIcon } from 'lucide-react'
+import { useParams, useSearchParams } from 'react-router-dom'
+import { ShieldCheck } from 'lucide-react'
 import { SlideOverPanel, LoadingSpinner, EmptyState, StatusPill } from '@/components/common'
 import { AppTopBar } from '@/components/layout/AppTopBar'
 import { EndpointDrawer } from '@/pages/discover/DiscoverPage'
@@ -17,6 +17,7 @@ import { usePolicy } from '@/hooks/usePolicies'
 import { useWorkflow } from '@/hooks/useWorkflows'
 import { useTools } from '@/hooks/useTools'
 import { RelationshipGraph, type SelectedGraphNode } from './RelationshipGraph'
+import { AgentActionsTab } from '@/components/agents/AgentActionsTab'
 
 // ── Read-only detail panels ──────────────────────────────────────────────────
 // Each wraps the existing SlideOverPanel shell (B-178) -- per this brief's
@@ -127,24 +128,18 @@ function Field({ label, value }: { label: string; value: string }) {
   )
 }
 
-// ── Top bar ───────────────────────────────────────────────────────────────────
-// B-201 Phase 2: now reuses the shared AppTopBar (components/layout/) --
-// this file's own inline top bar (the original B-200 implementation) was
-// extracted into that shared component verbatim, then deleted here, to
-// avoid two copies of the identical code existing side by side. The
-// disabled "More actions" chrome (code-review finding from B-200: no
-// overflow-menu actions are in scope for this page) is preserved exactly
-// as before, passed as AppTopBar's action prop -- same visual behavior,
-// no silent change.
-const agentDetailMoreActions = (
-  <button
-    className="cursor-not-allowed rounded-lg border border-gray-200 p-2 text-gray-300"
-    title="More actions — not built yet"
-    disabled
-  >
-    <MoreVertical className="h-4 w-4" />
-  </button>
-)
+// ── Tabs (DESIGN_SYSTEM.md §7.7) ────────────────────────────────────────────
+// Overview and Connections were sections of one page (B-200/B-204/B-206);
+// Actions is the first real tab. The disabled "More actions -- not built
+// yet" top-bar button was removed: this tab is the real home for those
+// actions. The active tab lives in ?tab= (SettingsPage's pattern), so a tab
+// is deep-linkable and survives reload.
+const TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'connections', label: 'Connections' },
+  { id: 'actions', label: 'Actions' },
+] as const
+type TabId = (typeof TABS)[number]['id']
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
@@ -153,6 +148,20 @@ export function AgentDetailPage() {
   const { data: agent, isLoading: agentLoading, error: agentError } = useAgent(id ?? null)
   const { data: connections, isLoading: connectionsLoading, error: connectionsError } = useAgentConnections(id ?? null)
   const [selected, setSelected] = useState<SelectedGraphNode | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tabParam = searchParams.get('tab')
+  const activeTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'overview'
+  function setTab(id: TabId) {
+    setSearchParams({ tab: id }, { replace: true })
+  }
+  // Left/Right arrow keys move between tabs (WAI-ARIA tabs pattern).
+  function onTabKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
+    const i = TABS.findIndex((t) => t.id === activeTab)
+    const next = TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length]
+    setTab(next.id)
+    document.getElementById(`agent-tab-${next.id}`)?.focus()
+  }
 
   if (agentLoading) {
     return <div className="p-6 text-sm text-gray-400">Loading agent…</div>
@@ -165,7 +174,6 @@ export function AgentDetailPage() {
     <div className="flex h-full flex-col overflow-hidden">
       <AppTopBar
         breadcrumb={[{ label: 'Agents', href: '/gateway/agents' }, { label: agent.name }]}
-        action={agentDetailMoreActions}
       />
       <div className="flex-1 overflow-y-auto px-10 py-8">
         <div className="mb-6 flex items-center justify-between">
@@ -189,10 +197,31 @@ export function AgentDetailPage() {
           <StatusPill status={agent.status} />
         </div>
 
-        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-ink">
-          <WorkflowIcon className="h-3.5 w-3.5 text-ink-faint" />
-          Connections
+        <div className="mb-6 border-b border-gray-200">
+          <nav className="-mb-px flex gap-6" role="tablist" aria-label="Agent sections" onKeyDown={onTabKeyDown}>
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                id={`agent-tab-${tab.id}`}
+                aria-controls={`agent-panel-${tab.id}`}
+                aria-selected={activeTab === tab.id}
+                tabIndex={activeTab === tab.id ? 0 : -1}
+                onClick={() => setTab(tab.id)}
+                className={`border-b-2 py-3 text-sm font-medium transition-colors ${
+                  activeTab === tab.id
+                    ? 'border-brand-600 text-brand-700'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
         </div>
+
+        {activeTab === 'connections' && (<div role="tabpanel" id="agent-panel-connections" aria-labelledby="agent-tab-connections">
 
         {connectionsLoading ? (
           <div className="flex h-[220px] items-center justify-center rounded-xl bg-white shadow-l1">
@@ -214,11 +243,9 @@ export function AgentDetailPage() {
             onSelect={setSelected}
           />
         )}
+        </div>)}
 
-        <div className="mt-8 flex items-center gap-2 text-sm font-semibold text-ink">
-          <Wrench className="h-3.5 w-3.5 text-ink-faint" />
-          Agent Details
-        </div>
+        {activeTab === 'overview' && (<div role="tabpanel" id="agent-panel-overview" aria-labelledby="agent-tab-overview">
         {/* B-206: metadata grid pattern, replacing B-204's per-field
             card stack entirely -- built to the live canvas mockup
             (Layer6-MetadataGrid.dc.html) exactly: one dense card, real
@@ -241,7 +268,7 @@ export function AgentDetailPage() {
             value uses the existing text-sm token (14px) rather than the
             mockup's literal 13px, a 1px difference judged visually
             negligible against reusing an existing scale step. */}
-        <div className="mt-3 grid grid-cols-2 gap-y-5 gap-x-7 rounded-[10px] border border-[rgba(228,231,240,0.55)] bg-white px-[26px] py-[22px] shadow-l1">
+        <div className="grid grid-cols-2 gap-y-5 gap-x-7 rounded-[10px] border border-[rgba(228,231,240,0.55)] bg-white px-[26px] py-[22px] shadow-l1">
           <div className="flex flex-col gap-[3px]">
             <span className="text-2xs font-semibold tracking-wider text-ink-faint">OWNER</span>
             <span className="font-mono text-sm font-semibold text-ink">{agent.owner}</span>
@@ -250,6 +277,13 @@ export function AgentDetailPage() {
             <span className="text-2xs font-semibold tracking-wider text-ink-faint">SCOPE</span>
             <span className="truncate font-mono text-sm font-semibold text-ink" title={agent.scope}>{agent.scope}</span>
           </div>
+        </div>
+        </div>)}
+
+        {/* Kept mounted (hidden) so an in-flight suspend/reactivate's result
+            or error isn't lost if the user switches tabs mid-request. */}
+        <div role="tabpanel" id="agent-panel-actions" aria-labelledby="agent-tab-actions" hidden={activeTab !== 'actions'}>
+          <AgentActionsTab agent={agent} />
         </div>
       </div>
 

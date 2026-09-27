@@ -4,7 +4,30 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-27, newest) — B-226/B-227 DONE (endpoint search + Discover paging); B-228 queued
+## Active decision thread (2026-09-27, newest) — Agent Detail Actions tab DONE; DESIGN_SYSTEM §7.7 added; B-230/B-231 queued; 3 pre-existing security findings need B-IDs
+
+**What was built.**
+- **§7.7 "Unified Entity Detail Pages"** is added (commit `8840335`).
+- **Agent Detail** now has real Overview, Connections and Actions tabs. Actions hosts Configure, Suspend/Reactivate and Delete using the list's exact hooks, rules and dialogs.
+- **Approved differences from the list:** redirect after delete, read-only for viewers, and the dead "More actions" button removed. The list page's buttons are unchanged, and retiring the Agents list is a later IA step.
+- **Configure had been broken on both surfaces before this work**, because of a bad token lookup that caused a 401 on every request. It is fixed (`apiFetch`), since the brief required it to work.
+- **Step-up auth is deliberately not built.** It is now B-231, with Horizon 1 placement. Note that the roadmap file has no step-up entry.
+- **The revoked-agent transition gap** is now B-230.
+
+**Evidence** (`AGENT_ACTIONS_TAB_VERIFICATION.md`, all verbatim):
+- **Live:** 23/23 checks.
+- **Audit:** identical lifecycle audit on both surfaces.
+- **Cleanup:** two fixture cycles, each proven by an identical snapshot.
+- **Reviews:** five passes, all completed. All in-scope findings were fixed.
+
+**Needs founder decision — pre-existing, found by the security review, not fixed:**
+- **H-1 (High, recommend urgent):** `PUT /v1/gateway/agents/{id}/config` never checks the org when a config row exists, which is always. A tenant holding another org's agent UUID can overwrite that org's scanner config.
+- **M-1 (Medium):** nginx's `location = /index.html` drops `X-Frame-Options`, so the app can be framed.
+- **The app-wide raw `err.Error()` in 500 responses.**
+
+All three need founder-confirmed B-IDs.
+
+## Active decision thread (2026-09-27) — B-226/B-227 DONE (endpoint search + Discover paging); B-228 queued
 
 **What was built.**
 - **B-226:** `/v1/endpoints` now honours its documented `search`. It is a literal, case-insensitive hostname match, the count uses the same filter, and invalid input returns 400.
@@ -2189,6 +2212,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-27 by Claude Code — Agent Detail Actions tab done, and DESIGN_SYSTEM.md §7.7 added. Configure had been broken on both surfaces and is now fixed. B-230 (revoked-agent transitions) and B-231 (step-up auth) are QUEUED; the next B-ID is B-232. Live checks 23/23, fixture cleanup proven twice, five review passes quoted verbatim. Three pre-existing security findings (H-1 cross-tenant config write, M-1 clickjacking headers, raw error echo) need founder B-IDs. Active marker cleared.
+
+Prior entry:
 2026-09-27 by Claude Code — founder confirmed B-226/B-227 complete and approved minting B-229. B-229 is QUEUED (`/v1/endpoints` ignores its documented `has_ai`/`has_local_model` filters) after the check against BACKLOG.md; the next B-ID is B-230. The Architect-EAMI contract notes stand as logged. No code changed. Active marker cleared.
 
 Prior entry:

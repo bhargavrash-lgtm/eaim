@@ -345,13 +345,13 @@ nothing here is invented ahead of its actual justification.
 |---|---|---|
 | Overview | Built (B-200) | — |
 | Connections | Built (B-200/B-205) | — |
-| Actions | Planned next | Orphaned Configure/Suspend/Reactivate/Delete controls |
+| Actions | Built (2026-09-27) | Orphaned Configure/Suspend/Reactivate/Delete controls — see `AGENT_ACTIONS_TAB_VERIFICATION.md` |
 | Orchestration | Future | Horizon 2 item 4 (Build/Orchestration layer) |
 | Autonomy Limits | Future | Horizon 2 item 5 (real autonomy safeguards) |
 | Memory | Future | Horizon 2 item 2 (RAG) |
 | Model | Future | Horizon 2 items 1 & 8 (model hosting, training/evaluation) |
 
-> **Verification note (Claude Code, 2026-09-27).** "Built" above means the *content* exists, not the tab. `AgentDetailPage.tsx` has no tab bar yet. Overview (the owner/scope metadata grid) and Connections (the B-200/B-205 relationship graph) are sections of one scrolling page. The tab bar itself is introduced by the Actions-tab brief, the first real tab added.
+> **Verification note (Claude Code, 2026-09-27).** When this section was added, "Built" for Overview/Connections meant the *content* existed, not the tab: Agent Detail had no tab bar. The Actions-tab brief (same day) introduced it. Overview, Connections and Actions are now real tabs, with the active tab in `?tab=` (SettingsPage's pattern) and the WAI-ARIA tab roles.
 
 **Endpoint Detail:**
 | Tab | Status | Roadmap source |
