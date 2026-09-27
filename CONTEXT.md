@@ -4,7 +4,25 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-27, newest) — B-241 DONE; B-242 blocked on a follow-up decision; B-243 flagged as a pre-pilot gate
+## Active decision thread (2026-09-27, newest) — B-242 DONE (option 2, honest residual); B-244 minted (approval audit integrity)
+
+**B-242 (option 2) is built and verified.** Any existing email now gets one fixed 409 with no DB text. Tests 496/0/0; 3 mutations caught; live before/after; snapshot identical; both reviews completed.
+
+**Correction to the premise.** Same-org and cross-org were already identical before this change (same constraint). So this does not narrow the oracle: an admin can subtract their own user list, and Login's pre-existing oracles reveal the account's state. Option 1 (email delivery) remains the real fix.
+
+**Serious pre-existing follow-ups from the reviews** (not minted; they need the founder's call; `B-242_VERIFICATION.md` §6):
+- **Cross-tenant email squatting (Medium):** an admin can hold a working account under another company's email.
+- **Unauthenticated Login enumeration oracles (Medium):** the SSO message and bcrypt timing.
+- **Email not normalized.**
+- **The invite UI ignores errors.**
+- **No re-invite path for revoked users.**
+- **OpenAPI drift.**
+
+**B-244 is minted (QUEUED, High, audit integrity).** Approvals can be decided after they expire or are orphaned, recording "approved" for actions that never ran.
+
+The next B-ID is B-245.
+
+## Active decision thread (2026-09-27) — B-241 DONE; B-242 blocked on a follow-up decision; B-243 flagged as a pre-pilot gate
 
 **B-241 is done.** The dead `POST /v1/approvals` is removed (handler, store insert, adapter, mock). There is no contract change. Tests 495/0/0; live 405 for every role; the gateway escalation round trip is unchanged. Evidence: `B-241_VERIFICATION.md`.
 
@@ -2322,6 +2340,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-27 by Claude Code — B-242 option 2 done (fixed 409; residual stated honestly, because the premise was corrected by review and the live pre-fix run); B-244 minted (approval audit integrity, High). Marker cleared.
+
+Prior entry:
 2026-09-27 by Claude Code — B-241 done (dead POST /v1/approvals removed, verified live, both reviews completed); B-242 blocked on a founder follow-up decision (true non-revelation needs out-of-band delivery); B-243 flagged as a pre-pilot gate. Marker cleared.
 
 Prior entry:

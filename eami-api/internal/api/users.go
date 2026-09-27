@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -109,6 +110,10 @@ func (s *Server) ListUsers(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// inviteEmailUnavailable is InviteUser's one response for an email that
+// already has an account anywhere (B-242).
+const inviteEmailUnavailable = "this email cannot be invited"
+
 // InviteUser handles POST /v1/users/invite
 func (s *Server) InviteUser(w http.ResponseWriter, r *http.Request) {
 	uc := claimsFromContext(r)
@@ -177,7 +182,21 @@ func (s *Server) InviteUser(w http.ResponseWriter, r *http.Request) {
 		InvitedBy: pgtype.UUID{Bytes: uc.UserID, Valid: true},
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		// B-242 (option 2): users.email is globally UNIQUE, so an email
+		// already registered -- in this org, another org, or on a
+		// soft-deleted account -- fails here. Every case gets one fixed 409
+		// with no DB text (previously a 500 echoing the constraint error).
+		// This does NOT close the existence oracle: "exists somewhere" is
+		// still signalled, and an admin can subtract their own GET
+		// /v1/users list to tell another org's email from their own. The
+		// real fix is out-of-band invite delivery (email), deferred until
+		// email sending exists.
+		if isUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "conflict", inviteEmailUnavailable)
+			return
+		}
+		slog.Error("invite user: create failed", "org_id", uc.OrgID, "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "could not create invite")
 		return
 	}
 	if _, err := tx.Exec(ctx,

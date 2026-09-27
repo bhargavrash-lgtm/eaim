@@ -2714,7 +2714,7 @@ Keep `store.CreateApproval` (with B-237's org-scoped SQL) only if a caller remai
 - Snapshot identical except the audit_log +2, which is left because the log is hash-chained.
 - Both reviews completed.
 
-### B-242 — `InviteUser` reveals whether an email has an account in any org — **QUEUED, 2026-09-27**
+### B-242 — `InviteUser` reveals whether an email has an account in any org — **DONE (option 2, partial by design), 2026-09-27** (evidence: `B-242_VERIFICATION.md`)
 **Origin:** B-237-era carried-over item (org-branch sweep #46, Info). Minted at founder direction 2026-09-27. The ID was confirmed free against BACKLOG.md directly: the counter read B-239, and a grep found no open item covering this scope.
 **Problem:**
 - `users.email` is **globally** UNIQUE.
@@ -2728,7 +2728,21 @@ Keep `store.CreateApproval` (with B-237's org-scoped SQL) only if a caller remai
 - In either case, stop echoing the DB error.
 - Test: an invite for an email in another org is indistinguishable from an invite for a new email.
 **Founder decision (2026-09-27):** option (a). Keep global email uniqueness, and make the invite response identical and non-revealing whether or not the email exists anywhere, matching the password-reset flow's anti-enumeration pattern exactly. Do **not** change uniqueness scope.
-**Status:** QUEUED, **blocked on a follow-up founder decision** (raised 2026-09-27). Implementing option (a) found a constraint:
+**Follow-up founder decision (2026-09-27):** option 2 was approved and built. Option 1 (out-of-band email delivery) stays the real fix, deferred until email sending exists as real infrastructure.
+**Status:** DONE (option 2) 2026-09-27.
+- Any existing email (same-org, other-org or soft-deleted) now gets one fixed 409 `"this email cannot be invited"`. There is no DB text; unexpected errors get a generic 500 logged with slog.
+- Test: byte-identical bodies, a leak-string check, and no rows written; 3 mutations, each caught; tests 496/0/0.
+- **Live:** the pre-fix build returned 500 plus constraint text; the fixed build returns the 409 for both cases; a new email still gets 201.
+- Both reviews completed.
+
+**Honest residual (corrected by the code review; see `B-242_VERIFICATION.md` §2):**
+- Same-org and cross-org were already indistinguishable before this change, because both hit the same constraint.
+- So this removes DB internals and gives a designed 409, but it does **not** narrow the existence oracle.
+- A 409 for an email absent from the admin's own `GET /v1/users` still shows the email is registered in another tenant, in bulk.
+- Pre-existing Login oracles can then reveal the account's state.
+- Closing it needs option 1, plus the separate follow-ups in `B-242_VERIFICATION.md` §6 (email squatting, Login oracles, email normalization, invite UI error display, the revoked-user re-invite path, OpenAPI drift). None is minted; they await the founder.
+
+Original investigation text follows for the record: Implementing option (a) found a constraint:
 - The password-reset pattern works because the requester gets **nothing back**: a uniform `{"status":"ok"}`, with the real action happening out of band.
 - An invite has to hand the admin a **working link**, because no email or SMTP delivery exists.
 - It also creates a user row that the admin's own `GET /v1/users` list shows.
@@ -2766,4 +2780,30 @@ Choices, for the founder:
 - Tests: a key for org A cannot write to org B.
 **Status:** QUEUED.
 
-## Next B-ID: B-244
+### B-244 — Approvals can be "approved" after they expire or are orphaned — the audit trail records decisions for actions that never ran — **QUEUED (High, audit integrity), 2026-09-27**
+**Origin:** found by the B-241 security review (L1). Minted at founder direction 2026-09-27, with explicit instruction to log it with real severity. The ID was confirmed free against BACKLOG.md directly: the counter read B-244, and a grep found no open item covering approval expiry or orphaning.
+
+**Why this matters:** EAMI's core value proposition is a **trustworthy audit record** of what AI agents did and who authorized it. This defect makes the approvals record **say something false**. The false record is exactly the kind of evidence an auditor, a compliance review or an incident investigation would rely on. That is an integrity failure of the product's central promise, not a cosmetic bug. It is not urgent enough to interrupt current work only because nothing extra *executes*: the risk is a misleading record, not an unauthorized action.
+
+**The defect:**
+- `DecideApproval` (`eami-api/internal/store/approvals.sql.go`) updates `WHERE id AND org_id AND status='pending'`. It **never checks `expires_at`**.
+- The gateway marks a row `expired` only on a genuine hold timeout (`eami-gateway/internal/approval/router.go`). If the agent's request context is cancelled (client disconnect) or the gateway restarts, the row stays `pending` **forever**, and no sweeper exists.
+- An approver can therefore approve, or deny, a request whose hold is long gone. The API returns **200**, and the row becomes `status='approved'` with `approved_by` and `decided_at` set.
+- But the gateway's `resolve()` finds no in-memory hold and **dispatches nothing**.
+- The permanent record now says "approved by X at T" for an action that **never occurred**. Nothing links it to a `resume_outcome` that shows it didn't run.
+- Stale pending items also pile up in the approvals queue, which invites exactly these meaningless decisions.
+
+**Fix direction:**
+1. Refuse to decide expired rows: the decide query adds `AND expires_at > now()`, and the API returns 409 "approval expired" (distinct from "already decided").
+2. Add a server-side expiry sweeper, in the API or the gateway, that moves overdue `pending` rows to `expired` with a reason. Also reconcile on gateway startup, since holds are in-memory and don't survive a restart.
+3. Ensure the record distinguishes "approved and executed", "approved, but the hold was gone, so not executed", and "expired". Use `resume_outcome` or an equivalent, and surface it in the UI and the audit export.
+4. Consider a one-off repair query for existing rows that are `approved` but have no execution trace.
+
+**Tests:** real Postgres plus a gateway integration.
+- An expired row cannot be approved.
+- A gateway restart leaves no permanently-pending rows.
+- A decision on an orphaned row cannot produce an "approved" record without an execution trace.
+
+**Status:** QUEUED. Not interrupting current work, per founder direction.
+
+## Next B-ID: B-245

@@ -1,5 +1,33 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-242 — Invite of an existing email returns one fixed 409 (option 2) — 2026-09-27 (Claude Code)
+
+At founder direction. The evidence record, with both reviews verbatim, is `B-242_VERIFICATION.md`.
+
+**Files**
+- **`eami-api/internal/api/users.go`** (`InviteUser`):
+  - a unique violation returns `409 conflict "this email cannot be invited"` (the const `inviteEmailUnavailable`);
+  - other create errors return a generic 500, with `slog`.
+- **New `eami-api/internal/api/invite_enumeration_pg_test.go`.**
+
+**Verification**
+- `go build` and `go vet` are clean. `go test ./...` gives PASS=496, FAIL=0, SKIP=0.
+- **Mutations:** 3, each caught.
+- **Live:** pre-fix 500 plus constraint text; fixed build 409 for same-org and cross-org; a new email still gets 201.
+- **Cleanup:** snapshot identical.
+
+**Limitations (honest residual):** this removes DB internals and gives a designed 409, but it does **not** narrow the cross-org existence oracle. Same-org and cross-org were already identical before, and the admin's own user list reveals which 409s are foreign. The real fix is out-of-band invite delivery (option 1, deferred).
+
+Review-found, pre-existing follow-ups (not minted; `B-242_VERIFICATION.md` §6):
+- email squatting;
+- Login enumeration oracles;
+- email normalization;
+- the invite UI ignoring errors;
+- no re-invite path for revoked users;
+- OpenAPI drift.
+
+**Also minted this session:** **B-244**, approvals decided after expiry or orphaning record "approved" for actions that never ran (High, audit integrity).
+
 ## B-241 — Dead `POST /v1/approvals` removed — 2026-09-27 (Claude Code)
 
 At founder direction. The evidence record, with both reviews verbatim, is `B-241_VERIFICATION.md`.
