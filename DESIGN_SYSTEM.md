@@ -325,6 +325,56 @@ scroll affordance (`overflow-y-auto` with a definite max-height) over
 `overflow: hidden` with a fixed/computed height — silent clipping is
 always the worse failure mode of the two.
 
+### 7.7 Unified Entity Detail Pages — The Planned Tab Structure
+
+Confirmed pattern (validated against real precedent: GitLab's own 2026 design
+discussion explicitly rejecting duplicate list views across modules; Freshservice's
+own production asset page; the "workflow entity pattern" already in real use
+elsewhere): **one canonical detail page per real entity — Agent, Endpoint, Tool —
+with tabs for each functional concern, never separate top-level pages competing
+to be the same list.** Discover, Agents, and Tools retire as standalone browse
+destinations; Assets/CMDB becomes the one place to find anything; clicking a row
+opens that entity's own canonical detail page.
+
+This section exists so future features land in a pre-planned slot, not bolted on
+awkwardly or forgotten. Every future tab below is traced to a real roadmap item —
+nothing here is invented ahead of its actual justification.
+
+**Agent Detail:**
+| Tab | Status | Roadmap source |
+|---|---|---|
+| Overview | Built (B-200) | — |
+| Connections | Built (B-200/B-205) | — |
+| Actions | Planned next | Orphaned Configure/Suspend/Reactivate/Delete controls |
+| Orchestration | Future | Horizon 2 item 4 (Build/Orchestration layer) |
+| Autonomy Limits | Future | Horizon 2 item 5 (real autonomy safeguards) |
+| Memory | Future | Horizon 2 item 2 (RAG) |
+| Model | Future | Horizon 2 items 1 & 8 (model hosting, training/evaluation) |
+
+> **Verification note (Claude Code, 2026-09-27).** "Built" above means the *content* exists, not the tab. `AgentDetailPage.tsx` has no tab bar yet. Overview (the owner/scope metadata grid) and Connections (the B-200/B-205 relationship graph) are sections of one scrolling page. The tab bar itself is introduced by the Actions-tab brief, the first real tab added.
+
+**Endpoint Detail:**
+| Tab | Status | Roadmap source |
+|---|---|---|
+| Overview | Planned next | Consolidates Discover's real content |
+| Connections | Planned next | Already-logged asset-perspective relationship graph extension |
+| Agent Link | Planned next | Currently trapped inside Discover |
+| Classification | Planned next | Currently in Assets, moves here |
+| Spend | Future | Confirmed real gap — endpoint-level FinOps, not yet workspace-scoped |
+
+**Tool Detail:**
+| Tab | Status | Roadmap source |
+|---|---|---|
+| Overview / Credentials | Planned next | Built from the existing add/edit form; no detail page exists yet |
+| Classification | Planned next | Currently in Assets, moves here |
+| Model Details | Future | Horizon 2 item 1 — a self-hosted model is architecturally a `gateway_tools` row (`type: ai_provider`) |
+| Usage Analytics | Future, not yet confirmed | May be redundant with what Connections already shows — a real decision for later, not assumed now |
+
+**Workflows** already have their own dedicated page, not currently duplicated —
+no urgent consolidation needed. Once the Build/Orchestration layer exists, it will
+likely want this same tab language rather than a new pattern; noted as a future
+consideration, not a current decision.
+
 ---
 
 ## 8. Anti-Patterns — Explicitly Rejected, Do Not Reintroduce
