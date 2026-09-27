@@ -252,23 +252,6 @@ func storePolicyFromPolicy(pol store.Policy) StorePolicy {
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
 
-func (a *queriesAdapter) CreateApproval(ctx context.Context, arg MockCreateApprovalParams) (StoreApproval, error) {
-	ap, err := a.q.CreateApproval(ctx, store.CreateApprovalParams{
-		OrgID:     arg.OrgID,
-		AgentID:   arg.AgentID,
-		AgentName: arg.AgentName,
-		ToolName:  arg.ToolName,
-		Action:    arg.Action,
-		Justification: arg.Justification,
-		RiskLevel: arg.RiskLevel,
-		ExpiresAt: arg.ExpiresAt,
-	})
-	if err != nil {
-		return StoreApproval{}, err
-	}
-	return storeApprovalFromDB(*ap), nil
-}
-
 func (a *queriesAdapter) GetApproval(ctx context.Context, id uuid.UUID, orgID uuid.UUID) (StoreApproval, error) {
 	ap, err := a.q.GetApproval(ctx, id, orgID)
 	if err != nil {

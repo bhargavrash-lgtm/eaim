@@ -70,38 +70,23 @@ func seedPendingApproval(ms *api.MockStore) api.StoreApproval {
 	return a
 }
 
-// ─── POST /v1/approvals ───────────────────────────────────────────────────────
+// ─── POST /v1/approvals: removed (B-241) ─────────────────────────────────────
 
-func TestCreateApproval_Success(t *testing.T) {
-	ts, ms := newApprovalTestServer(t)
-
-	token := ts.bearerToken(t, approvalAdminID, approvalOrgID, "admin")
-	resp := ts.do(t, http.MethodPost, "/v1/approvals", token, validApprovalPayload())
-	body := mustDecode(t, resp)
-
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		t.Fatalf("want 200/201, got %d — body: %v", resp.StatusCode, body)
-	}
-	if id, _ := body["id"].(string); id == "" {
-		t.Error("created approval must have an id in the response")
-	}
-	if ms.CreateApprovalCalls != 1 {
-		t.Errorf("CreateApproval should be called once, called %d times", ms.CreateApprovalCalls)
-	}
-}
-
-func TestCreateApproval_ViewerForbidden(t *testing.T) {
-	ts, ms := newApprovalTestServer(t)
-
-	token := ts.bearerToken(t, approvalViewerID, approvalOrgID, "viewer")
-	resp := ts.do(t, http.MethodPost, "/v1/approvals", token, validApprovalPayload())
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("viewer must get 403 on create, got %d", resp.StatusCode)
-	}
-	if ms.CreateApprovalCalls != 0 {
-		t.Error("CreateApproval must not be called when viewer is rejected")
+// B-241: the route had no caller (the gateway inserts its own approvals) and
+// let an admin/operator create spoofable same-org approvals. It must stay
+// gone: POST on the list path is 405 (GET still exists there) for every role.
+func TestCreateApprovalRoute_Removed(t *testing.T) {
+	ts, _ := newApprovalTestServer(t)
+	for _, role := range []struct {
+		id   uuid.UUID
+		name string
+	}{{approvalAdminID, "admin"}, {approvalOperatorID, "operator"}, {approvalViewerID, "viewer"}} {
+		token := ts.bearerToken(t, role.id, approvalOrgID, role.name)
+		resp := ts.do(t, http.MethodPost, "/v1/approvals", token, validApprovalPayload())
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Fatalf("%s POST /v1/approvals = %d, want 405 (route removed)", role.name, resp.StatusCode)
+		}
 	}
 }
 

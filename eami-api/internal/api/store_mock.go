@@ -157,18 +157,6 @@ type StoreApproval struct {
 	DecidedAt     *time.Time
 }
 
-// CreateApprovalParams for MockStore.CreateApproval.
-type MockCreateApprovalParams struct {
-	OrgID         uuid.UUID
-	AgentID       uuid.UUID
-	AgentName     string
-	ToolName      string
-	Action        string
-	Justification string
-	RiskLevel     string
-	ExpiresAt     time.Time
-}
-
 // ListApprovalsParams for MockStore.ListApprovals.
 type MockListApprovalsParams struct {
 	OrgID   uuid.UUID
@@ -211,7 +199,6 @@ type Store interface {
 	ReorderPolicies(ctx context.Context, arg ReorderPoliciesParams) error
 
 	// Approvals
-	CreateApproval(ctx context.Context, arg MockCreateApprovalParams) (StoreApproval, error)
 	GetApproval(ctx context.Context, id uuid.UUID, orgID uuid.UUID) (StoreApproval, error)
 	ListApprovals(ctx context.Context, arg MockListApprovalsParams) ([]StoreApproval, error)
 	CountApprovals(ctx context.Context, arg MockListApprovalsParams) (int64, error)
@@ -258,7 +245,6 @@ type MockStore struct {
 	UpdatePolicyErr   error
 	DeletePolicyErr   error
 	ReorderErr        error
-	CreateApprovalErr error
 	GetApprovalErr    error
 	ListApprovalsErr  error
 	DecideApprovalErr error
@@ -268,7 +254,6 @@ type MockStore struct {
 	DeleteAgentCalls    int
 	CreatePolicyCalls   int
 	ReorderCalls        int
-	CreateApprovalCalls int
 	DecideApprovalCalls int
 }
 
@@ -508,32 +493,6 @@ func (m *MockStore) ReorderPolicies(ctx context.Context, arg ReorderPoliciesPara
 }
 
 // ─── Approval interface implementation ───────────────────────────────────────
-
-func (m *MockStore) CreateApproval(ctx context.Context, arg MockCreateApprovalParams) (StoreApproval, error) {
-	m.mu.Lock()
-	m.CreateApprovalCalls++
-	m.mu.Unlock()
-	if m.CreateApprovalErr != nil {
-		return StoreApproval{}, m.CreateApprovalErr
-	}
-	a := StoreApproval{
-		ID:            uuid.New(),
-		OrgID:         arg.OrgID,
-		AgentID:       arg.AgentID,
-		AgentName:     arg.AgentName,
-		ToolName:      arg.ToolName,
-		Action:        arg.Action,
-		Justification: arg.Justification,
-		RiskLevel:     arg.RiskLevel,
-		Status:        "pending",
-		ExpiresAt:     arg.ExpiresAt,
-		CreatedAt:     time.Now().UTC(),
-	}
-	m.mu.Lock()
-	m.Approvals[a.ID] = a
-	m.mu.Unlock()
-	return a, nil
-}
 
 func (m *MockStore) GetApproval(ctx context.Context, id uuid.UUID, orgID uuid.UUID) (StoreApproval, error) {
 	if m.GetApprovalErr != nil {

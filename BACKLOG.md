@@ -2693,7 +2693,7 @@ webhook=http://169.254.169.254/latest/meta-data/           save=200 test=200 9ms
 - Test: one org with a blackholed webhook doesn't delay another org's alert creation or notification.
 **Status:** QUEUED.
 
-### B-241 — Remove the dead `POST /v1/approvals` route — **QUEUED, 2026-09-27**
+### B-241 — Remove the dead `POST /v1/approvals` route — **DONE, 2026-09-27** (evidence: `B-241_VERIFICATION.md`)
 **Origin:** B-237 carried-over item. The founder decided on removal rather than hardening the descriptive fields. Minted at founder direction 2026-09-27. The ID was confirmed free against BACKLOG.md directly: the counter read B-239, and a grep found no open item covering this scope.
 **Problem:** nothing calls this route: no service, no UI, no script (B-237 Part A). The gateway inserts its own approvals directly. B-237 closed its cross-org hole, but it still lets any admin or operator create inert **same-org** approvals whose descriptive fields (`agent_name`, `tool_name`, `justification`, …) are free text and can mislead approvers. Such approvals also make the org's own agent or policy undeletable, because the FKs are NO ACTION.
 **Scope confirmed:** the route is **not** in `api/openapi.yaml` (only `GET /v1/approvals` is), so removing it doesn't touch the Architect-owned contract.
@@ -2706,7 +2706,13 @@ To remove:
 
 Keep `store.CreateApproval` (with B-237's org-scoped SQL) only if a caller remains; otherwise remove it too. The gateway has its own insert.
 **Verification:** `POST /v1/approvals` returns 405 or 404; the approvals list and decide flows are unchanged; the gateway escalate→approve/deny round trip is unchanged live.
-**Status:** QUEUED.
+**Status:** DONE 2026-09-27.
+- The route, handler, store insert, adapter and mock were removed; there is no contract change.
+- `TestCreateApprovalRoute_Removed` (405 for every role) catches re-adding a POST handler (mutation checked).
+- Tests 495/0/0; the gateway approval suite passes.
+- **Live:** 405 for admin and operator; the gateway escalate→approve→SSE round trip is unchanged.
+- Snapshot identical except the audit_log +2, which is left because the log is hash-chained.
+- Both reviews completed.
 
 ### B-242 — `InviteUser` reveals whether an email has an account in any org — **QUEUED, 2026-09-27**
 **Origin:** B-237-era carried-over item (org-branch sweep #46, Info). Minted at founder direction 2026-09-27. The ID was confirmed free against BACKLOG.md directly: the counter read B-239, and a grep found no open item covering this scope.
@@ -2721,9 +2727,26 @@ Keep `store.CreateApproval` (with B-237's org-scoped SQL) only if a caller remai
 - **(b)** Per-org email uniqueness `(org_id, email)`. That is a bigger change, touching login (email → org resolution), resets and bootstrap.
 - In either case, stop echoing the DB error.
 - Test: an invite for an email in another org is indistinguishable from an invite for a new email.
-**Status:** QUEUED.
+**Founder decision (2026-09-27):** option (a). Keep global email uniqueness, and make the invite response identical and non-revealing whether or not the email exists anywhere, matching the password-reset flow's anti-enumeration pattern exactly. Do **not** change uniqueness scope.
+**Status:** QUEUED, **blocked on a follow-up founder decision** (raised 2026-09-27). Implementing option (a) found a constraint:
+- The password-reset pattern works because the requester gets **nothing back**: a uniform `{"status":"ok"}`, with the real action happening out of band.
+- An invite has to hand the admin a **working link**, because no email or SMTP delivery exists.
+- It also creates a user row that the admin's own `GET /v1/users` list shows.
+- With global uniqueness, an invite for an email registered in another org can produce neither a working link nor a listed pending user.
 
-### B-243 — Single global service key authorizes writes into any org — **QUEUED, 2026-09-27**
+So even a byte-identical invite response still leaks existence, in two ways:
+- the returned link fails when used;
+- the "invited" user never appears in the org's list.
+
+A fabricated success response would also mislead a legitimate admin, who believes they invited a colleague when they did not.
+
+Choices, for the founder:
+- **(i)** Out-of-band invite delivery (email), matching the reset flow exactly. Needs email sending, which doesn't exist yet (see B-238's SMTP note).
+- **(ii)** Interim: stop the raw-DB-text leak and return one generic 409 ("this email can't be invited") for any existing email, same-org or other-org. The existence signal remains until (i).
+- **(iii)** Uniform fake-success, which leaves the residual signals above and a misleading UX.
+
+### B-243 — Single global service key authorizes writes into any org — **QUEUED (Medium), 2026-09-27 — ⚠ MUST BE FIXED BEFORE ANY DESIGN PARTNER OR PILOT CUSTOMER RUNS THEIR OWN COLLECTOR/GATEWAY**
+**Founder flag (2026-09-27):** this is a real gap. It is harmless today only because no real customer deployment exists yet: every holder of the service key is platform-operated. Treat it as a hard gate. It must be fixed before the first design-partner or pilot deployment in which the customer runs `eami-collector` or `eami-gateway` themselves.
 **Origin:** B-237-era carried-over item (org-branch sweep #67/#69, Info; also the B-237 security review's Info). Minted at founder direction 2026-09-27. The ID was confirmed free against BACKLOG.md directly: the counter read B-239, and a grep found no open item covering this scope.
 **Problem:**
 - `requireServiceKey` compares `X-Service-Key` against one platform-wide `cfg.ServiceKey`.

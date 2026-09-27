@@ -4,7 +4,17 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-27, newest) — Follow-up B-IDs minted: B-239–B-243
+## Active decision thread (2026-09-27, newest) — B-241 DONE; B-242 blocked on a follow-up decision; B-243 flagged as a pre-pilot gate
+
+**B-241 is done.** The dead `POST /v1/approvals` is removed (handler, store insert, adapter, mock). There is no contract change. Tests 495/0/0; live 405 for every role; the gateway escalation round trip is unchanged. Evidence: `B-241_VERIFICATION.md`.
+
+**B-242.** The founder chose option (a): a non-revealing invite response and global uniqueness kept. Implementing it showed that true non-revelation needs out-of-band invite delivery, because the invite must hand the admin a working link and creates a listed user row. Choices (i), (ii) and (iii) are in BACKLOG B-242, awaiting the founder. No code has changed for B-242.
+
+**B-243** is flagged in BACKLOG as a must-fix before any design partner or pilot customer runs their own collector or gateway.
+
+The next B-ID is B-244.
+
+## Active decision thread (2026-09-27) — Follow-up B-IDs minted: B-239–B-243
 
 The founder directed closing out the B-237/B-238 carried-over items. All are **QUEUED**, and no code changed.
 - **B-239:** hooks.slack.com-only webhook allowlist.
@@ -2312,6 +2322,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-27 by Claude Code — B-241 done (dead POST /v1/approvals removed, verified live, both reviews completed); B-242 blocked on a founder follow-up decision (true non-revelation needs out-of-band delivery); B-243 flagged as a pre-pilot gate. Marker cleared.
+
+Prior entry:
 2026-09-27 by Claude Code — minted B-239–B-243 (B-238/B-237 follow-ups, all QUEUED). SMTP follow-up not minted, because no SMTP sending exists. Docs only.
 
 Prior entry:

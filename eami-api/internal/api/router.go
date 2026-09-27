@@ -362,7 +362,6 @@ func (s *Server) Handler() http.Handler {
 			// Multi-Hop Workflows Brief 2 (B-059): static per-step params.
 			r.Put("/v1/gateway/workflow-steps/{stepId}/params", s.PutWorkflowStepParams)
 			r.Delete("/v1/gateway/nodes/{nodeId}", s.DeleteNode)
-			r.Post("/v1/approvals", s.CreateApproval)
 			// Alert rules (write)
 			r.Post("/v1/alerts/rules", s.CreateAlertRule)
 			r.Put("/v1/alerts/rules/{ruleId}", s.UpdateAlertRule)

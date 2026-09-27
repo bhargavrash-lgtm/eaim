@@ -1,5 +1,31 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-241 — Dead `POST /v1/approvals` removed — 2026-09-27 (Claude Code)
+
+At founder direction. The evidence record, with both reviews verbatim, is `B-241_VERIFICATION.md`.
+
+**Removed (eami-api):**
+- the route (`router.go`);
+- `CreateApproval` and `CreateApprovalRequest` (`approvals.go`, plus two unused imports);
+- `queriesAdapter.CreateApproval` (`store_adapter.go`);
+- `MockStore.CreateApproval`, `MockCreateApprovalParams`, the `Store` interface method and the mock counters (`store_mock.go`);
+- `store.CreateApprovalParams`, `createApprovalQuery` and `Queries.CreateApproval` (`store/approvals.sql.go`, plus the `query/approvals.sql` block);
+- `approval_org_pg_test.go`.
+
+**Added:** `TestCreateApprovalRoute_Removed` (`approvals_test.go`).
+
+**Why:** the route had no caller (the gateway inserts its own approvals), and it let admins and operators create spoofable same-org approvals. It is not in `api/openapi.yaml`, so there is no contract change.
+
+**Verification**
+- `go build` and `go vet` are clean. `go test ./...` gives PASS=495, FAIL=0, SKIP=0. The gateway approval suite passes.
+- **Mutation:** re-adding a POST handler is caught.
+- **Live:** 405 for admin and operator; the gateway escalate→approve→SSE round trip is unchanged.
+- **Cleanup:** snapshot identical except audit_log +2, which is hash-chained and left in place.
+
+**Also this session:**
+- B-242 is decided (option (a)) but blocked on a follow-up decision (see BACKLOG B-242).
+- B-243 is flagged as a pre-pilot gate.
+
 ## B-238 — Slack webhook SSRF closed (shared outbound guard) — 2026-09-27 (Claude Code)
 
 This was an urgent SSRF fix, found by the org-branch sweep (endpoint 55). The evidence record (pre-fix route and engine attacks, post-fix live run, 8-mutation log, both reviews plus a security re-review, verbatim) is `B-238_VERIFICATION.md`.
@@ -805,7 +831,7 @@ Migration `000015_licenses` (append-only by application discipline: `CreateLicen
 - Public: `GET /health`, `POST /v1/auth/login`, `POST /v1/auth/refresh`
 - Service-key (collector/gateway → API, no JWT): `POST /v1/reports`, `POST /v1/ingest/batch`, `POST /v1/internal/token-usage`, `POST /v1/reports/paste-events` (B-032, no live caller yet)
 - JWT + admin: org/notification settings, user management (`/v1/users*`)
-- JWT + admin/operator: API keys, agents/policies/tools/nodes CRUD, agent-config, alert-rule CRUD, approval creation
+- JWT + admin/operator: API keys, agents/policies/tools/nodes CRUD, agent-config, alert-rule CRUD (approval creation removed in B-241)
 - JWT + admin/operator/approver: approval decide, alert acknowledge/resolve
 - JWT + admin/operator/viewer (read): agents/policies/tools/nodes list+get, `/v1/audit`, `/v1/audit/export`, `/v1/audit/verify`, `/v1/alerts*`, `/v1/finops/summary`, `/v1/finops/timeseries`, `/v1/memory/episodes`, `/v1/memory/episodes/search`, `/v1/memory/episodes/{episodeId}` (all three now served by the gateway-proxy handlers, see below), `/v1/gateway/episodes`, `/v1/gateway/episodes/search`, `/v1/gateway/episodes/{episodeId}` (same handlers, second mount, unused by the frontend), `/v1/endpoints*`, `/v1/discover/endpoints*`, `/v1/paste-events`, `/v1/paste-events/timeseries` (B-038)
 - JWT + any role: `GET /v1/approvals`, `GET /v1/approvals/{id}`

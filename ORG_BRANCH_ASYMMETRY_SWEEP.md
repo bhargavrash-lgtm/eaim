@@ -117,7 +117,7 @@ Full detail and the proposed fix are in BACKLOG.md B-238. The severity proposed 
 | 20 | POST /v1/alerts/rules/{ruleId}/test | TestAlertRule | PASS | an org-scoped read, then a dry run only (no write) |
 | 21 | POST /v1/alerts/{alertId}/acknowledge | AcknowledgeAlert | PASS | `UpdateAlertStatus … WHERE id AND org_id` |
 | 22 | POST /v1/alerts/{alertId}/resolve | ResolveAlert | PASS | the same |
-| 23 | POST /v1/approvals | CreateApproval | **FAIL → B-237 (FIXED 2026-09-27)** | see above; `B-237_VERIFICATION.md` |
+| 23 | POST /v1/approvals | CreateApproval | **FAIL → B-237 (FIXED 2026-09-27)**; route later **removed** (B-241) | see above; `B-237_VERIFICATION.md`, `B-241_VERIFICATION.md` |
 | 24 | PUT /v1/gateway/agents/{agentId}/config | UpdateAgentConfig | PASS (fixed by B-232) | `B-232_VERIFICATION.md` |
 | 25 | PATCH /v1/workspaces/{id}/members/{userId} | UpdateWorkspaceMemberRole | PASS (fixed by B-233) | `B-233_VERIFICATION.md` |
 | 26 | DELETE /v1/workspaces/{id}/members/{userId} | RemoveWorkspaceMember | PASS (fixed by B-233) | `B-233_VERIFICATION.md` |

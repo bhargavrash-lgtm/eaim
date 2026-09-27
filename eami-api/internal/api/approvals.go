@@ -2,8 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
-	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -46,24 +44,6 @@ type ApprovalResp struct {
 type ApprovalListResp struct {
 	Data []ApprovalResp `json:"data"`
 	Meta PaginationMeta `json:"meta"`
-}
-
-type CreateApprovalRequest struct {
-	AgentID            string      `json:"agent_id"`
-	AgentName          string      `json:"agent_name"`
-	ToolName           string      `json:"tool_name"`
-	Action             string      `json:"action"`
-	Parameters         interface{} `json:"parameters"`
-	Justification      string      `json:"justification"`
-	RiskLevel          string      `json:"risk_level"`
-	EstimatedRecords   *int        `json:"estimated_records"`
-	Reversible         *bool       `json:"reversible"`
-	Environment        *string     `json:"environment"`
-	DataTypes          []string    `json:"data_types"`
-	PolicyRuleID       *string     `json:"policy_rule_id"`
-	ExpiresInSeconds   int         `json:"expires_in_seconds"`
-	GatewaySessionID   string      `json:"gateway_session_id"`
-	GatewayNodeAddress string      `json:"gateway_node_address"`
 }
 
 type DecideApprovalRequest struct {
@@ -178,137 +158,6 @@ func (s *Server) GetApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, storeApprovalToResp(sa))
-}
-
-// CreateApproval handles POST /v1/approvals. Note: the gateway does NOT call
-// this route -- it inserts its own escalations directly
-// (eami-gateway/internal/approval/router.go Submit), with a server-resolved
-// agent identity. This route takes agent_id/policy_rule_id from the request
-// body, so both are org-validated here (B-237).
-func (s *Server) CreateApproval(w http.ResponseWriter, r *http.Request) {
-	uc := claimsFromContext(r)
-	var req CreateApprovalRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
-		return
-	}
-	if req.AgentID == "" || req.ToolName == "" || req.Action == "" || req.GatewaySessionID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "agent_id, tool_name, action, gateway_session_id required")
-		return
-	}
-
-	agentID, err := uuid.Parse(req.AgentID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid agent_id")
-		return
-	}
-
-	expiresIn := req.ExpiresInSeconds
-	if expiresIn <= 0 {
-		expiresIn = 3600 // default 1 hour
-	}
-	expiresAt := time.Now().Add(time.Duration(expiresIn) * time.Second)
-
-	// Marshal parameters to JSONB bytes.
-	paramsBytes, _ := json.Marshal(req.Parameters)
-
-	dataTypes := req.DataTypes
-	if dataTypes == nil {
-		dataTypes = []string{}
-	}
-
-	p := store.CreateApprovalParams{
-		OrgID:              uc.OrgID,
-		AgentID:            agentID,
-		AgentName:          req.AgentName,
-		ToolName:           req.ToolName,
-		Action:             req.Action,
-		Parameters:         paramsBytes,
-		Justification:      req.Justification,
-		RiskLevel:          req.RiskLevel,
-		DataTypes:          dataTypes,
-		ExpiresAt:          expiresAt,
-		GatewaySessionID:   req.GatewaySessionID,
-		GatewayNodeAddress: req.GatewayNodeAddress,
-	}
-	if req.EstimatedRecords != nil {
-		p.EstimatedRecords = pgtype.Int4{Int32: int32(*req.EstimatedRecords), Valid: true}
-	}
-	if req.Reversible != nil {
-		p.Reversible = pgtype.Bool{Bool: *req.Reversible, Valid: true}
-	}
-	if req.Environment != nil {
-		p.Environment = pgtype.Text{String: *req.Environment, Valid: true}
-	}
-	if req.PolicyRuleID != nil {
-		// Previously an unparseable id was silently dropped (stored as no
-		// policy); reject it like agent_id instead.
-		id, err := uuid.Parse(*req.PolicyRuleID)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "invalid policy_rule_id")
-			return
-		}
-		p.PolicyID = pgtype.UUID{Bytes: id, Valid: true}
-	}
-
-	if s.queries != nil {
-		// B-237: the referenced agent (and policy, if given) must belong to
-		// the caller's org. Another org's id gets the same 404 as a
-		// nonexistent one, so neither existence nor ownership leaks.
-		if _, err := s.queries.GetAgent(r.Context(), agentID, uc.OrgID); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				writeError(w, http.StatusNotFound, "not_found", "agent not found")
-				return
-			}
-			slog.Error("create approval: agent ownership check failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "failed to create approval")
-			return
-		}
-		if p.PolicyID.Valid {
-			if _, err := s.queries.GetPolicy(r.Context(), uuid.UUID(p.PolicyID.Bytes), uc.OrgID); err != nil {
-				if errors.Is(err, pgx.ErrNoRows) {
-					writeError(w, http.StatusNotFound, "not_found", "policy not found")
-					return
-				}
-				slog.Error("create approval: policy ownership check failed", "err", err)
-				writeError(w, http.StatusInternalServerError, "internal_error", "failed to create approval")
-				return
-			}
-		}
-		// The insert is itself org-scoped (defense in depth): ErrNoRows
-		// means the agent or policy is not this org's -- reachable only if
-		// the checks above were bypassed or raced (e.g. a delete between
-		// check and insert). Its distinct message keeps the two layers
-		// separately testable; it is the same for foreign and nonexistent
-		// references, so it reveals nothing either.
-		a, err := s.queries.CreateApproval(r.Context(), p)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				writeError(w, http.StatusNotFound, "not_found", "approval references not found")
-				return
-			}
-			slog.Error("create approval failed", "err", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "failed to create approval")
-			return
-		}
-		writeJSON(w, http.StatusCreated, approvalToResp(*a))
-		return
-	}
-	sa, err := s.storeIface.CreateApproval(r.Context(), MockCreateApprovalParams{
-		OrgID:         uc.OrgID,
-		AgentID:       agentID,
-		AgentName:     req.AgentName,
-		ToolName:      req.ToolName,
-		Action:        req.Action,
-		Justification: req.Justification,
-		RiskLevel:     req.RiskLevel,
-		ExpiresAt:     expiresAt,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
-	writeJSON(w, http.StatusCreated, storeApprovalToResp(sa))
 }
 
 // DecideApproval handles POST /v1/approvals/{approvalId}/decide
