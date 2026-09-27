@@ -18,7 +18,7 @@ ACTIVE AGENT: none
 - **Reviews:** security first pass and delta, plus a fresh full code review, all completed. A first code-review attempt was stopped before reporting and is not counted. All Lows were fixed.
 
 **Open:**
-- `has_ai`/`has_local_model` are still ignored. This is the same bug class and needs a founder-confirmed B-ID.
+- `has_ai`/`has_local_model` are still ignored. This is the same bug class, now tracked as B-229 (QUEUED); the next ID is B-230.
 - Architect contract notes: "hostname or username" (there is no username column), and `per_page` max 100 vs 200 in code.
 - B-225 still covers `parsePage` overflow.
 - IA consolidation decisions (previous thread) are still pending.
@@ -2189,6 +2189,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-27 by Claude Code — founder confirmed B-226/B-227 complete and approved minting B-229. B-229 is QUEUED (`/v1/endpoints` ignores its documented `has_ai`/`has_local_model` filters) after the check against BACKLOG.md; the next B-ID is B-230. The Architect-EAMI contract notes stand as logged. No code changed. Active marker cleared.
+
+Prior entry:
 2026-09-27 by Claude Code — B-226/B-227 done and B-228 queued. Endpoint search is fixed and Discover pages past 25 endpoints; MATURITY_AUDIT.md is corrected. Tests 476/0/0, live checks 18/18, fixture cleanup proven, and both mandatory reviews completed (quoted verbatim in `B-226_B-227_VERIFICATION.md`). Active marker cleared.
 
 Prior entry:

@@ -2445,7 +2445,7 @@ For example, `GET /v1/audit?page=4294967297&per_page=100` wraps the offset to 0 
 - **Live:** 18/18 checks passed.
 - **Reviews:** security review (first pass plus delta) and code review both completed and are quoted verbatim in `B-226_B-227_VERIFICATION.md`.
 **Follow-ups, not fixed here:**
-- `has_ai`/`has_local_model` are documented but still ignored. This is the same bug class and **needs a founder-confirmed B-ID**.
+- `has_ai`/`has_local_model` are documented but still ignored. This is the same bug class; it is **now B-229** (founder-approved 2026-09-27).
 - Architect-EAMI contract note: `search` is described as "hostname **or username**", but `endpoints` has no username column; and `per_page` is documented as max 100, while the server allows 200.
 - `parsePage` page overflow is still tracked under B-225.
 - Malformed `%zz` escapes silently drop the parameter, which is shared `url.Query()` behaviour (security review, Info).
@@ -2462,4 +2462,18 @@ For example, `GET /v1/audit?page=4294967297&per_page=100` wraps the offset to 0 
 **Origin:** B-227's founder-approved option (c). The Discover platform filter is client-side and only narrows the current page, and it is now honestly labelled that way. A real fix needs an `os` query parameter in `api/openapi.yaml`, which Architect-EAMI owns, plus a handler/store filter on `os_info`. Minted at founder direction after the same free-ID check.
 **Status:** QUEUED.
 
-## Next B-ID: B-229
+### B-229 — `GET /v1/endpoints` ignores its documented `has_ai` / `has_local_model` filters — **QUEUED, 2026-09-27**
+**Origin:** B-226's code review (Info), which found the same bug class as B-226. The founder approved minting this ID. It was confirmed free against BACKLOG.md directly, with the same pattern as B-226: the counter read B-229, and no open item used that number or covered this scope beyond the B-226 follow-up line that requested it.
+**Problem:**
+- `api/openapi.yaml` (~1227-1233) documents both boolean filters.
+- `useEndpoints`'s `EndpointParams` exposes them.
+- `ListAgentEndpoints` (`discover.go`) reads only `page`, `per_page` and `search`, so any request using them silently gets the unfiltered inventory.
+- No UI caller sends them today (only DashboardPage `{per_page:1}` and DiscoverPage), so nothing visible is broken yet.
+**Suggested fix:** follow B-226's pattern.
+- Parse each value strictly: `true`/`false`, with anything else returning 400.
+- Add the filters to the one shared list/count fragment, so `meta.total` stays consistent.
+- "Local model" likely maps to `endpoint_model_files`. What counts as "has AI" (AI apps, models, MCP servers, or any of them) must be confirmed against the contract's intent in Part A before building, and checked against the real normalized tables.
+- Add real-Postgres parity tests and mutation checks, and verify live.
+**Status:** QUEUED, not investigated.
+
+## Next B-ID: B-230
