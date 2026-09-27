@@ -48,8 +48,11 @@ func (q *Queries) GetAgentConfig(ctx context.Context, agentID uuid.UUID) (*Agent
 	return &c, nil
 }
 
-// UpsertAgentConfigParams holds the fields for insert-or-update.
+// UpsertAgentConfigParams holds the fields for insert-or-update. OrgID scopes
+// the write: agent_configs has no org_id column of its own, so ownership is
+// enforced through gateway_agents inside the same statement (B-232).
 type UpsertAgentConfigParams struct {
+	OrgID               uuid.UUID
 	AgentID             uuid.UUID
 	ScanIntervalSeconds int32
 	ModelScanPaths      []string
@@ -60,7 +63,9 @@ type UpsertAgentConfigParams struct {
 const upsertAgentConfigSQL = `
 INSERT INTO agent_configs (agent_id, scan_interval_seconds, model_scan_paths,
                            max_report_size_bytes, enabled_scanners, updated_at)
-VALUES ($1, $2, $3, $4, $5, NOW())
+SELECT $1, $2, $3, $4, $5, NOW()
+FROM gateway_agents
+WHERE id = $1 AND org_id = $6
 ON CONFLICT (agent_id) DO UPDATE SET
     scan_interval_seconds = EXCLUDED.scan_interval_seconds,
     model_scan_paths      = EXCLUDED.model_scan_paths,
@@ -70,7 +75,9 @@ ON CONFLICT (agent_id) DO UPDATE SET
 RETURNING agent_id, scan_interval_seconds, model_scan_paths,
           max_report_size_bytes, enabled_scanners, updated_at`
 
-// UpsertAgentConfig creates or fully replaces an agent's config row.
+// UpsertAgentConfig creates or fully replaces an agent's config row, but only
+// when the agent belongs to p.OrgID. For any other org's agent the INSERT's
+// SELECT yields no row, nothing is written, and pgx.ErrNoRows is returned.
 func (q *Queries) UpsertAgentConfig(ctx context.Context, p UpsertAgentConfigParams) (*AgentConfig, error) {
 	row := q.db.QueryRow(ctx, upsertAgentConfigSQL,
 		toPgtypeUUID(p.AgentID),
@@ -78,6 +85,7 @@ func (q *Queries) UpsertAgentConfig(ctx context.Context, p UpsertAgentConfigPara
 		p.ModelScanPaths,
 		p.MaxReportSizeBytes,
 		p.EnabledScanners,
+		toPgtypeUUID(p.OrgID),
 	)
 	var c AgentConfig
 	var id [16]byte

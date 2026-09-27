@@ -2516,4 +2516,25 @@ For example, `GET /v1/audit?page=4294967297&per_page=100` wraps the offset to 0 
 **Explicitly not built** by the Agent Detail Actions tab, which keeps today's authentication unchanged.
 **Status:** QUEUED.
 
-## Next B-ID: B-232
+### B-232 — Cross-org overwrite of agent scanner config via `PUT /v1/gateway/agents/{id}/config` (H-1, High) — **DONE, 2026-09-27**
+**Origin:** H-1 from the Agent Detail Actions-tab security review. The founder issued an urgent dedicated brief. The ID was confirmed free against BACKLOG.md directly: the counter read B-232, and no open item overlapped.
+**Cause:** `UpdateAgentConfig` checked org ownership only when the agent had no `agent_configs` row. A trigger always seeds one, so the check never ran. `agent_configs` has no `org_id` column, and the store upsert wrote by `agent_id` alone.
+**Fix:** two independent layers.
+1. **Handler:** an unconditional `GetAgent(agentID, uc.OrgID)` before any read or write, returning a 404 identical to a nonexistent agent's. Also: generic 500s, and no silent defaults on load errors.
+2. **SQL:** the upsert is org-scoped in-statement (`INSERT … SELECT … FROM gateway_agents WHERE id=$1 AND org_id=$6`). The sqlc source `store/query/agent_configs.sql` was updated to match.
+**Verification:**
+- **Live:** H-1 was reproduced on the pre-fix running stack (another org's admin got 200 and overwrote the victim's config). The identical attack gets 404 after the fix, with the victim row unchanged. Same-org Configure works from Agent Detail and the list.
+- **Tests:** real-Postgres tests cover cross-org admin/operator with and without a config row (the victim row is checked in the DB), same-org full/partial/no-row writes, viewer 403, and store-level wrong-org scoping.
+- **Mutation check:** 5 mutations, which show each layer alone blocks the write.
+- **Suite:** `go test ./...` PASS=479, FAIL=0, SKIP=0.
+- **Cleanup:** fixture snapshot identical.
+- **Reviews:** code and security both completed, quoted verbatim in `B-232_VERIFICATION.md`.
+**Found by this fix's security sweep, needing a founder-confirmed B-ID (recommended next urgent fix):** an org **admin can change or remove workspace memberships in another org's workspace**, given its UUIDs.
+- `requireWorkspaceRole` (`middleware.go:167-171`) lets any org admin through before its org-scoped query runs.
+- `UpdateWorkspaceMemberRole`/`RemoveWorkspaceMember` (`workspaces.go:539`, `:570`) filter only by `user_id`/`workspace_id`.
+- Confirmed in source. Rated Medium.
+**Also recorded (Low, not cross-tenant):**
+- The config GET paths (admin `GetAgentConfig`, service-key `AgentRemoteConfig`) treat any DB error as "no row" and return 404 or defaults. That fails open to all scanners on the remote route.
+- Other handlers still echo `err.Error()` in 500s (`CreateAgent`, `UpdatePolicy`, workspace handlers); this belongs to the app-wide raw-error item.
+
+## Next B-ID: B-233

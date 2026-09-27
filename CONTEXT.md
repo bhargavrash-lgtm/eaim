@@ -4,7 +4,20 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-27, newest) — Agent Detail Actions tab DONE; DESIGN_SYSTEM §7.7 added; B-230/B-231 queued; 3 pre-existing security findings need B-IDs
+## Active decision thread (2026-09-27, newest) — B-232 DONE: cross-org agent-config overwrite (H-1) closed; new workspace-membership cross-org write found (needs B-ID)
+
+**H-1 is closed as B-232.** `PUT /v1/gateway/agents/{id}/config` checked org ownership only when no config row existed, and one always exists.
+- **The fix:** an unconditional handler ownership check, plus an org-scoped upsert in SQL (`agent_configs` has no `org_id`).
+- **Before and after:** live on the running stack, the attack returned 200 and overwrote another org's config. After the fix, the same attack returns 404 with the victim unchanged.
+- **Same-org Configure** works from both UI surfaces.
+- **Evidence:** tests 479/0/0; 5 mutations showing each layer alone blocks the write; snapshot identical; both reviews completed, verbatim in `B-232_VERIFICATION.md`.
+
+**Needs founder decision (found by this fix's security sweep, confirmed in source):** an org **admin can change or remove workspace memberships in another org's workspace** (Medium). `requireWorkspaceRole` lets admins bypass its org check, and the member UPDATE and DELETE have no org predicate.
+- This is recommended as the next urgent fix, with the same two-layer shape plus an adversarial test.
+- **Still open from before:** M-1 clickjacking headers, and the app-wide raw `err.Error()` echo.
+- **Now recorded:** config GET paths fail open on DB errors (Low).
+
+## Active decision thread (2026-09-27) — Agent Detail Actions tab DONE; DESIGN_SYSTEM §7.7 added; B-230/B-231 queued; 3 pre-existing security findings need B-IDs
 
 **What was built.**
 - **§7.7 "Unified Entity Detail Pages"** is added (commit `8840335`).
@@ -2212,6 +2225,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-27 by Claude Code — B-232 (H-1 cross-org agent-config overwrite) fixed. It was reproduced live, then closed with two independently proven layers. Tests 479/0/0, both reviews completed. The security sweep found a separate cross-org workspace-membership write (Medium), which needs a founder B-ID. The next B-ID is B-233. Active marker cleared.
+
+Prior entry:
 2026-09-27 by Claude Code — Agent Detail Actions tab done, and DESIGN_SYSTEM.md §7.7 added. Configure had been broken on both surfaces and is now fixed. B-230 (revoked-agent transitions) and B-231 (step-up auth) are QUEUED; the next B-ID is B-232. Live checks 23/23, fixture cleanup proven twice, five review passes quoted verbatim. Three pre-existing security findings (H-1 cross-tenant config write, M-1 clickjacking headers, raw error echo) need founder B-IDs. Active marker cleared.
 
 Prior entry:

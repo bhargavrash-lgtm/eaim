@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -684,20 +685,36 @@ func (s *Server) UpdateAgentConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.queries != nil {
-		// Fetch current config to merge partial updates.
-		existing, err := s.queries.GetAgentConfig(r.Context(), agentID)
-		if err != nil {
-			// Verify agent ownership; seed defaults on miss.
-			if _, err2 := s.queries.GetAgent(r.Context(), agentID, uc.OrgID); err2 != nil {
+		// B-232: verify ownership unconditionally, before any read or write.
+		// This check previously ran only when the agent had no config row,
+		// and every agent always has one (trg_agent_configs_default), so any
+		// admin/operator could overwrite another org's agent config by id.
+		// Another org's agent gets the same 404 as a nonexistent one.
+		if _, err := s.queries.GetAgent(r.Context(), agentID, uc.OrgID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
 				writeError(w, http.StatusNotFound, "not_found", "agent not found")
 				return
 			}
-			_ = s.queries.SeedAgentConfig(r.Context(), agentID)
+			slog.Error("update agent config: ownership check failed", "agent_id", agentID, "err", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to update agent config")
+			return
+		}
+		// Fetch current config to merge partial updates. Only a missing row
+		// falls back to defaults; any other error must not silently reset the
+		// fields this request didn't send.
+		existing, err := s.queries.GetAgentConfig(r.Context(), agentID)
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				slog.Error("update agent config: load failed", "agent_id", agentID, "err", err)
+				writeError(w, http.StatusInternalServerError, "internal_error", "failed to update agent config")
+				return
+			}
 			d := store.AgentConfigDefaults
 			existing = &d
 			existing.AgentID = agentID
 		}
 		p := store.UpsertAgentConfigParams{
+			OrgID:               uc.OrgID,
 			AgentID:             agentID,
 			ScanIntervalSeconds: existing.ScanIntervalSeconds,
 			ModelScanPaths:      existing.ModelScanPaths,
@@ -716,9 +733,16 @@ func (s *Server) UpdateAgentConfig(w http.ResponseWriter, r *http.Request) {
 		if req.EnabledScanners != nil {
 			p.EnabledScanners = req.EnabledScanners
 		}
+		// The upsert is itself org-scoped (defense in depth): ErrNoRows here
+		// means the agent is not this org's, e.g. deleted since the check.
 		cfg, err := s.queries.UpsertAgentConfig(r.Context(), p)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "not_found", "agent not found")
+				return
+			}
+			slog.Error("update agent config: save failed", "agent_id", agentID, "err", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to update agent config")
 			return
 		}
 		writeJSON(w, http.StatusOK, agentConfigToResp(*cfg))

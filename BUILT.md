@@ -1,5 +1,28 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-232 — Cross-org agent-config overwrite (H-1) fixed — 2026-09-27 (Claude Code)
+
+This was an urgent tenant-isolation fix. The evidence record, quoting the live attack before and after, the mutation log and both reviews verbatim, is `B-232_VERIFICATION.md`.
+
+**Files changed**
+- **`eami-api/internal/api/agents.go`** (`UpdateAgentConfig`):
+  - an unconditional org ownership check before any read or write;
+  - 404 identical to a nonexistent agent's;
+  - only a missing row falls back to defaults;
+  - generic 500s logged with `slog`, with no `err.Error()` echo.
+- **`eami-api/internal/store/agent_configs.sql.go`:** `UpsertAgentConfigParams.OrgID`. The upsert is org-scoped in-statement through `gateway_agents`, and a foreign agent returns `pgx.ErrNoRows`.
+- **`eami-api/internal/store/query/agent_configs.sql`:** the sqlc source mirrored, so `sqlc generate` cannot revert it.
+- **New tests:** `eami-api/internal/api/agent_config_pg_test.go`, containing 3 real-Postgres tests.
+
+**Verification**
+- `go build`, `go vet` and gofmt are clean. `go test ./...` gives PASS=479, FAIL=0, SKIP=0.
+- **Mutations:** 5, covering both layers independently and the store-level test.
+- **Live:** H-1 was reproduced on the pre-fix stack (200, victim config overwritten). After the fix the same attack gets 404 with the victim unchanged, and same-org Configure works from both UI surfaces.
+- **Cleanup:** fixture snapshot identical.
+- **Reviews:** code and security both completed.
+
+**Found and not fixed (needs a founder B-ID):** an org admin can change or remove another org's workspace memberships. Also recorded: config GET paths fail open on DB errors (Low).
+
 ## Agent Detail Actions tab + DESIGN_SYSTEM.md §7.7 — 2026-09-27 (Claude Code)
 
 The evidence record, quoting the live runs and all five review passes verbatim, is `AGENT_ACTIONS_TAB_VERIFICATION.md`.
