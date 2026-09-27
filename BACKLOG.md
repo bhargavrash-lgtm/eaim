@@ -2560,4 +2560,55 @@ A nil-queries guard and doc/comment corrections were added after the code review
 - For an org admin on a foreign or nonexistent workspace, several routes changed from 400/200/500 to 404. Nothing depends on the old codes (listed in the verification record, §6).
 - More raw `err.Error()` echoes in workspace handlers, which belong to the app-wide item that still needs a founder B-ID.
 
-## Next B-ID: B-234
+### B-234 — API 500 responses echo raw database/driver error text (app-wide) — **QUEUED, 2026-09-27**
+**Origin:** found repeatedly by this session's security and code reviews:
+- the Agent Actions tab review (its Info-2);
+- the B-232 and B-233 reviews;
+- the class B-117 explicitly scoped out ("the raw-driver-error-text-in-response leak itself … not closed").
+
+Minted at founder direction. It was confirmed free against BACKLOG.md directly: the counter read B-234, and no open item covered this scope.
+**Problem:** many handlers call `writeError(w, 500, "internal_error", err.Error())`, which sends pgx/Postgres text (constraint, table and column names) to the client.
+**Instances named so far** (a partial list; a full sweep is part of this item):
+- `UpdateAgent` and `DeleteAgent` (`agents.go`), and `CreateAgent` (`agents.go:180`);
+- `UpdatePolicy`, and `ReorderPolicies`' exhausted-retry path (B-117);
+- `AddWorkspaceMember`, `ListWorkspaceMembers`, `UpdateWorkspace` and `CreateWorkspacePolicy`;
+- `ListAlerts` (`alerts.go`);
+- `audit.go`'s list path (also noted in B-225).
+
+B-232 and B-233 already fixed the handlers they touched: `UpdateAgentConfig`, and the workspace member PATCH/DELETE.
+**Exposure:** only authenticated callers see these messages, and only when a real DB fault occurs. They are same-org, so there is no cross-tenant data. It is still information disclosure and inconsistent hygiene.
+**Suggested fix:**
+- Grep every `err.Error()` passed to `writeError` on a 5xx.
+- Replace each with a fixed message, and log the detail server-side with `slog` (the pattern B-232/B-233 use).
+- Consider a small `writeInternalError(w, msg, err)` helper so this can't recur.
+- Add a test that forces a DB error on one representative route and asserts the body is generic.
+**Status:** QUEUED.
+
+### B-235 — SPA HTML served without frame protection (clickjacking) — **QUEUED, 2026-09-27**
+**Origin:** M-1 from the Agent Detail Actions-tab security review (`AGENT_ACTIONS_TAB_VERIFICATION.md` §3b). Minted at founder direction, with the same free-ID check.
+**Problem:**
+- `eami-ui/nginx.conf` sets `add_header X-Frame-Options "SAMEORIGIN" always` at server level.
+- `location = /index.html` declares its own `add_header Cache-Control`, and nginx then drops **all** inherited `add_header` directives for that location.
+- Every SPA route falls through `try_files … /index.html` into that location, so the app HTML is served with no `X-Frame-Options` and no CSP `frame-ancestors`.
+- **Why it matters:** the page can be framed for clickjacking. Agent Detail's Actions tab (`?tab=actions`) puts one-click Suspend/Reactivate buttons in a fixed position.
+- **Not verified live:** this comes from static reading of the config. The local stack serves the UI from the Vite dev server, not production nginx.
+**Suggested fix:**
+- Repeat the security headers inside `location = /index.html` (or use an `include` shared by every location that sets `add_header`).
+- Add `Content-Security-Policy: frame-ancestors 'self'`.
+- Verify by building the production UI image and checking the response headers for `/` and a deep SPA route.
+**Status:** QUEUED.
+
+### B-236 — Agent-config read paths fail open to defaults on any DB error — **QUEUED, 2026-09-27**
+**Origin:** B-232's code review (Low) and security review (Info). Minted at founder direction, with the same free-ID check.
+**Problem:** both read paths treat *any* error as "no config row" and serve the server defaults.
+- **Admin `GetAgentConfig` (`agents.go`):** any `GetAgent` error, including a DB error, becomes a 404. Any `GetAgentConfig` error falls back to defaults.
+- **Service-key `AgentRemoteConfig` (`agent_config_remote.go`):** a transient DB error serves the defaults (all six scanners, default scan paths) to the endpoint agent, silently overriding its real configured settings.
+- **Not cross-tenant** (confirmed by the B-232 security sweep): it is a correctness and fail-open issue.
+**Suggested fix:** match B-232's `UpdateAgentConfig`.
+- Only `pgx.ErrNoRows` falls back to defaults (or 404 for the agent lookup).
+- Any other error returns a generic 500 and is logged.
+- On the remote route, return an error the endpoint agent already treats as "keep current config" rather than defaults. Check `eami-agent`'s `FetchConfig` behaviour on non-200.
+- Add tests that force a DB error on each path.
+**Status:** QUEUED.
+
+## Next B-ID: B-237

@@ -2243,6 +2243,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-27 by Claude Code — the founder confirmed B-233 closed and approved minting three items: B-234 (raw DB error text in 500s, app-wide), B-235 (SPA HTML frame protection / clickjacking) and B-236 (agent-config reads fail open to defaults on DB errors). All three are QUEUED, confirmed free against BACKLOG.md; the next B-ID is B-237. No code changed. Active marker cleared.
+
+Prior entry:
 2026-09-27 by Claude Code — B-233 (cross-org workspace-membership mutation) fixed. It was reproduced live, then closed with two layers, each proven by its own mutation-checked test; the live check was repeated on the final build. Tests 483/0/0, both reviews completed. The next B-ID is B-234. Active marker cleared.
 
 Prior entry:
