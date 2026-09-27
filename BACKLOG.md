@@ -2740,7 +2740,11 @@ Keep `store.CreateApproval` (with B-237's org-scoped SQL) only if a caller remai
 - So this removes DB internals and gives a designed 409, but it does **not** narrow the existence oracle.
 - A 409 for an email absent from the admin's own `GET /v1/users` still shows the email is registered in another tenant, in bulk.
 - Pre-existing Login oracles can then reveal the account's state.
-- Closing it needs option 1, plus the separate follow-ups in `B-242_VERIFICATION.md` §6 (email squatting, Login oracles, email normalization, invite UI error display, the revoked-user re-invite path, OpenAPI drift). None is minted; they await the founder.
+- Closing it needs option 1, plus the separate follow-ups in `B-242_VERIFICATION.md` §6, since minted at founder direction:
+  - **B-245:** email squatting, blocked on email delivery;
+  - **B-246:** Login oracles;
+  - **B-247:** email normalization;
+  - **B-248:** provisioning UX cleanup (invite UI errors, the revoked-user re-invite path, OpenAPI drift for Architect).
 
 Original investigation text follows for the record: Implementing option (a) found a constraint:
 - The password-reset pattern works because the requester gets **nothing back**: a uniform `{"status":"ok"}`, with the real action happening out of band.
@@ -2806,4 +2810,76 @@ Choices, for the founder:
 
 **Status:** QUEUED. Not interrupting current work, per founder direction.
 
-## Next B-ID: B-245
+### B-245 — Cross-tenant email squatting: an org admin can hold a working account under another company's email — **QUEUED (Medium), 2026-09-27 — BLOCKED on real email delivery**
+**Origin:** B-242 security review, F1 (`B-242_VERIFICATION.md` §5b/§6). Minted at founder direction 2026-09-27. B-245 was confirmed free against BACKLOG.md directly: the counter read B-245, and B-245 to B-248 were unused. A grep found no open item overlapping this scope.
+
+**Problem:**
+- `users.email` is globally UNIQUE, and nothing verifies that the person owns the address.
+- Any org admin can `POST /v1/users/invite` with `alice@victimcorp.com`. They receive the invite link in the response and can accept it themselves, which gives them a **working account under the victim's email address**.
+- From then on, the real tenant can never invite that address; they get B-242's 409.
+- **This is an identity-impersonation risk,** not just an enumeration leak: approver and audit fields show a trusted-looking address that its real owner never controlled.
+
+**Fix (founder direction):** the same prerequisite as B-242 option 1. **Real out-of-band invite delivery by email**, where the link goes only to the address and never back to the inviting admin, so possession of the link proves ownership of the mailbox.
+- **Do not attempt a workaround now.**
+- **Prerequisite:** email-sending infrastructure. It doesn't exist yet: only `email_smtp_*` config storage, no sender (confirmed in B-238's close-out). It has **no B-ID of its own yet**; mint one when that work is scoped. Any sender must dial through `netguard` (B-238).
+
+**When unblocked, also:**
+- decide what happens to existing unverified accounts (for example, require re-verification);
+- add tests proving an invite link is never returned to the inviter.
+
+**Status:** QUEUED, BLOCKED on email delivery.
+
+### B-246 — Login endpoint reveals whether an email has an account (response and timing oracles) — **QUEUED (Medium), 2026-09-27**
+**Origin:** B-242 security review, F2 and F3. Minted at founder direction 2026-09-27. B-246 was confirmed free against BACKLOG.md directly: the counter read B-245, and B-245 to B-248 were unused. A grep found no open item overlapping this scope.
+**Class:** the same as B-242 (email existence enumeration), but **unauthenticated**, so reachable by anyone on the internet.
+
+**Problem** (`eami-api/internal/api/auth.go` `Login`):
+1. **Response oracle.** A user with `password_hash IS NULL` (every invited-but-not-accepted user, and SSO accounts) gets `401 "account uses SSO"`. An unknown email gets `401 "invalid email or password"`. So anyone can confirm that an email has a **pending invite**, and those are exactly the accounts whose invite links are still live.
+2. **Timing oracle.** An unknown or soft-deleted email returns right after one indexed lookup (`GetUserByEmail` filters `deleted_at IS NULL`). An existing password account runs `bcrypt.CompareHashAndPassword` at cost 12, hundreds of milliseconds, which is measurable over the network. The per-IP and per-account limiters (`ratelimit_login.go`) slow this but don't stop it.
+
+**Fix (founder direction: same discipline as B-242):**
+- **Identical responses:** one generic 401 "invalid email or password" for unknown, soft-deleted, SSO/NULL-hash and wrong-password cases alike. If an SSO hint is ever needed, move it to the SSO flow, never an unauthenticated email probe.
+- **Constant-time comparison where feasible:** on a lookup miss or a NULL hash, run `bcrypt.CompareHashAndPassword` against a fixed dummy hash of the same cost, so every path pays the same bcrypt cost.
+- Check the storeIface fallback branch and the rate-limiter's own responses for the same leaks.
+- **Tests:** unknown, soft-deleted, pending-invite and wrong-password all get a byte-identical body. A timing assertion (loose bounds, many samples) or a structural test that bcrypt is called on every path.
+
+**Status:** QUEUED.
+
+### B-247 — Normalize email addresses (case and whitespace) — **QUEUED (Low), 2026-09-27**
+**Origin:** B-242 security review, §4. Minted at founder direction 2026-09-27. B-247 was confirmed free against BACKLOG.md directly: the counter read B-245, and B-245 to B-248 were unused. A grep found no open item overlapping this scope.
+
+**Problem:**
+- `users.email` is plain `TEXT UNIQUE`: no `citext`, no `lower(email)` index.
+- `InviteUser` stores `req.Email` untrimmed and in its original case.
+- Login looks up with an exact `WHERE email = $1`.
+- So `Alice@x.com`, `alice@x.com` and `alice@x.com ` can be three separate accounts, which gives confusable identities in user lists and in approval `decided_by`.
+- Bootstrap and request-reset trim, but invite and login don't, so a user invited as `"a@x "` can't be found through request-reset.
+- It becomes Medium once SSO or email-based account linking exists.
+
+**Fix:**
+- normalize with `lower(trim(email))` on every write and lookup (invite, login, request-reset, bootstrap, accept-invite);
+- a migration adding a unique index on `lower(email)` (or converting the column to `citext`);
+- a pre-migration dedup check of existing rows, reporting any collisions for a manual decision.
+
+**Tests:** case and whitespace variants resolve to one account; a second variant cannot be created.
+
+**Status:** QUEUED, to fix whenever convenient.
+
+### B-248 — Provisioning UX cleanup (grouped): invite errors swallowed, revoked users can't be re-invited, invite-route OpenAPI drift — **QUEUED (Low), 2026-09-27**
+**Origin:** B-242 code review (Medium 2, Low 1, Info 4). This groups three small items under one ID, the same shape as earlier grouped cleanups. Minted at founder direction 2026-09-27. B-248 was confirmed free against BACKLOG.md directly: the counter read B-245, and B-245 to B-248 were unused. A grep found no open item overlapping this scope.
+
+1. **The invite form swallows failures** (`eami-ui/src/pages/settings/SettingsPage.tsx` `onInvite`; `eami-ui/src/hooks/useUsers.ts`).
+   - `invite.mutateAsync` has no catch, and the hook throws a plain `{code,message}` object, not an `Error`.
+   - B-242's designed 409 ("this email cannot be invited"), like the old 500, therefore ends as an unhandled rejection: the spinner stops and the modal stays open with no message.
+   - Fix: catch the error and `showToast(err?.message ?? 'Could not send invite', { type: 'error' })`, per the B-182 toast rule. Check `err?.message`, not `instanceof Error`.
+2. **A removed user can never be re-invited.**
+   - `DeleteUser` is a soft delete, and email uniqueness is global, so re-inviting a previously revoked teammate always gets the 409, with no way forward.
+   - Fix: a same-org restore/reactivate path for soft-deleted users, admin-only, org-scoped and audited. It must **not** allow reactivating another org's user. Coordinate with B-245/B-247.
+3. **OpenAPI drift on `POST /v1/users/invite`** — **flagged for Architect-EAMI** (`api/openapi.yaml` is theirs per `BOUNDARIES.md`). **Not touched directly.**
+   - The 409 description says "User already exists"; the actual response is "this email cannot be invited", and it also covers other-org and soft-deleted accounts.
+   - The `invite_link` description says it expires after 72 hours; `inviteTokenTTL` is 48 h (`provisioning.go`).
+   - The 201 schema documents only `invite_link`; the handler also returns `user` and `expires_at`.
+
+**Status:** QUEUED. Items 1 and 2 are Code-owned; item 3 goes to Architect-EAMI.
+
+## Next B-ID: B-249

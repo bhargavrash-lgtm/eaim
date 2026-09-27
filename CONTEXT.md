@@ -4,7 +4,17 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-27, newest) — B-242 DONE (option 2, honest residual); B-244 minted (approval audit integrity)
+## Active decision thread (2026-09-27, newest) — B-245 to B-248 minted (B-242 review follow-ups); docs only
+
+All four were minted at founder direction; none has code yet.
+- **B-245 — email squatting (Medium).** Blocked on real email delivery; the founder said no workaround now. Email-sending infrastructure itself has no B-ID yet.
+- **B-246 — Login enumeration oracles (Medium).** One generic 401, plus a dummy bcrypt on every path.
+- **B-247 — email normalization (Low).**
+- **B-248 — grouped provisioning UX cleanup (Low):** invite UI swallows errors; a revoked user can't be re-invited; OpenAPI drift, which is flagged for Architect-EAMI and not touched.
+
+The next B-ID is B-249.
+
+## Active decision thread (2026-09-27) — B-242 DONE (option 2, honest residual); B-244 minted (approval audit integrity)
 
 **B-242 (option 2) is built and verified.** Any existing email now gets one fixed 409 with no DB text. Tests 496/0/0; 3 mutations caught; live before/after; snapshot identical; both reviews completed.
 
@@ -2340,6 +2350,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-27 by Claude Code — minted B-245 to B-248 (B-242 review follow-ups), confirmed free against BACKLOG.md. Docs only; no code changes.
+
+Prior entry:
 2026-09-27 by Claude Code — B-242 option 2 done (fixed 409; residual stated honestly, because the premise was corrected by review and the live pre-fix run); B-244 minted (approval audit integrity, High). Marker cleared.
 
 Prior entry:
