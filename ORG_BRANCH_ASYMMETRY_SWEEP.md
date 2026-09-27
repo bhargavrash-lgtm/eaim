@@ -7,7 +7,7 @@ Started 2026-09-27 by Claude Code, from a founder brief. **Completed 2026-09-27.
 | | Count | Endpoints |
 |---|---|---|
 | **PASS** | 67 | everything not listed below |
-| **FAIL** | 2 | **B-237** (`CreateApproval`: cross-org references), **FIXED** 2026-09-27; **B-238** (webhook SSRF: the dial guard on one path is missing on its sibling), **OPEN**, awaiting the founder |
+| **FAIL** | 2 | **B-237** (`CreateApproval`: cross-org references), **FIXED** 2026-09-27; **B-238** (webhook SSRF: the dial guard on one path is missing on its sibling), **FIXED** 2026-09-27 |
 
 The two FAILs are counted by finding, not by row: B-238's source is shared between rows 54 and 55. Rows 24–26 PASS only because of B-232/B-233, which were fixed before this sweep.
 
@@ -38,6 +38,11 @@ The two FAILs are counted by finding, not by row: B-238's source is shared betwe
 > **Status note (2026-09-27):**
 > - **B-237 is FIXED and verified.** Handler ownership checks plus an org-scoped insert. Each layer's removal is caught by its own test. It was live-verified on the final build, including the gateway's own escalation path. See `B-237_VERIFICATION.md`.
 > - **The sweep resumed at endpoint 27.**
+> - **B-238 is FIXED and verified (2026-09-27).**
+>   - Both webhook senders now use one guarded client, with save-time validation and a single failure reason.
+>   - The shared guard is hardened.
+>   - It was live-verified on both the route and the real alert-engine path.
+>   - See `B-238_VERIFICATION.md`.
 
 ### B-237 — `POST /v1/approvals` (`CreateApproval`) stores unvalidated cross-org agent and policy references — **FAIL, live-confirmed → FIXED 2026-09-27**
 
@@ -68,7 +73,7 @@ It does **not** read or modify the victim's rows. Proposed severity: **Medium**,
 - **Tests:** a cross-org adversarial test (real-Postgres) and per-layer mutation checks.
 - **Open question:** whether this JWT route should exist at all. No gateway code calls it; the gateway creates approvals itself.
 
-### B-238 — Slack webhook sends bypass the SSRF dial guard — **FAIL (guard-on-one-path shape), live-confirmed**
+### B-238 — Slack webhook sends bypass the SSRF dial guard — **FAIL (guard-on-one-path shape), live-confirmed → FIXED 2026-09-27**
 
 **The problem**
 - `safeDialContext` protects `TestTool` and `DiscoverOpenAPI`.
@@ -144,7 +149,7 @@ Full detail and the proposed fix are in BACKLOG.md B-238. The severity proposed 
 | 52 | PUT /v1/settings/org | UpdateOrgSettings | PASS | keyed on `uc.OrgID` only |
 | 53 | POST /v1/settings/license | UploadLicense | PASS | the signed license's `org_id` must equal `uc.OrgID`; the transaction is locked and scoped to `uc.OrgID` |
 | 54 | PUT /v1/settings/notifications | UpdateNotificationConfig | PASS (org) | the upsert is keyed on `uc.OrgID`. It stores `slack_webhook_url` unvalidated, which feeds B-238 |
-| 55 | POST /v1/settings/notifications/test | TestNotificationChannel | PASS (org) / **FAIL → B-238** | the config is read by `uc.OrgID`. The unguarded `http.Post` to the stored URL is an SSRF (see above) |
+| 55 | POST /v1/settings/notifications/test | TestNotificationChannel | PASS (org) / **FAIL → B-238 (FIXED 2026-09-27)** | the config is read by `uc.OrgID`. The unguarded `http.Post` to the stored URL is an SSRF (see above) |
 | 56 | POST /v1/admin/model-pricing | CreateModelPricing | PASS (N/A: global) | `model_pricing` is a deliberately global table with no `org_id`, gated to `platform_admin`. That role cannot be granted through invite or role-update (#46/#47), only at provisioning |
 | 57 | PATCH /v1/admin/model-pricing/{model} | UpdateModelPricing | PASS (N/A: global) | the same |
 | 58 | DELETE /v1/admin/model-pricing/{model} | DeleteModelPricing | PASS (N/A: global) | the same |

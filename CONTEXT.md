@@ -4,7 +4,32 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-27, newest) — Org-branch sweep COMPLETE 69/69: 67 PASS, 2 FAIL (B-237 fixed, B-238 open)
+## Active decision thread (2026-09-27, newest) — B-238 DONE: Slack webhook SSRF closed
+
+**The bug.** The test-notification route and the alert engine POSTed to the admin-set Slack webhook URL through an unguarded client. It was live-confirmed that this reached internal addresses, with the echoed error text working as a port-scan oracle.
+
+**The fix.**
+- The existing SSRF guard moved to `internal/netguard` and was hardened (special ranges, embedded IPv4).
+- One guarded webhook client (timeout, no proxy, no redirects) serves both senders.
+- The URL is validated on save.
+- The test route returns a single failure reason.
+- Webhook URLs are redacted from logs.
+
+**Verification.**
+- 8 separate mutations, all caught; tests 499/0/0; both reviews plus a security re-review.
+- **Live:** the pre-fix engine path was reproduced, and both paths were blocked on the final build.
+- Snapshot identical, including audit_log.
+- Evidence: `B-238_VERIFICATION.md`.
+
+**Proposed follow-ups (not minted; founder's call):**
+- a webhook host allowlist, which would also close the internal-DNS timing residue;
+- async/bounded alert dispatch;
+- SMTP must use netguard when built;
+- the test-route `{sent,reason}` vs openapi/UI `{success,error}` drift.
+
+The next B-ID is still B-239.
+
+## Active decision thread (2026-09-27) — Org-branch sweep COMPLETE 69/69: 67 PASS, 2 FAIL (B-237 fixed, B-238 open)
 
 **Result.** `ORG_BRANCH_ASYMMETRY_SWEEP.md` now has the literal pass/fail ledger for all 69 eami-api mutation endpoints. Only two real findings:
 - **B-237** (cross-org approval references): FIXED.
@@ -2274,6 +2299,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-27 by Claude Code — B-238 (Slack webhook SSRF) fixed and verified: one shared hardened guard; the route and alert engine both guarded; save-time validation; the oracle closed; 8 mutations caught; tests 499/0/0; both reviews plus a re-review completed; live-verified on both paths. Active marker cleared.
+
+Prior entry:
 2026-09-27 by Claude Code — the org-branch sweep is complete: 69/69, 67 PASS, 2 FAIL (B-237 fixed in 1f33bf6; B-238 webhook SSRF OPEN, logged in 75bb867). The active marker is cleared.
 
 Prior entry:

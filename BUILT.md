@@ -1,5 +1,42 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-238 — Slack webhook SSRF closed (shared outbound guard) — 2026-09-27 (Claude Code)
+
+This was an urgent SSRF fix, found by the org-branch sweep (endpoint 55). The evidence record (pre-fix route and engine attacks, post-fix live run, 8-mutation log, both reviews plus a security re-review, verbatim) is `B-238_VERIFICATION.md`.
+
+**Files**
+- **New `eami-api/internal/netguard/netguard.go`:**
+  - `DialContext` and `IsBlocked` (moved from `api/tool_connectivity.go`, then hardened on `net/netip`: special-purpose ranges, and IPv4 embedded in mapped/compatible/NAT64/6to4 forms);
+  - `NewHTTPClient(dial, timeout)`: nil proxy, no redirects.
+- **`api/tool_connectivity.go`:** `safeDialContext` and `isBlockedTestTarget` delegate to netguard, so TestTool and DiscoverOpenAPI share it.
+- **`alerting/dispatcher.go`:**
+  - `WebhookTimeout` (10 s) and `NewWebhookClient()`;
+  - `ValidateWebhookURL` / `ErrInvalidWebhookURL`;
+  - `SendSlack(ctx, client, url, msg)`, whose errors never contain the URL.
+- **`alerting/engine.go`:** the `Engine.webhook` field, set by `NewEngine`.
+- **`api/settings.go`:**
+  - save-time validation (400 `invalid_webhook_url`);
+  - the test route uses the guarded client, with the single reason `webhook_delivery_failed`, the detail sent to `slog`, and idle connections closed.
+- **`api/router.go`:** `toolDialOverride` comment.
+- **Tests:**
+  - `netguard/netguard_test.go`;
+  - `alerting/webhook_test.go`;
+  - `alerting/engine_webhook_ssrf_pg_test.go` (real Postgres, real `evaluateRule`);
+  - `api/notification_webhook_ssrf_pg_test.go` (real Postgres, full HTTP; save, send and unguarded control).
+
+**Verification**
+- `go build` and `go vet` are clean. `go test ./...` gives PASS=499, FAIL=0, SKIP=0.
+- **Mutations:** 8 separate mutations, each caught.
+- **Live:** the pre-fix route oracle and a pre-fix engine delivery to a private host were both reproduced. On the final build, every target on both paths was refused, with byte-identical responses and 0 listener hits.
+- **Cleanup:** snapshot identical, including audit_log.
+
+**Limitations / follow-ups** (not minted):
+- a timing residue on internal DNS names (a host allowlist would remove it; product call);
+- sequential alert dispatch lets one tenant's slow webhook delay others (bounded to 10 s per rule);
+- legacy `http://` rows are not re-checked at send time (0 exist here);
+- SMTP must use netguard when built;
+- the test-route response shape drifts from openapi.yaml and the UI (`{success,error}`), which existed before this fix.
+
 ## B-237 — Cross-org approval references fixed — 2026-09-27 (Claude Code)
 
 This was an urgent tenant-isolation fix, found by the org-ownership branch-asymmetry sweep. The evidence record (Part A answer, live attack before and after, per-layer mutation log, gateway end-to-end run, both reviews verbatim) is `B-237_VERIFICATION.md`.

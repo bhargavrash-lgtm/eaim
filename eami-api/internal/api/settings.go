@@ -1,11 +1,13 @@
 package api
 
 import (
-	"bytes"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/eami/api/internal/alerting"
+	"github.com/eami/api/internal/netguard"
 	"github.com/eami/api/internal/store"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -160,6 +162,15 @@ func (s *Server) UpdateNotificationConfig(w http.ResponseWriter, r *http.Request
 		p.SlackEnabled = *req.SlackEnabled
 	}
 	if req.SlackWebhookURL != nil {
+		// B-238: validated on save (https, public addresses only), with one
+		// fixed message for every rejection cause so this response can't
+		// reveal which internal hostnames resolve. Empty clears the URL.
+		if *req.SlackWebhookURL != "" {
+			if err := alerting.ValidateWebhookURL(r.Context(), *req.SlackWebhookURL); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_webhook_url", alerting.ErrInvalidWebhookURL.Error())
+				return
+			}
+		}
 		p.SlackWebhookURL = pgtype.Text{String: *req.SlackWebhookURL, Valid: true}
 	}
 	if req.EmailEnabled != nil {
@@ -182,6 +193,10 @@ func (s *Server) UpdateNotificationConfig(w http.ResponseWriter, r *http.Request
 	}
 	writeJSON(w, http.StatusOK, notificationConfigToResp(*cfg))
 }
+
+// webhookDeliveryFailed is TestNotificationChannel's only failure reason for
+// a configured Slack webhook (B-238).
+const webhookDeliveryFailed = "webhook_delivery_failed"
 
 func (s *Server) TestNotificationChannel(w http.ResponseWriter, r *http.Request) {
 	uc := claimsFromContext(r)
@@ -207,15 +222,21 @@ func (s *Server) TestNotificationChannel(w http.ResponseWriter, r *http.Request)
 			writeJSON(w, http.StatusOK, TestNotificationResp{Sent: false, Reason: "slack_not_configured"})
 			return
 		}
-		payload := `{"text":"EAMI test notification \u2014 your Slack integration is working."}`
-		resp, err := http.Post(cfg.SlackWebhookURL.String, "application/json", bytes.NewBufferString(payload))
-		if err != nil {
-			writeJSON(w, http.StatusOK, TestNotificationResp{Sent: false, Reason: err.Error()})
-			return
+		// B-238: the same guarded client the alert engine uses (netguard SSRF
+		// guard, timeout, no redirects). Every delivery failure (blocked
+		// address, DNS failure, refused port, non-HTTP service, non-200,
+		// timeout) returns the one fixed reason below, with the detail logged
+		// server-side only, so the response can't tell open from closed
+		// ports on the target.
+		client := alerting.NewWebhookClient()
+		if s.toolDialOverride != nil {
+			client = netguard.NewHTTPClient(s.toolDialOverride, alerting.WebhookTimeout)
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			writeJSON(w, http.StatusOK, TestNotificationResp{Sent: false, Reason: "slack_webhook_non_200"})
+		defer client.CloseIdleConnections() // per-request transport; don't leave its pool idle
+
+		if err := alerting.SendSlack(r.Context(), client, cfg.SlackWebhookURL.String, "EAMI test notification \u2014 your Slack integration is working."); err != nil {
+			slog.Warn("test notification: slack delivery failed", "org_id", uc.OrgID, "err", err)
+			writeJSON(w, http.StatusOK, TestNotificationResp{Sent: false, Reason: webhookDeliveryFailed})
 			return
 		}
 		writeJSON(w, http.StatusOK, TestNotificationResp{Sent: true})

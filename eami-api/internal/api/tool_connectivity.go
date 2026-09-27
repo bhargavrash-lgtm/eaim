@@ -13,12 +13,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/eami/api/internal/netguard"
 	"github.com/eami/api/internal/toolcreds"
 )
 
-// safeDialContext resolves addr's host and refuses to connect if any
-// resolved address is loopback, link-local, unspecified, or private
-// (RFC1918/ULA).
+// safeDialContext refuses to connect to loopback, link-local, unspecified,
+// or private (RFC1918/ULA) addresses.
 //
 // Unlike eami-gateway's real tool-proxy path (which runs on-prem, inside
 // the customer's own network -- see eami-gateway/internal/proxy), TestTool
@@ -27,64 +27,18 @@ import (
 // reach into EAMI's cloud environment) could point a tool's base_url/
 // connection_string at cloud metadata endpoints (e.g. 169.254.169.254) or
 // internal-only services and use connected/auth-failed/unreachable as an
-// oracle to probe them -- a real boundary crossing this feature would
-// otherwise introduce, not merely a restatement of capability the caller
-// already has. Shared by both the REST and database checks.
+// oracle to probe them. Shared by both the REST and database checks.
 //
-// The resolved IP is dialed directly rather than re-resolving addr's host
-// inside the dialer, so a DNS answer that changes between the check above
-// and the actual connection (rebinding) can't slip through.
+// The guard itself lives in internal/netguard (B-238) so the alerting
+// engine's webhook sends use the exact same one.
 func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return nil, err
-	}
-
-	var resolved []net.IP
-	if ip := net.ParseIP(host); ip != nil {
-		resolved = []net.IP{ip}
-	} else {
-		ipAddrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-		if err != nil {
-			return nil, err
-		}
-		for _, a := range ipAddrs {
-			resolved = append(resolved, a.IP)
-		}
-	}
-	if len(resolved) == 0 {
-		return nil, fmt.Errorf("no addresses resolved for %q", host)
-	}
-	for _, ip := range resolved {
-		if isBlockedTestTarget(ip) {
-			return nil, errors.New("connections to loopback/link-local/private addresses are not permitted")
-		}
-	}
-
-	// Try every validated address in order (mirrors net.Dialer's own
-	// multi-address fallback behavior) rather than only the first -- a host
-	// whose first A/AAAA record happens to be down but whose second is
-	// reachable should still succeed, not report unreachable.
-	d := &net.Dialer{}
-	var lastErr error
-	for _, ip := range resolved {
-		conn, err := d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-		if err == nil {
-			return conn, nil
-		}
-		lastErr = err
-	}
-	return nil, lastErr
+	return netguard.DialContext(ctx, network, addr)
 }
 
-// isBlockedTestTarget reports whether ip is a loopback, link-local,
-// unspecified, or private (RFC1918/ULA) address -- covers 127.0.0.0/8,
-// ::1, 169.254.0.0/16 and fe80::/10 (includes cloud metadata endpoints),
-// 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, and fc00::/7, via the
-// standard library's own classification.
+// isBlockedTestTarget reports whether safeDialContext refuses ip; see
+// netguard.IsBlocked.
 func isBlockedTestTarget(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+	return netguard.IsBlocked(ip)
 }
 
 // dialContextFunc is an alias for pgconn.DialFunc's signature (identical to

@@ -38,7 +38,9 @@ type Server struct {
 	// means safeDialContext -- tests set this to an unrestricted dialer so
 	// they can exercise real round-trips against local httptest servers,
 	// which safeDialContext's loopback/private-address block would
-	// otherwise reject exactly as it's designed to in production.
+	// otherwise reject exactly as it's designed to in production. Also
+	// used by TestNotificationChannel's Slack test send (B-238), whose
+	// production client dials through the same netguard guard.
 	toolDialOverride dialContextFunc
 
 	// setupLimiter rate-limits the first-boot setup wizard's token-guessing

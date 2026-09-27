@@ -2629,7 +2629,7 @@ B-232 and B-233 already fixed the handlers they touched: `UpdateAgentConfig`, an
 - **Recorded for a founder decision:** the route has no legitimate caller and still allows **same-org** spoofed descriptive fields. Remove it, or derive those fields from the agent row.
 - **Pre-existing, not fixed:** invalid `risk_level`/`environment` returns 500 instead of 400; `EstimatedRecords` has an int32 overflow.
 
-### B-238 — Slack webhook sends bypass the SSRF dial guard (internal-network requests + port-scan oracle) — **OPEN, 2026-09-27, found by the org-branch-asymmetry sweep**
+### B-238 — Slack webhook sends bypass the SSRF dial guard (internal-network requests + port-scan oracle) — **DONE, 2026-09-27** (found by the org-branch-asymmetry sweep; evidence: `B-238_VERIFICATION.md`)
 **Origin:** endpoint 55 of the org-ownership sweep (`ORG_BRANCH_ASYMMETRY_SWEEP.md`), reported immediately per its brief. The brief pre-authorizes a B-ID for any real finding. B-238 was confirmed free against BACKLOG.md directly: the counter read B-238, and a grep found no open item covering webhook SSRF. **The founder should confirm the number isn't separately reserved in conversation.**
 **Same shape as the sweep's target (a guard on one path, missing on a sibling):** `safeDialContext` (`tool_connectivity.go`), which blocks loopback, private and link-local addresses, protects `TestTool` and `DiscoverOpenAPI`. The two Slack webhook senders use a bare `http.Post` with Go's default client instead:
 - `TestNotificationChannel` (`api/settings.go`), on demand;
@@ -2657,6 +2657,16 @@ webhook=http://169.254.169.254/latest/meta-data/           save=200 test=200 9ms
 - Validate the URL on save: require https, and optionally an allow-list such as `hooks.slack.com`, as an org setting.
 - Return a fixed `reason` ("webhook_unreachable") instead of `err.Error()`.
 - Tests: real-Postgres and httptest cases asserting that loopback and private targets are refused on both paths, plus a mutation check that removing the guard is caught.
-**Status:** OPEN, awaiting the founder's go.
+**Status:** DONE 2026-09-27.
+- **Fix:**
+  - the guard moved into a new shared `internal/netguard` (TestTool and DiscoverOpenAPI unchanged in behaviour) and hardened: CGNAT and other special ranges, and IPv4 embedded in NAT64/6to4/compatible forms;
+  - one guarded webhook client (10 s timeout, no proxy, no redirects) for both the test route and the alert engine;
+  - save-time `ValidateWebhookURL` (https, public-only, one fixed 400);
+  - a single `webhook_delivery_failed` reason;
+  - webhook URL redacted from logs.
+- **Verification:**
+  - 8 separate mutations, all caught; tests 499/0/0; both reviews plus a security re-review of the delta.
+  - **Live:** the pre-fix engine path was reproduced (a real alert POSTed to a private host), then the final build refused every target on both paths with byte-identical responses. Snapshot identical, including audit_log.
+- **Proposed follow-ups, not minted** (see `B-238_VERIFICATION.md` §6): internal-DNS timing residue / webhook host allowlist; sequential alert dispatch stall; SMTP must use netguard when built; UI/contract `{success,error}` vs `{sent,reason}` drift.
 
 ## Next B-ID: B-239

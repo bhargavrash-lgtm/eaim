@@ -79,13 +79,17 @@ func (c *collectorClient) deadLetterCount(ctx context.Context, since time.Time) 
 type Engine struct {
 	queries   *store.Queries
 	collector *collectorClient // nil when collector URL is not configured
+	// webhook sends every Slack notification. Always NewWebhookClient() in
+	// production (the netguard SSRF guard, B-238); only in-package tests
+	// replace it, to reach a local httptest server.
+	webhook *http.Client
 }
 
 // NewEngine creates an Engine backed by the given query store.
 // collectorURL and collectorAPIKey are optional; if collectorURL is empty the
 // failed_delivery_count metric will log a warning and return 0.
 func NewEngine(queries *store.Queries, collectorURL, collectorAPIKey string) *Engine {
-	e := &Engine{queries: queries}
+	e := &Engine{queries: queries, webhook: NewWebhookClient()}
 	if collectorURL != "" {
 		e.collector = &collectorClient{
 			baseURL: collectorURL,
@@ -189,7 +193,7 @@ func (e *Engine) dispatchNotifications(ctx context.Context, rule store.AlertRule
 	}
 	if cfg.SlackEnabled && cfg.SlackWebhookURL.Valid && cfg.SlackWebhookURL.String != "" {
 		msg := BuildSlackMessage(rule, metricValue)
-		if err := SendSlack(cfg.SlackWebhookURL.String, msg); err != nil {
+		if err := SendSlack(ctx, e.webhook, cfg.SlackWebhookURL.String, msg); err != nil {
 			log.Printf("alerting: slack dispatch for rule %s: %v", rule.Name, err)
 		} else {
 			_ = e.queries.MarkAlertNotified(ctx, alert.ID)
