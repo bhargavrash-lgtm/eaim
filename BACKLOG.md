@@ -2629,4 +2629,34 @@ B-232 and B-233 already fixed the handlers they touched: `UpdateAgentConfig`, an
 - **Recorded for a founder decision:** the route has no legitimate caller and still allows **same-org** spoofed descriptive fields. Remove it, or derive those fields from the agent row.
 - **Pre-existing, not fixed:** invalid `risk_level`/`environment` returns 500 instead of 400; `EstimatedRecords` has an int32 overflow.
 
-## Next B-ID: B-238
+### B-238 — Slack webhook sends bypass the SSRF dial guard (internal-network requests + port-scan oracle) — **OPEN, 2026-09-27, found by the org-branch-asymmetry sweep**
+**Origin:** endpoint 55 of the org-ownership sweep (`ORG_BRANCH_ASYMMETRY_SWEEP.md`), reported immediately per its brief. The brief pre-authorizes a B-ID for any real finding. B-238 was confirmed free against BACKLOG.md directly: the counter read B-238, and a grep found no open item covering webhook SSRF. **The founder should confirm the number isn't separately reserved in conversation.**
+**Same shape as the sweep's target (a guard on one path, missing on a sibling):** `safeDialContext` (`tool_connectivity.go`), which blocks loopback, private and link-local addresses, protects `TestTool` and `DiscoverOpenAPI`. The two Slack webhook senders use a bare `http.Post` with Go's default client instead:
+- `TestNotificationChannel` (`api/settings.go`), on demand;
+- `alerting.SendSlack` (`alerting/dispatcher.go`), fired server-side by the alert engine.
+
+The default client has **no dial guard and no timeout**, and it follows redirects. `UpdateNotificationConfig` stores any `slack_webhook_url` unvalidated.
+**Live-confirmed on the running stack.** An admin of a throwaway org (fixture, since deleted; snapshot identical) made the API server POST to internal-only addresses. The `reason` field distinguishes an open HTTP service, a closed port, and a non-HTTP service (raw `err.Error()`), so it works as an internal port scanner:
+```
+webhook=http://127.0.0.1:8081/health                       save=200 test=200 21ms {"sent":false,"reason":"slack_webhook_non_200"}
+webhook=http://127.0.0.1:1/                                save=200 test=200 15ms {"sent":false,"reason":"Post \"http://127.0.0.1:1/\": dial tcp 127.0.0.1:1: connect: connection refused"}
+webhook=http://postgres:5432/                              save=200 test=200 11ms {"sent":false,"reason":"Post \"http://postgres:5432/\": EOF"}
+webhook=http://eami-gateway:8080/health                    save=200 test=200 20ms {"sent":false,"reason":"slack_webhook_non_200"}
+webhook=http://169.254.169.254/latest/meta-data/           save=200 test=200 9ms {"sent":false,"reason":"Post \"http://169.254.169.254/latest/meta-data/\": dial tcp 169.254.169.254:80: connect: connection refused"}
+```
+- `postgres:5432` and `eami-gateway:8080` are compose-internal hostnames.
+- The metadata IP is refused only because this dev host has no metadata service. On a cloud host it would be reachable.
+**Impact:**
+- Any org admin (a tenant-level role in SaaS) can make eami-api send POST requests into the platform's internal network (loopback, other services, cloud metadata) and map it through the error oracle.
+- The alert engine will also POST alert JSON there repeatedly.
+- The response body is not returned, which limits read-back.
+- There is no timeout, so a slow target also ties up a handler goroutine indefinitely.
+**Proposed severity:** Medium.
+**Proposed fix:**
+- Send both webhook paths through one shared HTTP client that uses `safeDialContext` (or its equivalent), with a timeout and redirects refused or re-checked.
+- Validate the URL on save: require https, and optionally an allow-list such as `hooks.slack.com`, as an org setting.
+- Return a fixed `reason` ("webhook_unreachable") instead of `err.Error()`.
+- Tests: real-Postgres and httptest cases asserting that loopback and private targets are refused on both paths, plus a mutation check that removing the guard is caught.
+**Status:** OPEN, awaiting the founder's go.
+
+## Next B-ID: B-239
