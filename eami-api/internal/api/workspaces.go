@@ -16,6 +16,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -535,14 +536,17 @@ func (s *Server) UpdateWorkspaceMemberRole(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	tag, err := s.queries.DB().Exec(r.Context(), `
-		UPDATE workspace_memberships SET role = $1 WHERE user_id = $2 AND workspace_id = $3
-	`, req.Role, pgtype.UUID{Bytes: userID, Valid: true}, pgtype.UUID{Bytes: workspaceID, Valid: true})
+	// Org-scoped in SQL (B-233, defense in depth behind requireWorkspaceRole's
+	// ownership check): another org's workspace changes nothing and reports
+	// 0 rows, the same 404 as a nonexistent membership.
+	uc := claimsFromContext(r)
+	n, err := s.queries.UpdateWorkspaceMemberRole(r.Context(), uc.OrgID, workspaceID, userID, req.Role)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		slog.Error("update workspace member role failed", "workspace_id", workspaceID, "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update membership")
 		return
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		writeError(w, http.StatusNotFound, "not_found", "membership not found")
 		return
 	}
@@ -566,14 +570,15 @@ func (s *Server) RemoveWorkspaceMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid userId")
 		return
 	}
-	tag, err := s.queries.DB().Exec(r.Context(), `
-		DELETE FROM workspace_memberships WHERE user_id = $1 AND workspace_id = $2
-	`, pgtype.UUID{Bytes: userID, Valid: true}, pgtype.UUID{Bytes: workspaceID, Valid: true})
+	// Org-scoped in SQL (B-233), as UpdateWorkspaceMemberRole above.
+	uc := claimsFromContext(r)
+	n, err := s.queries.RemoveWorkspaceMember(r.Context(), uc.OrgID, workspaceID, userID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		slog.Error("remove workspace member failed", "workspace_id", workspaceID, "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to remove membership")
 		return
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		writeError(w, http.StatusNotFound, "not_found", "membership not found")
 		return
 	}

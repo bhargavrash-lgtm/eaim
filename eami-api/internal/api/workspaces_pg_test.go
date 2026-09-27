@@ -408,10 +408,11 @@ func TestRequireWorkspaceRole_RealDB_CrossOrgWorkspaceID_Rejected(t *testing.T) 
 	tokA := env.token(t, userA, orgA, "admin@ws-xorg-a.test", "admin")
 
 	resp := env.do(t, http.MethodPatch, "/v1/workspaces/"+wsInOrgB.String(), tokA, map[string]string{"name": "Hijacked From Org A"})
-	// Org A's own admin bypass short-circuits BEFORE the workspace lookup
-	// in the current design -- this is deliberately checked at the
-	// UpdateWorkspace HANDLER level too (org_id = uc.OrgID in every query),
-	// so even an org-admin's bypass cannot reach a different org's row.
+	// Since B-233, requireWorkspaceRole's org-admin branch checks the
+	// workspace belongs to the admin's own org before passing (404
+	// otherwise); UpdateWorkspace's handler-level org_id = uc.OrgID query is
+	// a second, independent guard, so even with the bypass it could not
+	// reach a different org's row.
 	if resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("REGRESSION: status = %d, want 404 or 403 -- a cross-org workspace_id must never be "+
 			"actionable, even by an org-admin whose own bypass skips the membership lookup: %s",

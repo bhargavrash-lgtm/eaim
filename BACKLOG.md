@@ -2529,7 +2529,7 @@ For example, `GET /v1/audit?page=4294967297&per_page=100` wraps the offset to 0 
 - **Suite:** `go test ./...` PASS=479, FAIL=0, SKIP=0.
 - **Cleanup:** fixture snapshot identical.
 - **Reviews:** code and security both completed, quoted verbatim in `B-232_VERIFICATION.md`.
-**Found by this fix's security sweep, needing a founder-confirmed B-ID (recommended next urgent fix):** an org **admin can change or remove workspace memberships in another org's workspace**, given its UUIDs.
+**Found by this fix's security sweep:** an org **admin could change or remove workspace memberships in another org's workspace**, given its UUIDs. **Now fixed as B-233.**
 - `requireWorkspaceRole` (`middleware.go:167-171`) lets any org admin through before its org-scoped query runs.
 - `UpdateWorkspaceMemberRole`/`RemoveWorkspaceMember` (`workspaces.go:539`, `:570`) filter only by `user_id`/`workspace_id`.
 - Confirmed in source. Rated Medium.
@@ -2537,4 +2537,27 @@ For example, `GET /v1/audit?page=4294967297&per_page=100` wraps the offset to 0 
 - The config GET paths (admin `GetAgentConfig`, service-key `AgentRemoteConfig`) treat any DB error as "no row" and return 404 or defaults. That fails open to all scanners on the remote route.
 - Other handlers still echo `err.Error()` in 500s (`CreateAgent`, `UpdatePolicy`, workspace handlers); this belongs to the app-wide raw-error item.
 
-## Next B-ID: B-233
+### B-233 — Cross-org workspace-membership mutation via the org-admin bypass in `requireWorkspaceRole` (Medium) — **DONE, 2026-09-27**
+**Origin:** B-232's security-review sweep. The founder issued an urgent dedicated brief. The ID was confirmed free against BACKLOG.md directly: the counter read B-233, and no open item overlapped.
+**Cause:**
+- `requireWorkspaceRole` returned early for any org `admin`, before any org check.
+- `UpdateWorkspaceMemberRole`/`RemoveWorkspaceMember` ran their `UPDATE`/`DELETE` filtered only by user and workspace. `workspace_memberships` has no `org_id`.
+- **Effect:** an org-A admin holding org-B workspace and user UUIDs could promote, demote or remove org-B members.
+**Fix:** two independent layers.
+1. **Middleware:** the admin branch checks the workspace belongs to the caller's org, returning 404 "workspace not found" (identical for foreign and nonexistent workspaces). This guards all 9 workspace routes. Non-admins keep their established 403.
+2. **SQL:** org-scoped store writes, in a new `store/workspace_memberships.sql.go`. The handlers stop echoing `err.Error()`.
+
+A nil-queries guard and doc/comment corrections were added after the code review.
+**Verification:**
+- **Live, before the fix:** reproduced on the pre-fix running stack. Another org's admin promoted, demoted and removed members of a Dev Org fixture workspace (204s).
+- **Live, after the fix:** the identical attack gets 404 in every case, with memberships unchanged, re-verified on the final build. Same-org list, promote, demote and remove still work.
+- **Tests:** real-Postgres tests with **one per layer**: a middleware sentinel test (the handler is never reached), and a store test (0 rows for the wrong org). Plus HTTP adversarial coverage across all 9 guarded routes, and same-org management.
+- **Mutations:** each layer removed separately is caught by its own test.
+- **Suite:** `go test ./...` PASS=483, FAIL=0, SKIP=0.
+- **Cleanup:** snapshot identical, twice.
+- **Reviews:** code and security both completed, quoted verbatim in `B-233_VERIFICATION.md`.
+**Recorded:**
+- For an org admin on a foreign or nonexistent workspace, several routes changed from 400/200/500 to 404. Nothing depends on the old codes (listed in the verification record, §6).
+- More raw `err.Error()` echoes in workspace handlers, which belong to the app-wide item that still needs a founder B-ID.
+
+## Next B-ID: B-234

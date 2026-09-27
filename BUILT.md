@@ -1,5 +1,32 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-233 — Cross-org workspace-membership mutation fixed — 2026-09-27 (Claude Code)
+
+This was an urgent tenant-isolation fix. The evidence record, quoting the live attack before and after, the per-layer mutation log and both reviews verbatim, is `B-233_VERIFICATION.md`.
+
+**Files changed**
+- **`eami-api/internal/api/middleware.go`** (`requireWorkspaceRole`):
+  - the org-admin branch now requires the workspace to be in the caller's org, returning 404 "workspace not found" otherwise;
+  - `requireQueries` nil guard;
+  - doc comment corrected.
+- **`eami-api/internal/store/workspace_memberships.sql.go`** (new): org-scoped `UpdateWorkspaceMemberRole`/`RemoveWorkspaceMember`.
+- **`eami-api/internal/api/workspaces.go`:** the member PATCH/DELETE handlers use the store methods, with generic 500s.
+- **`eami-api/internal/api/workspaces_pg_test.go`:** a stale comment corrected.
+- **New tests:**
+  - `eami-api/internal/api/workspace_member_org_pg_test.go`: HTTP adversarial coverage across all 9 guarded routes, same-org management, and the store layer.
+  - `workspace_role_org_internal_pg_test.go`: a middleware sentinel test.
+
+**Verification**
+- `go build`, `go vet` and gofmt are clean. `go test ./...` gives PASS=483, FAIL=0, SKIP=0.
+- **Mutations:** each layer's removal is caught separately.
+- **Live:** reproduced on the pre-fix stack. After the fix, every case gets an identical 404 with memberships unchanged, and same-org management works; this was re-verified on the final build.
+- **Cleanup:** snapshot identical, twice.
+- **Reviews:** code and security both completed.
+
+**Recorded**
+- Admin-vs-non-admin response codes are now split: 404 vs 403.
+- More raw `err.Error()` echoes, under the app-wide item.
+
 ## B-232 — Cross-org agent-config overwrite (H-1) fixed — 2026-09-27 (Claude Code)
 
 This was an urgent tenant-isolation fix. The evidence record, quoting the live attack before and after, the mutation log and both reviews verbatim, is `B-232_VERIFICATION.md`.

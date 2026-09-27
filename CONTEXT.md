@@ -4,7 +4,25 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-27, newest) — B-232 DONE: cross-org agent-config overwrite (H-1) closed; new workspace-membership cross-org write found (needs B-ID)
+## Active decision thread (2026-09-27, newest) — B-233 DONE: cross-org workspace-membership mutation closed
+
+**The bug.** `requireWorkspaceRole` let any org admin through before checking the workspace's org, and the membership UPDATE/DELETE had no org predicate. It was reproduced live: another org's admin promoted, demoted and removed a Dev Org fixture workspace's members.
+
+**The fix.** Two layers, each proven by its own test:
+- an ownership check in the admin branch (404 "workspace not found", identical for foreign and nonexistent workspaces), guarding all 9 workspace routes;
+- org-scoped store writes.
+
+**Evidence.**
+- **Live:** the identical attack now gets 404 with memberships unchanged, on the final build. Same-org management works.
+- **Tests:** 483/0/0. Per-layer mutations each caught separately. Snapshot identical.
+- **Reviews:** both completed, verbatim in `B-233_VERIFICATION.md`.
+
+**Open (needs founder decisions):**
+- M-1 clickjacking headers.
+- The app-wide raw `err.Error()` echo in 500s. More instances were named by these reviews.
+- Config GET paths fail open on DB errors (Low).
+
+## Active decision thread (2026-09-27) — B-232 DONE: cross-org agent-config overwrite (H-1) closed; new workspace-membership cross-org write found (needs B-ID)
 
 **H-1 is closed as B-232.** `PUT /v1/gateway/agents/{id}/config` checked org ownership only when no config row existed, and one always exists.
 - **The fix:** an unconditional handler ownership check, plus an org-scoped upsert in SQL (`agent_configs` has no `org_id`).
@@ -2225,6 +2243,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-27 by Claude Code — B-233 (cross-org workspace-membership mutation) fixed. It was reproduced live, then closed with two layers, each proven by its own mutation-checked test; the live check was repeated on the final build. Tests 483/0/0, both reviews completed. The next B-ID is B-234. Active marker cleared.
+
+Prior entry:
 2026-09-27 by Claude Code — B-232 (H-1 cross-org agent-config overwrite) fixed. It was reproduced live, then closed with two independently proven layers. Tests 479/0/0, both reviews completed. The security sweep found a separate cross-org workspace-membership write (Medium), which needs a founder B-ID. The next B-ID is B-233. Active marker cleared.
 
 Prior entry:

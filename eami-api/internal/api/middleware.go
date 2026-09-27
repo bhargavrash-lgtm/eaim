@@ -150,13 +150,18 @@ func (s *Server) requireRole(allowed ...string) func(http.Handler) http.Handler 
 // (chi guarantees it's present if the route matched at all) -- there is
 // no "no workspace_id" case here to treat as a wildcard/pass, unlike
 // policies.workspace_id being a genuinely nullable COLUMN (B-207) that
-// means "global." An unparseable param is a real 400, and a workspace_id
-// with no matching membership row (including one belonging to a
-// different org than the caller's own token-asserted org) fails closed
-// with 403 -- never trusted, never a silent pass.
+// means "global." An unparseable param is a real 400. A workspace_id
+// outside the caller's own token-asserted org never passes: an org admin
+// gets 404 "workspace not found" (the same as for a nonexistent workspace,
+// B-233), and every other caller -- whose membership lookup is org-joined
+// -- gets 403, the same as for "not a member". Never trusted, never a
+// silent pass.
 func (s *Server) requireWorkspaceRole(paramName, minRole string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !s.requireQueries(w) {
+				return
+			}
 			uc := claimsFromContext(r)
 			workspaceID, err := uuid.Parse(chi.URLParam(r, paramName))
 			if err != nil {
@@ -164,9 +169,29 @@ func (s *Server) requireWorkspaceRole(paramName, minRole string) func(http.Handl
 				return
 			}
 
-			// Org-level admin always passes -- the org's own administrative
-			// ceiling, same as requireRole("admin") everywhere else.
+			// Org-level admin passes -- the org's own administrative ceiling,
+			// same as requireRole("admin") everywhere else -- but only for a
+			// workspace in the admin's OWN org (B-233). Previously the bypass
+			// ran before any org check, so an admin holding another org's
+			// workspace UUID reached handlers whose membership UPDATE/DELETE
+			// had no org predicate. A foreign workspace gets the same 404 as
+			// a nonexistent one, so the response reveals nothing. (The non-
+			// admin path below keeps its established 403 for both cases.)
 			if uc.Role == "admin" {
+				var inOrg bool
+				if err := s.queries.DB().QueryRow(r.Context(),
+					`SELECT EXISTS (SELECT 1 FROM workspaces WHERE id = $1 AND org_id = $2)`,
+					pgtype.UUID{Bytes: workspaceID, Valid: true},
+					pgtype.UUID{Bytes: uc.OrgID, Valid: true},
+				).Scan(&inOrg); err != nil {
+					slog.Error("requireWorkspaceRole: workspace ownership check failed", "workspace_id", workspaceID, "err", err)
+					writeError(w, http.StatusInternalServerError, "internal_error", "failed to authorize workspace access")
+					return
+				}
+				if !inOrg {
+					writeError(w, http.StatusNotFound, "not_found", "workspace not found")
+					return
+				}
 				next.ServeHTTP(w, r)
 				return
 			}
