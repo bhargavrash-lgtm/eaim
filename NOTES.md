@@ -72,3 +72,13 @@ Found by the B-236 reviews. They predate B-236 and sit outside its diff. At foun
 
 1. **Page-local success toast.** The `toast` state is set with `setToast('Config saved')` plus `setTimeout(..., 3000)` and rendered in a green box. CLAUDE.md's B-182 rule requires the shared `useToast()`: `showToast('Config saved', { type: 'success', durationMs: 3000 })`.
 2. **Raw Tailwind red on the save-error box.** `saveError` renders with `bg-red-50 border-red-200 text-red-700`. Use the design-system Danger tokens that B-236's load-error panel in the same file already uses: `bg-status-danger` / `text-status-danger-text`, `DESIGN_SYSTEM.md` §2. Alternatively, route the save error through `useToast()` with `type: 'error'` as well.
+
+## 2026-09-28 — B-254 code-review follow-ups (not fixed; out of scope)
+
+- **Conditions column truncation is inconsistent** (`components/policies/PolicyBadges.tsx` `ConditionSummary`).
+  - `truncate max-w-xs` on a plain inline `<span>` does nothing: inline elements ignore `max-width`, so non-semantic rows never truncate.
+  - Inside B-254's `inline-flex` wrapper the same span *does* truncate. So semantic-rule rows cap at about 20rem while others widen the `whitespace-nowrap` cell.
+  - Fix: make the summary `inline-block` (or `block`) in both branches.
+- **"Never fires" uses the same warning pill colour as the `Escalate` ActionBadge.** A row can show two identical amber pills meaning different things. A product call (danger colour, or a distinct icon) for whoever next touches the badges.
+- **`PolicyPanel.tsx`: the semantic-rule `<label>` has no `htmlFor`/`id` pairing** with its textarea. This existed before; B-254 added `aria-describedby` for the note only.
+- **`eami-policy/semantic.go:15`'s comment says the stub "always returns ESCALATE".** Wrong: it returns `(false, nil)`, the rule is skipped, and the evaluator's default applies. Fix the comment with B-007 or B-258.

@@ -66,6 +66,7 @@ _(empty — founder/PM assigns from QUEUED)_
 
 ### B-007 — Implement real semantic policy evaluation
 **Objective:** `eami-policy/semantic.go` does real LLM-based intent evaluation instead of always returning no-match.
+**Correction (2026-09-28):** until this ships, **every policy with a semantic rule never fires**, not only semantic-only ones. `Evaluate` skips the whole rule when the stub says no, so mixed policies are skipped too. Disclosed in the UI by B-254. `TestEvaluate_MixedSemanticRuleSkippedByStub` (with the existing `…SemanticRuleSkippedByStub`) pins this, and must be deliberately updated here. See also B-258 (an interim enforcement decision) and B-259 (the evaluator-error fail-open).
 **Acceptance criteria:**
 - [ ] Configurable LLM endpoint (local or API) per ADR-009's decision
 - [ ] `TestEvaluate_SemanticRuleSkippedByStub` replaced/updated to test real matching behavior
@@ -2986,7 +2987,7 @@ Choices, for the founder:
 
 **Status:** QUEUED. **Part A was done 2026-09-28: `RBAC_SPLIT_PART_A.md`** (route inventory, in-handler splits for reactivate and tool credential/`base_url`, reliance, no credential material in reads, proposed groups, test plan, and open questions Q-A to Q-F). The build brief awaits those answers.
 
-### B-254 — Policies can carry a "semantic rule" that silently never fires, with no warning — **QUEUED (Medium), 2026-09-28**
+### B-254 — Policies can carry a "semantic rule" that silently never fires, with no warning — **DONE, 2026-09-28** (evidence: `B-254_VERIFICATION.md`)
 **Origin:** `IA_CONSOLIDATION_INVESTIGATION.md` D3. Minted at founder direction 2026-09-28. B-254 was confirmed free against BACKLOG.md directly: the counter read B-252, and B-252 to B-257 were unused. A grep found no open item overlapping this scope (see the per-item notes where an adjacent item exists).
 **Adjacent item:** **B-007** (implement real semantic evaluation, blocked on ADR-009) is the eventual *real* fix. **This item is the interim honesty fix, which B-007 does not cover.**
 
@@ -2994,11 +2995,22 @@ Choices, for the founder:
 - `eami-policy/semantic.go` `evaluateSemantic` is a stub that **always returns false**, and the evaluator skips the rule.
 - The policy form (`PolicyPanel.tsx:212`) still offers "Semantic rule (LLM-evaluated)" as a normal condition.
 - **So a policy with a semantic condition never matches.** A "deny" written that way silently never fires. That conflicts with DESIGN_SYSTEM §7.4.
+- **Correction (2026-09-28):** this applies to **every policy with a semantic rule, not only semantic-only ones.** `Evaluate` (`evaluator.go:136-141`) skips the whole rule when its semantic check says no, so a *mixed* policy (structural conditions plus a semantic rule) never fires either.
 
 **Fix options** (the founder picks):
 - disclose it in the UI (a warning on the field and on any policy using it, plus a badge in the list);
 - and/or reject saving semantic conditions server-side until B-007 ships;
 - plus a one-off report of existing policies with semantic conditions.
+
+**Status:** DONE 2026-09-28 (the UI disclosure option, revised scope).
+- **What shipped:**
+  - a "Never fires" badge, in warning colours with an explanatory tooltip, on **every** policy with a semantic rule, on both the org Policies page and the workspace "Our Policies" page (the shared `ConditionSummary`);
+  - an always-visible note at the semantic-rule field;
+  - a temporary evaluator test pinning the mixed-rule behaviour.
+- **Unchanged:** evaluation, the API and saving.
+- **Verified:** live on both pages (semantic-only and mixed flagged, non-semantic not); the mutation check was caught; snapshot identical; code review completed.
+- Dev DB had 0 semantic-rule policies.
+- Follow-ups: B-258 (an interim enforcement decision) and B-259 (evaluator fail-open paths).
 
 **Status:** QUEUED.
 
@@ -3044,4 +3056,40 @@ The inline-test-on-detail-page part lands in **B-252 C5**.
 
 **Status:** QUEUED.
 
-## Next B-ID: B-258
+### B-258 — Interim enforcement for policies with a semantic rule (fail closed for deny/escalate?) — **QUEUED, 2026-09-28 — FOUNDER DECISION; needs its own brief with BOTH reviews**
+**Origin:** B-254's trace (`B-254_VERIFICATION.md` §4). Minted at founder direction 2026-09-28. B-258 was confirmed free against BACKLOG.md directly: the counter read B-258, and B-258 and B-259 were unused. A grep found no open item covering evaluator fail-open behaviour (B-128, the old org-scoping fix, doesn't overlap).
+
+**The question:** until B-007 ships real semantic evaluation, every policy with a semantic rule is skipped entirely, so deny and escalate policies built on one protect nothing. **Proposed interim:**
+- a **deny** or **escalate** policy with a semantic rule **fails closed** when its structural conditions match: it applies its action as if the semantic rule matched;
+- an **allow** policy with a semantic rule **stays skipped** (fail-safe: no unintended exception is granted).
+
+This changes enforcement behaviour, so it is a founder decision with a dedicated brief, code **and** security review, and tests (the B-254 pinning tests change deliberately).
+
+**Also in scope: skips leave no trace.**
+- A skipped semantic-rule policy leaves **no trace in audit**: the call is recorded under the next matching rule's ID, or none on the default.
+- Decide whether to **log or annotate skips**. For example, an audit field or `Decision.Reason` note such as "skipped N semantic-rule policies (not evaluated)", or a counter metric.
+- **The workflow `ProjectedDecision` skips identically:** `executor.go:182` calls the same evaluator, so the preview shows the fallback decision too. Any annotation must cover both paths.
+
+**Status:** QUEUED, awaiting the founder's decision.
+
+### B-259 — Policy evaluation fails open to ALLOW on error (latent), plus two adjacent fail-open paths — **QUEUED (severity TBD, see trace), 2026-09-28**
+**Origin:** B-254's trace (`B-254_VERIFICATION.md` §5). Minted at founder direction 2026-09-28. B-259 was confirmed free against BACKLOG.md directly: the counter read B-258, and B-258 and B-259 were unused. A grep found no open item covering evaluator fail-open behaviour (B-128, the old org-scoping fix, doesn't overlap).
+
+**1. The dispatcher's evaluator-error → ALLOW** (`eami-gateway/cmd/gateway/dispatcher.go:545-548`).
+- **Trace verdict: unreachable today.** `Evaluate` returns a `nil` error on every path, and `evaluateSemantic` never errors. **It becomes live when B-007 lands**, when semantic evaluation can time out or fail.
+- That would make a failing semantic check allow the call. **It must be decided before or with B-007:** fail closed (deny or escalate) on evaluator error, per ADR-009's own "ESCALATE-on-timeout" design.
+
+**2. A malformed agent-name glob silently disables its own policy.**
+- `path.Match` errors are swallowed (`eami-policy/structural.go:101-105`), and **nothing validates the glob on save** (org or workspace policy routes).
+- A pattern like `agent-[` in a deny policy never matches. The effect is contained to that one rule: the org and workspace checks run first, so it can't affect another org or another rule.
+- Fix: validate with `path.Match(pattern, "")` on create and update (400), and surface existing invalid patterns.
+
+**3. Startup with no policies means allow everything.**
+- If the DB policy load fails **and** the YAML fallback fails or is absent, the gateway runs with an **empty evaluator, and every call is allowed**. It is logged only as a Warn (`cmd/gateway/main.go:116-121`, `policyloader/loader.go:50-55`).
+- Fix options: refuse to start or become ready; deny-by-default until a successful load; at minimum an Error log plus a health flag.
+- A later reload failure keeps the previous rule set, which is safe.
+
+**Severity:** TBD by the founder. Item 1 is latent; item 3 is a real availability-vs-safety trade-off; item 2 is low.
+**Status:** QUEUED.
+
+## Next B-ID: B-260

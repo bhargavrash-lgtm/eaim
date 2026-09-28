@@ -1,5 +1,27 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-254 — "Never fires" warnings for policies with a semantic rule — 2026-09-28 (Claude Code)
+
+Horizon 0 hardening (an interim honesty fix; the real fix is B-007). The evidence record, including the deny/escalate/allow and evaluator-error traces and the code review verbatim, is `B-254_VERIFICATION.md`.
+
+**Files**
+- **`eami-ui/src/components/policies/PolicyBadges.tsx`:** `SemanticNeverFiresBadge` and `SEMANTIC_NEVER_FIRES_TOOLTIP`. `ConditionSummary` shows the badge for any policy with a semantic rule, on both the org Policies page and the workspace Our Policies page.
+- **`eami-ui/src/components/policies/PolicyPanel.tsx`:** an always-visible "Not enforced yet" note at the semantic-rule field.
+- **`eami-policy/policy_test.go`:** `TestEvaluate_MixedSemanticRuleSkippedByStub` (temporary; pins current behaviour).
+
+**Verification**
+- `go test` (eami-policy) and `tsc` pass.
+- **Mutation:** caught.
+- **Live:** on both pages; semantic-only and mixed flagged, non-semantic not.
+- **Cleanup:** snapshot identical.
+- **Code review:** completed.
+
+**Unchanged:** evaluation, the API and saving.
+
+**Correction recorded:** *every* policy with a semantic rule never fires, including mixed ones.
+
+**Minted:** B-258 (the interim fail-closed decision plus skip visibility) and B-259 (evaluator fail-open paths: latent error→ALLOW, unvalidated glob, empty-evaluator startup).
+
 ## B-236 — Agent-config reads no longer fall back to defaults on DB error — 2026-09-28 (Claude Code)
 
 Horizon 0 hardening. The evidence record, with both reviews plus a re-review verbatim, is `B-236_VERIFICATION.md`.

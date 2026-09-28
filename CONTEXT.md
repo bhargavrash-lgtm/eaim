@@ -4,7 +4,23 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-28, newest) — IA plan founder decisions recorded; B-252 to B-257 minted; RBAC split Part A done
+## Active decision thread (2026-09-28, newest) — B-254 DONE ("Never fires"); B-258 and B-259 minted
+
+**B-254 is done.** A "Never fires" badge (warning colours, tooltip) on every policy with a semantic rule, on the org Policies and workspace Our Policies pages; a not-enforced note at the form field; and a temporary test pinning the mixed-rule skip.
+- Verified live, both pages; code review completed; snapshot identical.
+- **Premise corrected and accepted:** *all* semantic-rule policies never fire, mixed ones included.
+- B-254 and B-007 backlog entries corrected.
+
+**Minted:**
+- **B-258:** the interim fail-closed decision for deny/escalate with a semantic rule (a founder decision needing its own brief with both reviews), plus audit/skip visibility including the workflow `ProjectedDecision`.
+- **B-259:** evaluator fail-open paths:
+  - the error→ALLOW branch is unreachable today but becomes live with B-007;
+  - an unvalidated glob disables its own policy;
+  - startup with no rules allows everything.
+
+The next B-ID is B-260.
+
+## Active decision thread (2026-09-28) — IA plan founder decisions recorded; B-252 to B-257 minted; RBAC split Part A done
 
 **Founder decisions** are in `IA_CONSOLIDATION_MIGRATION_PLAN.md` ("Founder decisions"):
 - **Q1:** retire the Agents and Tools lists; amend CLAUDE.md in C9.
@@ -2433,6 +2449,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-28 by Claude Code — B-254 done ("Never fires" warnings; live-verified on both pages; code review completed); B-258 and B-259 minted; B-254/B-007 corrected. Marker cleared.
+
+Prior entry:
 2026-09-28 by Claude Code — IA plan founder decisions recorded; B-252 to B-257 minted; roadmap step-up bullet (commit c43f6df); B-253 RBAC Part A report (RBAC_SPLIT_PART_A.md). Docs only. Marker cleared.
 
 Prior entry:

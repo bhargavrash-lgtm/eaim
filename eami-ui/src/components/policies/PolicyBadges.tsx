@@ -60,6 +60,28 @@ export function ScopeBadge({ workspaceName }: { workspaceName?: string | null })
   )
 }
 
+// B-254: the gateway's semantic-rule check is still a stub that never
+// matches (eami-policy/semantic.go; the real fix is B-007), and the
+// evaluator skips a whole rule when its semantic check says no -- so ANY
+// policy carrying a semantic rule never fires, whatever its other
+// conditions. Warning colours: a real, current enforcement state.
+export const SEMANTIC_NEVER_FIRES_TOOLTIP =
+  "The semantic rule isn't evaluated yet, so this whole policy is skipped -- even when its other conditions match."
+
+export function SemanticNeverFiresBadge() {
+  return (
+    <span
+      className="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-semibold bg-status-warning text-status-warning-text"
+      title={SEMANTIC_NEVER_FIRES_TOOLTIP}
+    >
+      Never fires
+      {/* title is mouse-only; the reason must reach keyboard, touch and
+          screen-reader users too. */}
+      <span className="sr-only">: {SEMANTIC_NEVER_FIRES_TOOLTIP}</span>
+    </span>
+  )
+}
+
 export function ConditionSummary({ conditions }: { conditions: Policy['conditions'] }) {
   const parts: string[] = []
   if (conditions.agent_name_pattern) parts.push('agent: ' + conditions.agent_name_pattern)
@@ -70,5 +92,12 @@ export function ConditionSummary({ conditions }: { conditions: Policy['condition
   if (conditions.semantic_rule) parts.push('semantic rule set')
   if (conditions.scope_drift) parts.push('scope drift')
   if (parts.length === 0) return <span className="text-gray-400 italic text-xs">any request</span>
-  return <span className="text-xs text-gray-600 truncate max-w-xs" title={parts.join(' / ')}>{parts.join(' / ')}</span>
+  const summary = <span className="text-xs text-gray-600 truncate max-w-xs" title={parts.join(' / ')}>{parts.join(' / ')}</span>
+  if (!conditions.semantic_rule) return summary
+  return (
+    <span className="inline-flex items-center gap-2">
+      <SemanticNeverFiresBadge />
+      {summary}
+    </span>
+  )
 }

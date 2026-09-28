@@ -613,6 +613,44 @@ func TestEvaluate_SemanticRuleSkippedByStub(t *testing.T) {
 	}
 }
 
+// TEMPORARY (B-254): pins CURRENT behaviour for a MIXED rule -- structural
+// conditions that DO match, plus a semantic rule. The semantic stub always
+// says no, and Evaluate skips the whole rule, so even this deny never fires
+// and the default ALLOW applies with no policy ID. This is exactly what the
+// UI's "Never fires" badge discloses. It is expected to change deliberately
+// when B-007 (real semantic evaluation) or B-258 (interim fail-closed
+// decision) lands -- update it then; don't "fix" it to pass otherwise.
+func TestEvaluate_MixedSemanticRuleSkippedByStub(t *testing.T) {
+	ac := baseAC()
+	rules := []Rule{
+		{
+			ID:       "mixed",
+			Name:     "Mixed structural + semantic rule",
+			Priority: 1,
+			Action:   ActionDeny,
+			Conditions: Conditions{
+				ToolNames:    []string{ac.ToolName}, // matches structurally
+				SemanticRule: "The agent must not exfiltrate sensitive data.",
+			},
+		},
+	}
+	// Control: the same rule WITHOUT the semantic rule matches and denies,
+	// so the ALLOW below is the semantic skip, not a structural mismatch.
+	control := rules[0]
+	control.Conditions.SemanticRule = ""
+	if d, err := NewEvaluator([]Rule{control}).Evaluate(context.Background(), ac); err != nil || d.Action != ActionDeny {
+		t.Fatalf("control (no semantic rule): got %q err=%v, want DENY", d.Action, err)
+	}
+
+	d, err := NewEvaluator(rules).Evaluate(context.Background(), ac)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if d.Action != ActionAllow || d.PolicyID != nil || d.Reason != "no matching rule; default action applied" {
+		t.Errorf("got %q (policy %v, reason %q), want the default ALLOW with no policy: a mixed rule is skipped entirely by the semantic stub", d.Action, d.PolicyID, d.Reason)
+	}
+}
+
 func TestEvaluate_DecisionAlwaysPopulated(t *testing.T) {
 	// Contract: Decision.Action is never empty, even on the default path.
 	ev := NewEvaluator(nil)
