@@ -4,7 +4,29 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-28, newest) — B-250 and B-251 minted (B-236 review follow-ups); docs only
+## Active decision thread (2026-09-28, newest) — IA_CONSOLIDATION_MIGRATION_PLAN.md produced (investigation only)
+
+Horizon 1 (CMDB completion) plus Horizon 0 maturity. The document gives:
+- **Part A:** a fresh file-by-file touchpoint audit (endpoint E1–E12, agent G1–G18, tool T1–T15);
+- **Part B:** current vs target against §7.7, surfacing its gaps: no Agent Classification or Credentials tab; no Tool Connections tab or Test-connection home; no Paste-events home; licence-off Endpoint Detail;
+- **Part C:** an ordered sequence C0–C12, each step with dependency, mid-migration UX and B-ID fold/new, plus the final Layer-8 sidebar grouping (GOVERN / OBSERVE / AI INFRASTRUCTURE / AGENTIC) with placeholders;
+- **Part D:** open questions Q1–Q7.
+
+**Flagged discrepancies:**
+- **DESIGN_SYSTEM.md has no §7.8.** Only canvas Layer 8 defines the collapsible-nav mechanism, and it explicitly defers its content to this plan.
+- **CLAUDE.md's six core pages (Agents, Tools) conflict with §7.7** retiring Agents and Tools as browse destinations (Q1; blocks C9).
+
+**RBAC findings (Q2):**
+- operator can mint agent keys, re-point a credentialed tool's base_url, and link endpoints;
+- approver can't read agents, tools or assets at all;
+- the Agents list, Tools and Discover's link control have no UI role gating;
+- the sidebar has no role filtering.
+
+**Recommendation, not decided:** credential- and identity-bearing writes to admin-only, and approver gets read access.
+
+No code; no B-IDs minted.
+
+## Active decision thread (2026-09-28) — B-250 and B-251 minted (B-236 review follow-ups); docs only
 
 - **B-250 — collector config proxy doesn't escape `agent_id` (path injection with the collector's service key).** Flagged in BACKLOG the same way as B-243: **must be fixed before any pilot customer runs their own collector.** It is low-risk only while one read-only service-key route is reachable.
 - **B-251 — `IngestBatch` returns 503 "no org" on any `GetDefaultOrgID` error.** Same class as B-236. Check the collector's retry behaviour first.
@@ -2378,6 +2400,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-28 by Claude Code — IA_CONSOLIDATION_MIGRATION_PLAN.md (Parts A–D) produced; investigation only; no code, no B-IDs. Marker cleared.
+
+Prior entry:
 2026-09-28 by Claude Code — minted B-250 (collector proxy path injection, pre-pilot gate) and B-251 (ingest no-org misclassification); AgentConfigPanel deviations noted in NOTES.md. Docs only.
 
 Prior entry:
