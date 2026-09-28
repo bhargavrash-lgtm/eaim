@@ -2943,4 +2943,105 @@ Choices, for the founder:
 
 **Status:** QUEUED.
 
-## Next B-ID: B-252
+### B-252 — EPIC: IA consolidation, one canonical detail page per entity (C0–C12) — **QUEUED, 2026-09-28**
+**Plan (the source of truth):** `IA_CONSOLIDATION_MIGRATION_PLAN.md`. It holds the Part A touchpoint audit, the Part B target state, the Part C ordered steps (each with its dependency, mid-migration UX and B-ID treatment), the Part D questions, and the **Founder decisions** section.
+**Roadmap:** Horizon 1 "CMDB completion" plus Horizon 0 maturity. Minted at founder direction 2026-09-28. B-252 was confirmed free against BACKLOG.md directly: the counter read B-252, and B-252 to B-257 were unused. A grep found no open item overlapping this scope (see the per-item notes where an adjacent item exists).
+**Sequence:** **B-253 (RBAC split) first**, then:
+- [ ] **C0** Foundations: extract `EndpointDrawer`/`LinkedAgentControl`; delete the orphaned `AgentAssetPanel`/`ToolAssetPanel`; UI role-gating parity (after B-253).
+- [ ] **C1** Assets agent rows open Agent Detail at its new `/assets/agents/:id` home (redirect from `/gateway/agents/:id`), with an Agent Classification tab. **Agent cross-links from C10 ship here.**
+- [ ] **C2** Endpoint Detail at `/assets/endpoints/:id`: Overview, Agent Link (scanner settings read-only, "shared by N endpoints"), Classification. Discover rows open it.
+- [ ] **C3** Assets parity for endpoints (OS, last seen, per-domain counts, server filters). **Folds B-228/B-229. Needs Architect contract authorization before its brief; measure query cost in its Part A.**
+- [ ] **C4** Retire Discover (redirect).
+- [ ] **C5** Tool Detail at `/assets/tools/:id`: Overview/Credentials with inline Test, and Classification. **Partly absorbs B-256.**
+- [ ] **C6** Connections tabs: the endpoint graph (B-196 extension) and tool connections (new API).
+- [ ] **C7** Agent Credentials tab plus edit-in-place. **Absorbs B-255.** Settings → API Keys narrows (Q5).
+- [ ] **C8** Create entry points in Assets.
+- [ ] **C9** Retire the Agents and Tools list pages; **amend CLAUDE.md's six-core-pages wording in this commit.**
+- [ ] **C10** Remaining cross-links: tools (needs tool IDs in the API) and paste events (check the API's `endpoint_id` first).
+- [ ] **C11** Sidebar regroup (Layer 8). Guardrails goes in GOVERN; placeholders behind a flag (on in dev/demo, off in customer builds).
+- [ ] **C12** Write `DESIGN_SYSTEM.md` §7.8.
+
+**Status:** QUEUED. Each step is scoped as its own brief from the plan.
+
+### B-253 — RBAC split: "operators contain; admins expand or destroy" — **QUEUED, 2026-09-28**
+**Origin:** `IA_CONSOLIDATION_MIGRATION_PLAN.md` Part D, Q2, and its founder decision. Minted at founder direction 2026-09-28. B-253 was confirmed free against BACKLOG.md directly: the counter read B-252, and B-252 to B-257 were unused. A grep found no open item overlapping this scope (see the per-item notes where an adjacent item exists).
+**Decision:**
+- **Stay admin + operator:** suspend and API-key revoke.
+- **Become admin-only:**
+  - agent reactivate and delete;
+  - API-key minting;
+  - tool credential and `base_url` changes;
+  - the endpoint↔agent link;
+  - every create or import path that sets a credential or `base_url`.
+- **`approver` gets read-only access** to agents, tools and assets.
+- **Viewer is unchanged.**
+
+**Scope:** server routes only (the UI follows in B-252 C0(c)). Step-up (B-231) layers on top later.
+**Test plan:**
+- operator 403 on every restricted route, create paths included;
+- admin succeeds;
+- approver read-only;
+- viewer unchanged;
+- a mutation test for each group move.
+
+**Status:** QUEUED. Part A (route inventory) was done 2026-09-28; see CONTEXT.md.
+
+### B-254 — Policies can carry a "semantic rule" that silently never fires, with no warning — **QUEUED (Medium), 2026-09-28**
+**Origin:** `IA_CONSOLIDATION_INVESTIGATION.md` D3. Minted at founder direction 2026-09-28. B-254 was confirmed free against BACKLOG.md directly: the counter read B-252, and B-252 to B-257 were unused. A grep found no open item overlapping this scope (see the per-item notes where an adjacent item exists).
+**Adjacent item:** **B-007** (implement real semantic evaluation, blocked on ADR-009) is the eventual *real* fix. **This item is the interim honesty fix, which B-007 does not cover.**
+
+**Problem** (re-verified 2026-09-28):
+- `eami-policy/semantic.go` `evaluateSemantic` is a stub that **always returns false**, and the evaluator skips the rule.
+- The policy form (`PolicyPanel.tsx:212`) still offers "Semantic rule (LLM-evaluated)" as a normal condition.
+- **So a policy with a semantic condition never matches.** A "deny" written that way silently never fires. That conflicts with DESIGN_SYSTEM §7.4.
+
+**Fix options** (the founder picks):
+- disclose it in the UI (a warning on the field and on any policy using it, plus a badge in the list);
+- and/or reject saving semantic conditions server-side until B-007 ships;
+- plus a one-off report of existing policies with semantic conditions.
+
+**Status:** QUEUED.
+
+### B-255 — Agents can't be edited after creation (scope, risk tier, token lifetime) — **QUEUED (Low), 2026-09-28 — folds into B-252 C7**
+**Origin:** `IA_CONSOLIDATION_INVESTIGATION.md` D2. Minted at founder direction 2026-09-28. B-255 was confirmed free against BACKLOG.md directly: the counter read B-252, and B-252 to B-257 were unused. A grep found no open item overlapping this scope (see the per-item notes where an adjacent item exists).
+**Problem** (re-verified):
+- The API accepts `scope`, `risk_tier` and `token_ttl_seconds` updates (`AgentUpdateRequest`).
+- **The UI never sends them.** Neither the Agents list nor the Agent Detail Actions tab has an edit surface; only `status` is ever sent.
+- **Scope, the field the governance model is built around, can be set once and never corrected in the product.**
+
+**Fix:** edit-in-place on Agent Detail, built as part of **B-252 C7**. Apply B-253's role split: scope and risk edits stay admin + operator unless the founder says otherwise.
+**Status:** QUEUED, folded into C7.
+
+### B-256 — Tool form: OAuth 2 / Basic auth have no credential input; connection test can falsely report failure — **QUEUED (Medium), 2026-09-28 — partly folds into B-252 C5**
+**Origin:** `IA_CONSOLIDATION_INVESTIGATION.md` D1. Minted at founder direction 2026-09-28. B-256 was confirmed free against BACKLOG.md directly: the counter read B-252, and B-252 to B-257 were unused. A grep found no open item overlapping this scope (see the per-item notes where an adjacent item exists).
+
+**Problem** (re-verified):
+1. **Missing credential inputs.** `ToolsPage.tsx` offers "OAuth 2" and "Basic auth" (`:516-517`), but only `api_key` and `db_connection_string` render a credential field, in both Add (`:600-616`) and Edit (`:734-735`). A tool with either auth type cannot be given credentials through the UI. **Backend storage support for these two types is unverified; check it first.**
+2. **False negatives from the connection test.**
+   - The test (API side) refuses private and loopback targets via the SSRF guard, but real gateway dispatch to an on-prem internal REST tool has no such guard. So the test can report failure while dispatch works.
+   - MCP tools always report "misconfigured".
+   - The result auto-clears after 6 s, and the reason shows only as a tooltip.
+
+**Fix:**
+- credential inputs for the supported auth types, or remove the options the backend can't honour;
+- make the test honest about targets it deliberately can't reach ("can't test private addresses from the cloud; dispatch may still work"), without weakening the B-238 SSRF guard.
+
+The inline-test-on-detail-page part lands in **B-252 C5**.
+**Status:** QUEUED.
+
+### B-257 — Policies page error handling: failed delete shows nothing; failed save says only "Save failed" — **QUEUED (Low), 2026-09-28**
+**Origin:** `IA_CONSOLIDATION_INVESTIGATION.md` D3. Minted at founder direction 2026-09-28. B-257 was confirmed free against BACKLOG.md directly: the counter read B-252, and B-252 to B-257 were unused. A grep found no open item overlapping this scope (see the per-item notes where an adjacent item exists).
+**Adjacent items:** B-117 (reorder deadlock raw text, DONE) and B-090 (DONE) do not cover this.
+
+**Problem** (re-verified):
+- `PoliciesPage.tsx:218`: `deletePolicy.mutate(id, { onSuccess })` has **no `onError`**, so a failed delete leaves the dialog open with no message.
+- `PolicyPanel.tsx:89-90`: any save failure, including a priority unique-constraint collision, shows a generic "Save failed" toast.
+
+**Fix:**
+- surface delete errors in the dialog (ConfirmDialog pattern);
+- map the priority-collision 409 to "Another policy already has priority N";
+- otherwise show the server's generic message via `useToast`.
+
+**Status:** QUEUED.
+
+## Next B-ID: B-258

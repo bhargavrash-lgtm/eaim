@@ -186,9 +186,10 @@ Dashboard                                   (ungrouped, top)
 GOVERN
   Assets              ← canonical browse for endpoints, agents and tools (C9)
   Policies
+  Guardrails          ⟂ planned (B-150, Horizon 2 item 3)   ← moved here by founder decision
   Workflows
   Approvals  [badge]
-  (Agents, Tools)     ← only until C9, or permanently if Q1 keeps them
+  (Agents, Tools)     ← only until C9 (Q1 decided: retire)
 
 OBSERVE
   Audit
@@ -201,7 +202,6 @@ OBSERVE
 AI INFRASTRUCTURE
   Nodes
   Models              ⟂ planned (B-151, Horizon 2 item 1)
-  Guardrails          ⟂ planned (B-150, Horizon 2 item 3)
 
 AGENTIC                                      (every item planned today)
   Automations         ⟂ planned (Horizon 2 item 4, Build/Orchestration; B-155 likely subsumed)
@@ -291,9 +291,45 @@ Profile / account menu
 - **Paste events:** I verified only that the UI type carries no endpoint field. Whether the API response already carries `endpoint_id` needs checking before C10's paste links are scoped.
 - **The Workspace mode's asset view** (Layer 4b) is out of scope here. When it's built, it should reuse Endpoint, Agent and Tool Detail read-only, not grow a parallel set.
 - **B-218** (tools and nodes have no `workspace_id`) will affect how Tool Detail shows workspace scope; not assessed further here.
-- **Layer 7's example tab strip for Endpoint Detail** shows Overview, Connections, Agent Link and Classification, and its note lists "Agents list Configure" among the merged surfaces. That supports option (a) of Q3 only if the founder reads "Configure" as moving to Endpoint Detail. Flagged, not assumed.
+- **Layer 7's canvas note** (as originally written) listed "Agents list Configure" among the surfaces merged into Endpoint Detail. That argues **against** Q3 option (a), which keeps Configure on Agent Detail; it leans toward moving the edit to Endpoint Detail. *(Corrected 2026-09-28: an earlier version of this bullet wrongly said the note supported option (a). The founder reports the canvas note itself has since been corrected. Q3 is decided below.)*
 
 ---
+
+## Founder decisions (2026-09-28)
+
+These supersede the recommendations above wherever they differ.
+
+**Tracking:** umbrella **B-252** (C0–C12 checklist); RBAC split **B-253**.
+
+- **Q1: retire the Agents and Tools list pages.** CLAUDE.md's "six core pages" wording is amended **in the C9 commit**, not before.
+- **Q2: "operators contain; admins expand or destroy."**
+  - **Stay admin + operator:** suspend and API-key revoke (containment).
+  - **Become admin-only:**
+    - agent reactivate and delete;
+    - API-key minting;
+    - tool credential and `base_url` changes;
+    - the endpoint↔agent link;
+    - **every create or import path that sets a credential or `base_url`**.
+  - **`approver` gets read on agents, tools and assets only.**
+  - This is a server-side route change first (B-253); UI gating follows in C0(c).
+- **Q3: option (a).** Scanner settings stay edited on Agent Detail. Endpoint Detail shows them **read-only, with "shared by N endpoints"** and a link to edit them on the agent.
+- **Q4: `/assets/{endpoints|agents|tools}/:id`.** New detail pages are built there. **Agent Detail moves in C1**, with a redirect from `/gateway/agents/:id`.
+- **Q5: (a) + (b).** Settings → API Keys manages org-wide keys and lists agent-bound keys read-only, with a "manage on agent" link.
+- **Q6: placeholder nav entries sit behind a feature flag**, on in dev and demo builds, off in customer builds. Rendering follows the proposal above (muted, "Planned", an honest page).
+- **Q7:**
+  - measure the query cost of the endpoint column parity **in C3's Part A**;
+  - check whether the paste-events API returns `endpoint_id` **before C10**;
+  - Workspace mode reuses the detail pages read-only.
+- **Sequence changes:**
+  - **The RBAC brief (B-253) comes first, then C0.**
+  - **Agent cross-links (the agent half of C10) ship with C1.**
+  - **C3 needs Architect-EAMI contract authorization** (new `GET /v1/cmdb/assets` fields and filters) from the founder **before its brief is written**.
+  - **Guardrails sits in GOVERN**, not AI INFRASTRUCTURE (sidebar above updated).
+- **Related items minted from `IA_CONSOLIDATION_INVESTIGATION.md` Part D:**
+  - **B-254:** semantic-policy honesty;
+  - **B-255:** agent edit form, which **folds into C7**;
+  - **B-256:** tool auth and test gaps, which **partly folds into C5**;
+  - **B-257:** Policies page error handling.
 
 ## Corrections to existing records
 1. **The brief's "§7.8 defines the placeholder navigation entries" is inaccurate:** no §7.8 exists (see the discrepancy at the top). Recommended remedy: write it after C11 is approved (C12).

@@ -45,6 +45,7 @@ Scoped, logged, real backlog items — not yet built, no invented urgency, seque
 - **B-137 (A secured, public third-party API)** — real ecosystem/integration requirement once customers want to build against rheoARC, not only use its UI
 - **B-158/B-159 (Curated connector registry, hosted MCP wrapper)** — real Gateway completeness items, closing gaps found during the original TrueFoundry competitive research
 - **B-154 (Onboarding templates)** — reduces real time-to-value for a new deployment
+- **Step-up authentication for sensitive actions (B-231)** — server-enforced re-authentication before rotating a tool credential or changing a credentialed tool's URL, deleting/reactivating an agent, creating an agent API key, deleting a policy, promoting a user to admin, and generating an admin password-reset link. Suspending agents and revoking keys are excluded: emergency containment must stay frictionless. Must account for SSO-only users who have no password.
 - **The small, already-disclosed items** — B-213 (doc correction), B-218 (gateway_tools/nodes workspace scoping), the Status field allow-list nit, custom-roles investigation (deferred, correctly, pending real demonstrated need), Groups-for-users bulk-tagging (small, real, not blocked on custom roles per tonight's own analysis)
 
 ---

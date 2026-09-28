@@ -2,9 +2,30 @@
 # Updated by: Claude Code (after every task) AND the PM chat (after every
 # planning decision). Read by both at the start of every session, before
 # anything else.
-ACTIVE AGENT: none
+ACTIVE AGENT: Code — IA plan founder decisions + B-IDs (Part 0), RBAC split Part A (Part 1) — started 2026-09-28T08:29:26Z
 
-## Active decision thread (2026-09-28, newest) — IA_CONSOLIDATION_MIGRATION_PLAN.md produced (investigation only)
+## Active decision thread (2026-09-28, newest) — IA plan founder decisions recorded; B-252 to B-257 minted; RBAC split Part A done
+
+**Founder decisions** are in `IA_CONSOLIDATION_MIGRATION_PLAN.md` ("Founder decisions"):
+- **Q1:** retire the Agents and Tools lists; amend CLAUDE.md in C9.
+- **Q2:** "operators contain; admins expand or destroy". Approver gets read access.
+- **Q3:** option (a), with Endpoint Detail showing "shared by N endpoints" read-only.
+- **Q4:** `/assets/{kind}/:id`; Agent Detail moves in C1.
+- **Q5:** (a)+(b).
+- **Q6:** placeholders behind a flag.
+- **Sequence:** RBAC first, then C0. Agent cross-links ship with C1. C3 needs Architect contract authorization. Guardrails goes in GOVERN.
+
+**Minted:**
+- **B-252:** the consolidation epic (C0–C12 checklist);
+- **B-253:** the RBAC split;
+- **B-254:** semantic-rule honesty (the interim fix; B-007 remains the real fix);
+- **B-255:** agent edit (folds into C7);
+- **B-256:** tool auth and test gaps (partly C5);
+- **B-257:** Policies error handling.
+
+The step-up bullet (B-231) was added to the roadmap's Horizon 1. The next B-ID is B-258.
+
+## Active decision thread (2026-09-28) — IA_CONSOLIDATION_MIGRATION_PLAN.md produced (investigation only)
 
 Horizon 1 (CMDB completion) plus Horizon 0 maturity. The document gives:
 - **Part A:** a fresh file-by-file touchpoint audit (endpoint E1–E12, agent G1–G18, tool T1–T15);
