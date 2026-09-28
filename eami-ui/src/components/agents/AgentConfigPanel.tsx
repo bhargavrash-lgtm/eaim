@@ -37,7 +37,22 @@ type ConfigFormValues = z.infer<typeof configSchema>
 // ── Config panel ──────────────────────────────────────────────────────────────
 
 export function AgentConfigPanel({ agent, onClose }: { agent: Agent; onClose: () => void }) {
-  const { data: cfg, isLoading } = useAgentConfig(agent.id)
+  const { data: cfg, isLoading, isError, refetch } = useAgentConfig(agent.id)
+  // B-236: if the real config can't be loaded, show that -- never a form. An
+  // empty (or default-filled) form here could be saved over the agent's
+  // real, deliberately chosen settings. A refetch with no cached data puts
+  // the query back into its loading state, so `retrying` keeps the error
+  // panel (and its spinning Retry) mounted until the retry settles.
+  const [retrying, setRetrying] = useState(false)
+  const loadFailed = isError || retrying
+  const onRetry = async () => {
+    setRetrying(true)
+    try {
+      await refetch()
+    } finally {
+      setRetrying(false)
+    }
+  }
   const update = useUpdateAgentConfig()
   const [toast, setToast] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -102,8 +117,19 @@ export function AgentConfigPanel({ agent, onClose }: { agent: Agent; onClose: ()
 
       {/* Form */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
-        {isLoading ? (
+        {isLoading && !retrying ? (
           <p className="text-sm text-gray-400">Loading config…</p>
+        ) : loadFailed ? (
+          <div role="alert" className="rounded-[10px] bg-status-danger px-4 py-4 shadow-l1">
+            <p className="text-sm font-semibold text-status-danger-text">Couldn&apos;t load this agent&apos;s config</p>
+            <p className="mt-1 text-sm text-status-danger-text">
+              The saved settings couldn&apos;t be read, so nothing is shown and nothing can be saved. Try again in a
+              moment.
+            </p>
+            <Button variant="outline" size="sm" className="mt-3" isLoading={retrying} onClick={() => void onRetry()}>
+              Retry
+            </Button>
+          </div>
         ) : (
           <form id="config-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
             {/* Scan interval */}
@@ -179,11 +205,13 @@ export function AgentConfigPanel({ agent, onClose }: { agent: Agent; onClose: ()
 
       {/* Footer */}
       <div className="px-6 py-4 border-t flex gap-3">
-        <Button type="submit" form="config-form" isLoading={update.isPending} className="flex-1">
-          Save config
-        </Button>
+        {!loadFailed && (
+          <Button type="submit" form="config-form" isLoading={update.isPending} className="flex-1">
+            Save config
+          </Button>
+        )}
         <Button variant="secondary" onClick={onClose} disabled={update.isPending}>
-          Cancel
+          {loadFailed ? 'Close' : 'Cancel'}
         </Button>
       </div>
     </SlideOverPanel>

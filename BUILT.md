@@ -1,5 +1,30 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-236 — Agent-config reads no longer fall back to defaults on DB error — 2026-09-28 (Claude Code)
+
+Horizon 0 hardening. The evidence record, with both reviews plus a re-review verbatim, is `B-236_VERIFICATION.md`.
+
+**Files**
+- **`eami-api/internal/api/agent_config_remote.go`** (endpoint config route):
+  - `GetDefaultOrgID`: 503 only on `ErrNoRows`, otherwise 500;
+  - endpoint-resolve errors are logged;
+  - config read: defaults only on `ErrNoRows`, otherwise 500 "failed to load agent config".
+- **`eami-api/internal/api/agents.go`** (`GetAgentConfig`, admin route): `GetAgent` 404 only on `ErrNoRows`; config read the same as above.
+- **`eami-ui/src/components/agents/AgentConfigPanel.tsx`:** on query error, an error panel with Retry (`Button isLoading`, with a `retrying` state kept across the TanStack pending reset) and no form or Save. Shared by Agent Detail's Actions tab and the Agents list.
+- **New `eami-api/internal/api/agent_config_read_fail_pg_test.go`:** forces a real Postgres error via a test-only `faultDB` wrapper.
+- **Not changed:** `eami-agent`. It keeps its last-known-good config on a non-200 (Part A).
+
+**Verification**
+- `go build`, `go vet` and gofmt are clean. `go test ./...` gives PASS=498, FAIL=0, SKIP=0. `tsc` and the `vite build` pass.
+- **Mutations:** 7 server and 3 UI, each caught.
+- **Live:** Playwright interception from both entry points (error panel, no form or Save, the Retry spinner, recovery to the real config, zero writes); admin route real, missing-row and unknown cases on the rebuilt API.
+- **Cleanup:** snapshot identical.
+
+**Limitations and follow-ups**
+- The endpoint service-key route wasn't exercised live over HTTP (it needs `.env` secrets); it is covered by the route-level real-Postgres test.
+- Minted **B-249** (agent fetch-failure log level).
+- Proposed, not minted: collector proxy `agent_id` escaping; `ingest.go` `GetDefaultOrgID` 503 misclassification; `AgentConfigPanel`'s page-local toast and raw red save-error box.
+
 ## B-242 — Invite of an existing email returns one fixed 409 (option 2) — 2026-09-27 (Claude Code)
 
 At founder direction. The evidence record, with both reviews verbatim, is `B-242_VERIFICATION.md`.

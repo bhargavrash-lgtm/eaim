@@ -2599,7 +2599,7 @@ B-232 and B-233 already fixed the handlers they touched: `UpdateAgentConfig`, an
 - Verify by building the production UI image and checking the response headers for `/` and a deep SPA route.
 **Status:** QUEUED.
 
-### B-236 — Agent-config read paths fail open to defaults on any DB error — **QUEUED, 2026-09-27**
+### B-236 — Agent-config read paths fail open to defaults on any DB error — **DONE, 2026-09-28** (evidence: `B-236_VERIFICATION.md`)
 **Origin:** B-232's code review (Low) and security review (Info). Minted at founder direction, with the same free-ID check.
 **Problem:** both read paths treat *any* error as "no config row" and serve the server defaults.
 - **Admin `GetAgentConfig` (`agents.go`):** any `GetAgent` error, including a DB error, becomes a 404. Any `GetAgentConfig` error falls back to defaults.
@@ -2610,7 +2610,18 @@ B-232 and B-233 already fixed the handlers they touched: `UpdateAgentConfig`, an
 - Any other error returns a generic 500 and is logged.
 - On the remote route, return an error the endpoint agent already treats as "keep current config" rather than defaults. Check `eami-agent`'s `FetchConfig` behaviour on non-200.
 - Add tests that force a DB error on each path.
-**Status:** QUEUED.
+**Status:** DONE 2026-09-28 (Horizon 0 hardening).
+- **Both read paths:** defaults only on `pgx.ErrNoRows`; otherwise a generic 500 with `slog`.
+- **Admin `GetAgent`:** 404 only on `ErrNoRows`.
+- **`GetDefaultOrgID`:** 503 only on `ErrNoRows`.
+- **Endpoint agent:** unchanged. Part A proved it keeps its last-known-good config on any non-200 other than 404.
+- **Config panel:** now shows an error state with Retry (`Button isLoading`) and no form or Save.
+- **Tests:** real-Postgres tests force a real DB error (`SELECT 1/0` via a test-only DBTX wrapper) on each read, plus the deliberate missing-row case. 7 server mutations and 3 UI mutations, each caught. Tests 498/0/0.
+- **Live:**
+  - Playwright interception from both entry points;
+  - admin route real, missing-row and unknown-agent cases on the rebuilt API;
+  - no write requests fired.
+- **Reviews:** both completed, plus a UI delta re-review. Snapshot identical.
 
 ### B-237 — `POST /v1/approvals` stores unvalidated cross-org agent/policy references (cross-tenant delete-blocking + existence oracle) — **DONE, 2026-09-27** (found by the org-branch-asymmetry sweep; evidence: `B-237_VERIFICATION.md`)
 **Origin:** the org-ownership branch-asymmetry sweep (`ORG_BRANCH_ASYMMETRY_SWEEP.md`), reported immediately per its brief. The brief pre-authorizes a B-ID for any real finding. B-237 was confirmed free against BACKLOG.md directly: the counter read B-237, and no open item overlapped.
@@ -2882,4 +2893,19 @@ Choices, for the founder:
 
 **Status:** QUEUED. Items 1 and 2 are Code-owned; item 3 goes to Architect-EAMI.
 
-## Next B-ID: B-249
+### B-249 — eami-agent logs remote-config fetch failures at Debug (invisible at default level) — **QUEUED (Low), 2026-09-28**
+**Origin:** B-236 Part A, and both B-236 reviews. Minted at founder direction. B-249 was confirmed free against BACKLOG.md directly: the counter read B-249, and a grep found no open item covering this scope.
+**Problem:**
+- `eami-agent/cmd/agent/main.go` logs a `sender.FetchConfig` error with `log.Debug`.
+- After B-236, a DB problem on the server now correctly returns 500 instead of defaults, and the agent correctly keeps its current config.
+- But a **persistently failing config fetch is invisible in the endpoint's own logs at default verbosity**. The server logs it with `slog.Error`.
+
+**Fix:**
+- Log non-404 fetch failures at Warn, including the status. A 404 ("not registered or linked yet") is not an error and stays silent.
+- Optionally rate-limit repeated identical warnings.
+- Test: a non-200/non-404 response produces a Warn record.
+
+**Explicitly out of scope** (founder, 2026-09-28): the agent's last-known-good config lives in memory only, so after a restart it uses its local config file until the next successful fetch. That is existing behaviour, not part of this item.
+**Status:** QUEUED.
+
+## Next B-ID: B-250

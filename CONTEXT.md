@@ -4,7 +4,27 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-27, newest) — B-245 to B-248 minted (B-242 review follow-ups); docs only
+## Active decision thread (2026-09-28, newest) — B-236 DONE: agent-config reads fail closed on DB error; B-249 minted
+
+**B-236 (Horizon 0 hardening) is done.**
+- Both agent-config read paths serve defaults only when the row genuinely doesn't exist. Any other DB error returns a generic 500, with `slog`.
+- Admin `GetAgent` returns 404 only on no-rows; `GetDefaultOrgID` returns 503 only on no-rows.
+- The endpoint agent is unchanged: Part A proved it keeps its last-known-good config on any non-200 other than 404.
+- The Configure panel shows an error state with Retry and no saveable form. It is verified live from both entry points with Playwright interception.
+- A TanStack pending-reset bug, found by the first live run, was fixed and re-reviewed.
+- Tests 498/0/0; 7 server and 3 UI mutations caught; both reviews completed.
+- Evidence: `B-236_VERIFICATION.md`.
+
+**B-249 is minted:** agent fetch-failure log from Debug to Warn. The restart-uses-local-file behaviour stays out of scope.
+
+**Proposed, not minted:**
+- collector proxy `agent_id` escaping;
+- `ingest.go` 503-on-any-error;
+- `AgentConfigPanel` local toast.
+
+The next B-ID is B-250.
+
+## Active decision thread (2026-09-27) — B-245 to B-248 minted (B-242 review follow-ups); docs only
 
 All four were minted at founder direction; none has code yet.
 - **B-245 — email squatting (Medium).** Blocked on real email delivery; the founder said no workaround now. Email-sending infrastructure itself has no B-ID yet.
@@ -2350,6 +2370,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-28 by Claude Code — B-236 done (agent-config reads fail closed; UI error state; live-verified; both reviews completed); B-249 minted. Marker cleared.
+
+Prior entry:
 2026-09-27 by Claude Code — minted B-245 to B-248 (B-242 review follow-ups), confirmed free against BACKLOG.md. Docs only; no code changes.
 
 Prior entry:

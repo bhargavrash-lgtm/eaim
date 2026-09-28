@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -54,8 +55,15 @@ func (s *Server) AgentRemoteConfig(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	orgID, err := s.queries.GetDefaultOrgID(ctx)
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "no_org",
-			"no org found; run reseed.sql before agents can fetch remote config")
+		// B-236: only a genuinely empty orgs table is "no org"; any other
+		// error is a real failure, not a setup hint.
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusServiceUnavailable, "no_org",
+				"no org found; run reseed.sql before agents can fetch remote config")
+			return
+		}
+		slog.Error("agent remote config: resolve default org failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to load agent config")
 		return
 	}
 
@@ -68,6 +76,7 @@ func (s *Server) AgentRemoteConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "endpoint not registered")
 			return
 		}
+		slog.Error("agent remote config: resolve endpoint failed", "org_id", orgID, "err", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to resolve endpoint")
 		return
 	}
@@ -82,13 +91,20 @@ func (s *Server) AgentRemoteConfig(w http.ResponseWriter, r *http.Request) {
 
 	cfg, err := s.queries.GetAgentConfig(ctx, *gatewayAgentID)
 	if err != nil {
-		// No config row yet (shouldn't normally happen -- gateway_agents
-		// auto-seeds one via trigger on insert) -- fail open with defaults
-		// rather than 500, matching GetAgentConfig's own admin-facing
-		// fallback behavior exactly.
-		d := store.AgentConfigDefaults
-		d.AgentID = *gatewayAgentID
-		writeJSON(w, http.StatusOK, agentConfigToResp(d))
+		// B-236: defaults ONLY when the row genuinely doesn't exist
+		// (unusual -- gateway_agents auto-seeds one via trigger on insert).
+		// Any other error is a 500: serving defaults on a transient DB
+		// error would silently re-enable scanners an admin deliberately
+		// turned off. eami-agent's FetchConfig treats any non-200 other than
+		// 404 as an error and keeps its current config, so a 500 is safe.
+		if errors.Is(err, pgx.ErrNoRows) {
+			d := store.AgentConfigDefaults
+			d.AgentID = *gatewayAgentID
+			writeJSON(w, http.StatusOK, agentConfigToResp(d))
+			return
+		}
+		slog.Error("agent remote config: read config failed", "agent_id", *gatewayAgentID, "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to load agent config")
 		return
 	}
 	writeJSON(w, http.StatusOK, agentConfigToResp(*cfg))

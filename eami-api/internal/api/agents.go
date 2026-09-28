@@ -624,15 +624,28 @@ func (s *Server) GetAgentConfig(w http.ResponseWriter, r *http.Request) {
 	// Verify the agent belongs to this org.
 	if s.queries != nil {
 		if _, err := s.queries.GetAgent(r.Context(), agentID, uc.OrgID); err != nil {
-			writeError(w, http.StatusNotFound, "not_found", "agent not found")
+			// B-236: only a genuinely missing (or other-org) agent is a 404.
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "not_found", "agent not found")
+				return
+			}
+			slog.Error("get agent config: agent lookup failed", "agent_id", agentID, "err", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to load agent config")
 			return
 		}
 		cfg, err := s.queries.GetAgentConfig(r.Context(), agentID)
 		if err != nil {
-			// No config row yet — return defaults.
-			d := store.AgentConfigDefaults
-			d.AgentID = agentID
-			writeJSON(w, http.StatusOK, agentConfigToResp(d))
+			// B-236: defaults ONLY when no config row exists. Any other
+			// error is a 500 -- showing defaults as if they were the real
+			// settings would let a Save silently overwrite the real config.
+			if errors.Is(err, pgx.ErrNoRows) {
+				d := store.AgentConfigDefaults
+				d.AgentID = agentID
+				writeJSON(w, http.StatusOK, agentConfigToResp(d))
+				return
+			}
+			slog.Error("get agent config: config read failed", "agent_id", agentID, "err", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to load agent config")
 			return
 		}
 		writeJSON(w, http.StatusOK, agentConfigToResp(*cfg))
