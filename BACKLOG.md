@@ -2908,4 +2908,39 @@ Choices, for the founder:
 **Explicitly out of scope** (founder, 2026-09-28): the agent's last-known-good config lives in memory only, so after a restart it uses its local config file until the next successful fetch. That is existing behaviour, not part of this item.
 **Status:** QUEUED.
 
-## Next B-ID: B-250
+### B-250 — Collector config proxy forwards an unescaped `agent_id` into the upstream path (path injection with the collector's service key) — **QUEUED (Low today), 2026-09-28 — ⚠ MUST BE FIXED BEFORE ANY PILOT CUSTOMER RUNS THEIR OWN COLLECTOR**
+**Founder flag (2026-09-28):** treat this the same way as B-243. It is low-risk **only while** a single read-only service-key route is reachable this way. It must be fixed before the first design-partner or pilot deployment in which the customer runs `eami-collector` themselves.
+**Origin:** B-236 security review, I1 (`B-236_VERIFICATION.md` §5b/§6). Minted at founder direction 2026-09-28. B-250 was confirmed free against BACKLOG.md directly: the counter read B-250, B-250 and B-251 were unused, and a grep found no open item overlapping this scope.
+
+**Problem:**
+- `eami-collector/internal/api/config_proxy.go` builds `upstream := saasURL + "/v1/agents/" + agentID + "/config"` from the **decoded** `r.PathValue("agent_id")`, without escaping, and sends it with the collector's own `X-Service-Key`.
+- The per-agent identity check (B-073) applies only when the caller authenticated with a per-agent credential. With the shared collector key there is no check.
+- So a crafted `agent_id` (e.g. containing `%3F` → `?`, or `..%2F` → `../`) can change which eami-api path the collector requests **with the platform service key**.
+
+**Current reach:** only a GET, and today the only service-key GET route in eami-api is `AgentRemoteConfig` itself, which is why this is low-risk now. Any new service-key GET route widens it immediately, and this interacts with B-243 (the single global service key).
+
+**Fix:**
+- `url.PathEscape(agentID)` when building the upstream URL;
+- validate `agent_id` against a charset and length allow-list at the collector, and reject anything else with 400;
+- apply the same validation on eami-api's `GET /v1/agents/{agent_id}/config`.
+- Tests: encoded `?`, `/`, `..` and `#` variants are rejected or escaped, and never reach a different upstream path.
+
+**Status:** QUEUED, pre-pilot gate.
+
+### B-251 — `IngestBatch` maps ANY `GetDefaultOrgID` error to 503 "no org found; run reseed.sql" — **QUEUED (Low), 2026-09-28**
+**Origin:** B-236 code review, Info. Minted at founder direction 2026-09-28. B-251 was confirmed free against BACKLOG.md directly: the counter read B-250, B-250 and B-251 were unused, and a grep found no open item overlapping this scope.
+**Class:** the same misclassification B-236 fixed on the agent-config route, on a different, non-config path.
+
+**Problem:**
+- `eami-api/internal/api/ingest.go` (`IngestBatch`, `POST /v1/ingest/batch`, the collector's forwarding route) returns `503 no_org` for **any** `GetDefaultOrgID` error.
+- A transient DB failure (timeout, dropped connection) is therefore reported as a setup problem ("run reseed.sql"). That misleads operators and anyone reading collector logs.
+- The detail is logged server-side, so it doesn't leak; it's a correctness and diagnosability issue.
+
+**Fix:**
+- Match B-236: `errors.Is(err, pgx.ErrNoRows)` → 503 `no_org`; any other error → a generic 500 `internal_error` with `slog`.
+- **Check the collector forwarder's retry behaviour for 500 vs 503 first.** If it retries only on some statuses, make sure a transient DB error is still retried and never dropped: its buffered reports must survive.
+- Test: forced DB error vs genuinely empty org lookup, using the B-236 `faultDB` approach.
+
+**Status:** QUEUED.
+
+## Next B-ID: B-252

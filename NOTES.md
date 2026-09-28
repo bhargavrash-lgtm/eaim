@@ -63,3 +63,12 @@ client knows about it.
 The live DB has 0 rows with trailing tab, NBSP or newline (security review, 2026-09-26). **Suggested fix:** a new migration that makes `normalize_ci_name` trim and collapse Unicode whitespace, and strips zero-width format characters, before lowercasing. Then renormalize existing rows with a conflict check.
 
 **`PATCH /v1/endpoints/{endpointId}/link-agent` (`LinkEndpointAgent`) has no Discovery-license gate.** It is admin-only and stays within one org. The B-196 fix-up gated only `SetCMDBAssetClassification`; this route was noted in both B-196 security reviews as pre-existing precedent. **Suggested fix:** the same `discoveryLicensed` check and 403 `module_not_licensed`, when a brief covers the endpoint-link surface.
+
+## 2026-09-28 — `AgentConfigPanel.tsx`: two pre-existing UI-rule deviations (fix opportunistically, no B-ID)
+
+**File:** `eami-ui/src/components/agents/AgentConfigPanel.tsx`
+
+Found by the B-236 reviews. They predate B-236 and sit outside its diff. At founder direction (2026-09-28) there is **no separate B-ID**: fix them the next time this file is touched for any reason.
+
+1. **Page-local success toast.** The `toast` state is set with `setToast('Config saved')` plus `setTimeout(..., 3000)` and rendered in a green box. CLAUDE.md's B-182 rule requires the shared `useToast()`: `showToast('Config saved', { type: 'success', durationMs: 3000 })`.
+2. **Raw Tailwind red on the save-error box.** `saveError` renders with `bg-red-50 border-red-200 text-red-700`. Use the design-system Danger tokens that B-236's load-error panel in the same file already uses: `bg-status-danger` / `text-status-danger-text`, `DESIGN_SYSTEM.md` §2. Alternatively, route the save error through `useToast()` with `type: 'error'` as well.

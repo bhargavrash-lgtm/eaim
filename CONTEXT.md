@@ -4,7 +4,15 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-28, newest) — B-236 DONE: agent-config reads fail closed on DB error; B-249 minted
+## Active decision thread (2026-09-28, newest) — B-250 and B-251 minted (B-236 review follow-ups); docs only
+
+- **B-250 — collector config proxy doesn't escape `agent_id` (path injection with the collector's service key).** Flagged in BACKLOG the same way as B-243: **must be fixed before any pilot customer runs their own collector.** It is low-risk only while one read-only service-key route is reachable.
+- **B-251 — `IngestBatch` returns 503 "no org" on any `GetDefaultOrgID` error.** Same class as B-236. Check the collector's retry behaviour first.
+- **`AgentConfigPanel` deviations** (page-local toast; raw red save-error box): **no B-ID** by founder direction. Logged in NOTES.md, to fix opportunistically the next time the file is touched.
+
+No code changed. The next B-ID is B-252.
+
+## Active decision thread (2026-09-28) — B-236 DONE: agent-config reads fail closed on DB error; B-249 minted
 
 **B-236 (Horizon 0 hardening) is done.**
 - Both agent-config read paths serve defaults only when the row genuinely doesn't exist. Any other DB error returns a generic 500, with `slog`.
@@ -2370,6 +2378,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-28 by Claude Code — minted B-250 (collector proxy path injection, pre-pilot gate) and B-251 (ingest no-org misclassification); AgentConfigPanel deviations noted in NOTES.md. Docs only.
+
+Prior entry:
 2026-09-28 by Claude Code — B-236 done (agent-config reads fail closed; UI error state; live-verified; both reviews completed); B-249 minted. Marker cleared.
 
 Prior entry:
