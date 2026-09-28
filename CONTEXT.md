@@ -2,7 +2,7 @@
 # Updated by: Claude Code (after every task) AND the PM chat (after every
 # planning decision). Read by both at the start of every session, before
 # anything else.
-ACTIVE AGENT: Code — IA plan founder decisions + B-IDs (Part 0), RBAC split Part A (Part 1) — started 2026-09-28T08:29:26Z
+ACTIVE AGENT: none
 
 ## Active decision thread (2026-09-28, newest) — IA plan founder decisions recorded; B-252 to B-257 minted; RBAC split Part A done
 
@@ -24,6 +24,18 @@ ACTIVE AGENT: Code — IA plan founder decisions + B-IDs (Part 0), RBAC split Pa
 - **B-257:** Policies error handling.
 
 The step-up bullet (B-231) was added to the roadmap's Horizon 1. The next B-ID is B-258.
+
+**B-253 Part A is done:** `RBAC_SPLIT_PART_A.md`, a report only.
+- Two decisions **cannot** be done with route groups: reactivate shares the agent PATCH with suspend, and tool credential/`base_url` changes share the tool PATCH. Both need in-handler admin checks.
+- No read response returns credential material.
+- Operator reliance is UI-only (plus one test: `TestCreateAgent_OperatorRole_Succeeds`).
+- **Open questions for the founder:**
+  - Q-A: agent create;
+  - Q-B: whole tool-create route;
+  - Q-C: tool `provider`/`audit_mode`/`redaction_rules`;
+  - Q-D: tool and node delete;
+  - Q-E: approver's "assets" scope;
+  - Q-F: agent scope/TTL widening.
 
 ## Active decision thread (2026-09-28) — IA_CONSOLIDATION_MIGRATION_PLAN.md produced (investigation only)
 
@@ -2421,6 +2433,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-28 by Claude Code — IA plan founder decisions recorded; B-252 to B-257 minted; roadmap step-up bullet (commit c43f6df); B-253 RBAC Part A report (RBAC_SPLIT_PART_A.md). Docs only. Marker cleared.
+
+Prior entry:
 2026-09-28 by Claude Code — IA_CONSOLIDATION_MIGRATION_PLAN.md (Parts A–D) produced; investigation only; no code, no B-IDs. Marker cleared.
 
 Prior entry:

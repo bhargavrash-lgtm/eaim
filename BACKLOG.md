@@ -2984,7 +2984,7 @@ Choices, for the founder:
 - viewer unchanged;
 - a mutation test for each group move.
 
-**Status:** QUEUED. Part A (route inventory) was done 2026-09-28; see CONTEXT.md.
+**Status:** QUEUED. **Part A was done 2026-09-28: `RBAC_SPLIT_PART_A.md`** (route inventory, in-handler splits for reactivate and tool credential/`base_url`, reliance, no credential material in reads, proposed groups, test plan, and open questions Q-A to Q-F). The build brief awaits those answers.
 
 ### B-254 — Policies can carry a "semantic rule" that silently never fires, with no warning — **QUEUED (Medium), 2026-09-28**
 **Origin:** `IA_CONSOLIDATION_INVESTIGATION.md` D3. Minted at founder direction 2026-09-28. B-254 was confirmed free against BACKLOG.md directly: the counter read B-252, and B-252 to B-257 were unused. A grep found no open item overlapping this scope (see the per-item notes where an adjacent item exists).
