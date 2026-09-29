@@ -202,7 +202,24 @@
 
 **Case 2b: Governed Agents (already dispatching through the gateway).** **No new mechanism.** **Lineage** (shipped 2026-09-29) *is* the deep view, fed continuously by real dispatch data, not by a probe. The only link needed is from a Discovery finding for a governed agent to its Agent Detail → Lineage, via the existing `AgentLink` pattern.
 
-## Decisions needed before any build brief
+## Founder decisions (2026-09-30)
+
+- **D1:** the probe is a **new item, B-267**, separate from B-139. B-139 stays passive network inspection.
+- **D2:** roadmap lines were added for presets, B-267 and the deep-discovery tiers.
+- **D3:** "B-054" meant **TASK-054** (the founder's error in the brief).
+- **D4:** probe credentials are **locked to the probe process**. The API holds them but can't decrypt them. They are write-only, rotatable, admin-only behind step-up (B-231) and fully audited, a stricter standard than tool credentials.
+- **D5:** a discovered but unregistered model server gets a real section on Endpoint Detail before Model Details applies.
+- **D6:** ship on the real signals first. Install and start-time capture is **B-268** (future, not blocking).
+
+**Approved build order:**
+1. Presets.
+2. The read-only Endpoint Detail view, alongside C2.
+3. Shadow-agent surfacing and onboarding.
+4. The probe (B-267).
+
+**LLM characterisation is not yet placed in that order.**
+
+## Decisions that were needed before any build brief (as originally asked)
 
 | # | Decision | Recommendation |
 |---|---|---|

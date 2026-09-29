@@ -4,7 +4,19 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-30, newest) — Discovery admin investigation delivered; awaiting D1–D6
+## Active decision thread (2026-09-30, newest) — Discovery decisions D1–D6 recorded; B-267/B-268 minted; roadmap lines added
+
+- **B-267 (Discovery Probe)** is minted: active, credentialed agentless scanning, **separate from B-139**, which stays passive network inspection. Its credentials are probe-sealed and held to a stricter standard than tool credentials.
+- **B-268** is minted: install-time and start-time capture (future, not blocking).
+- **Roadmap Horizon 1** gained:
+  - the three-layer discovery admin model, with its approved build order (presets, then read-only Endpoint Detail with C2, then shadow-agent surfacing and onboarding, then B-267);
+  - B-267;
+  - the deep-discovery tiers.
+- **Presets and the Layer-3 view** get B-IDs when briefed.
+- **Open:** LLM characterisation isn't placed in the approved order yet (founder to sequence).
+- **Next:** no build brief until the founder sends one. The next B-ID is B-269.
+
+## Active decision thread (2026-09-30) — Discovery admin investigation delivered; awaiting D1–D6
 
 - **Delivered** `DISCOVERY_ADMIN_INVESTIGATION.md` (investigation only; no code, no B-IDs).
 - **Part 1, the three-layer model:**
@@ -2561,6 +2573,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — recorded discovery decisions D1–D6; minted B-267 (Discovery Probe) and B-268 (install/start-time capture); added Horizon 1 roadmap lines. Docs only. Marker cleared.
+
+Prior entry:
 2026-09-30 by Claude Code — Discovery administration investigation (three-layer model + deep-discovery tiers) delivered; docs only; awaiting D1–D6. Marker cleared.
 
 Prior entry:

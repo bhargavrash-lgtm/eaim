@@ -1530,6 +1530,7 @@ No schema/migration work (`policies.org_id` has existed since the original schem
 - **Network-level traffic inspection** (mirror port or proxy integration, observing the same hardcoded `KnownAIHosts` list `network_activity`'s scanner already uses today) — needs a privileged network position at the org's infrastructure level; per B-164, "a real infra/deployability ask, not a software one."
 - **DNS-query inspection** — technically simpler to parse (reuses the same local-parsing logic `network_activity.ParseDNSCache` already implements), but only ever catches lookups, never payload content, and requires the org's DNS traffic to flow through a controlled resolver.
 B-164 also flagged one adjacent-but-unrelated dormant artifact so it isn't mistaken for a head start on either mechanism above: the dormant `discovered_endpoints`/`POST /v1/reports` surface is shape-similar (HTTP method/host/path observation) but was built for a different original purpose, predates B-139's own logging, has zero active producer, and does not constitute progress here. Neither candidate mechanism has been weighed against the other, costed, or run past deployability/legal review — whoever picks this up still starts the real mechanism investigation from zero, per this entry's own acceptance criteria above; the two bullets above are a starting reading list, not a shortlist.
+**Scope confirmed 2026-09-30 (founder, D1):** B-139 stays **passive network inspection** exactly as originally scoped. The active, credentialed agentless scanning designed in `DISCOVERY_ADMIN_INVESTIGATION.md` is a **separate item, B-267** (the Discovery Probe). The two must not be conflated.
 **Dependencies:** none blocking investigation start. Conceptually complements, does not replace, the existing `eami-agent` endpoint-based detection (12 domains) — this is additive coverage for devices the agent can't be installed on, not a replacement mechanism.
 **Status:** logged 2026-08-29. Discussed, never investigated, never previously logged in the repo. B-ID confirmed free (counter stood at B-139, no collision) before minting.
 
@@ -3253,4 +3254,58 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 
 **Status:** QUEUED. Do not build now.
 
-## Next B-ID: B-267
+### B-267 — Discovery Probe: active, credentialed agentless discovery (separate from B-139) — **QUEUED, 2026-09-30 — investigated; build after presets**
+**Origin:** `DISCOVERY_ADMIN_INVESTIGATION.md` Part 1B(b), founder decisions D1 and D4 (2026-09-30). Minted at founder direction 2026-09-30. B-267 was confirmed free against BACKLOG.md directly: the counter read B-267, and B-267 and B-268 were referenced nowhere. A grep of BACKLOG.md for open items covering WinRM, vCenter, credentialed or active scanning, install time or process start time found none. No number was reserved in conversation.
+
+**What it is:** an on-prem service, `eami-probe`, that **actively** discovers AI assets on machines with no endpoint agent, using credentials an admin supplies. It is **not** "Collector" (`eami-collector` is a passive relay that never originates traffic), and it is **not B-139** (passive network inspection, which stays as scoped).
+
+**Shape:**
+- **Deployment and control:** packaged like the collector (an appliance container or standalone). It registers with a one-time token and generates its own keypair. It **pulls** jobs (ranges, credential references, schedule, protocols) and accepts no inbound commands.
+- **Results:** written through the ingest path as `source=probe`, onto the same endpoint asset kind (`discovery_source`: agent, probe or both).
+- **Identity matching** against agent-reported endpoints (hostname, IP and MAC drift) is a real design problem for the first brief.
+
+**v1 coverage:**
+- **Linux and macOS:** SSH, key-based preferred, with a read-only command allowlist.
+- **Windows:** WinRM over HTTPS (Kerberos preferred; NTLM only by opt-in), running read-only PowerShell.
+- **Hypervisors:** vCenter/vSphere REST (read-only role), the Proxmox API, and Hyper-V via WinRM. These give an **inventory**, not in-guest processes.
+- **AI serving ports:** a TCP connect probe (for example 11434, 8000, 8080, 1234 and 8001–8002), which triggers LLM characterisation.
+- **Out of v1:** WMI/DCOM, SNMP, cloud provider APIs, and passive traffic inspection (B-139).
+
+**Ranges:** an explicit admin allow list (CIDRs and hosts) plus exclusions, with per-range size caps and rate limits. The probe touches nothing off the list, and every change is audited. The list is the org's authorisation record.
+
+**Credentials (founder D4: a materially higher-trust surface, held to a stricter standard than tool credentials):**
+- **Locked to the probe process.** The admin UI encrypts each secret to the probe's public key (X25519 into AES-256-GCM). The API stores ciphertext it **cannot decrypt**; only the on-prem probe can.
+- **AAD** binds each blob to `(org_id, credential_id, probe_id)`.
+- **Key versioning and rotation:** the probe re-keys and re-seals.
+- **Write-only:** never returned by any API.
+- **Admin-only, behind step-up (B-231),** which B-267's credential writes depend on.
+- **Fully audited:** create, update, use and failure.
+- **Least-privilege guidance** is published per protocol.
+
+**Dependencies:**
+- Discovery presets and enrollment (roadmap: build order item 1).
+- B-231 step-up, for credential writes.
+- B-252 C2 (Endpoint Detail), to show probe results.
+
+**Status:** QUEUED. Do not build now. Per the founder-approved build order, it comes after presets, Endpoint Detail's read-only view and shadow-agent surfacing.
+
+### B-268 — Capture install time and process start time in eami-agent (deep-discovery case 2a) — **QUEUED (future), 2026-09-30**
+**Origin:** `DISCOVERY_ADMIN_INVESTIGATION.md` Part 2.2, founder decision D6 (2026-09-30). Minted at founder direction 2026-09-30. B-268 was confirmed free against BACKLOG.md directly: the counter read B-267, and B-267 and B-268 were referenced nowhere. A grep of BACKLOG.md for open items covering WinRM, vCenter, credentialed or active scanning, install time or process start time found none. No number was reserved in conversation.
+
+**Problem:** shadow-agent deep discovery (case 2a) would benefit from **when** an AI app was installed and **when** a process started. **Neither is captured today:**
+- `ai_apps` has no install date;
+- `ai_processes.detected_at` and `network_activity.detected_at` are the **scan** time;
+- no owning user is recorded.
+
+**Scope (for a later brief):**
+- Per-platform instrumentation:
+  - **Windows:** registry `InstallDate` and process creation time.
+  - **macOS:** app bundle and receipt dates, and process start time.
+  - **Linux:** package manager install time and `/proc/<pid>/stat` start time.
+- Optionally, the process owner.
+- New report fields, the API and store, and UI surfacing in case 2a.
+- Privacy review: the owning user is personal data.
+
+**Status:** QUEUED (future). **Not blocking.** Case 2a ships first on the real signals already collected (founder D6).
+
+## Next B-ID: B-269
