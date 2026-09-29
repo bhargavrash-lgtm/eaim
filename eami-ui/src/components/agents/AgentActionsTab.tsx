@@ -4,20 +4,18 @@
 // AgentConfigPanel's useUpdateAgentConfig) with the same toggle rule,
 // confirmation and error handling. Differences from the list, all
 // founder-approved: a successful delete returns to the Agents list (this
-// page's agent no longer exists), and viewers get a read-only tab instead
-// of buttons that 403. Step-up authentication for delete/reactivate is a
+// page's agent no longer exists), and each action renders only for the
+// roles the API accepts it from (B-252 C0, lib/rbac.ts) instead of a
+// button that 403s. Step-up authentication for delete/reactivate is a
 // separate tracked item (B-231), deliberately not added here.
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Ban, PlayCircle, Settings2, Trash2 } from 'lucide-react'
-import { Button, ConfirmDialog } from '@/components/common'
+import { Button, ConfirmDialog, useToast } from '@/components/common'
 import { useDeleteAgent, useUpdateAgent } from '@/hooks/useAgents'
 import type { Agent } from '@/hooks/useAgents'
-import { useAuthStore } from '@/stores/authStore'
+import { can, useOrgRole } from '@/lib/rbac'
 import { AgentConfigPanel } from './AgentConfigPanel'
-
-// Mirrors the API's write group for these routes (router.go: admin, operator).
-const WRITE_ROLES = ['admin', 'operator']
 
 function errorText(err: unknown, fallback: string) {
   return (err as { message?: string } | null)?.message ?? fallback
@@ -25,8 +23,8 @@ function errorText(err: unknown, fallback: string) {
 
 export function AgentActionsTab({ agent }: { agent: Agent }) {
   const navigate = useNavigate()
-  const role = useAuthStore((s) => s.user?.role)
-  const canWrite = WRITE_ROLES.includes(role ?? '')
+  const role = useOrgRole()
+  const { showToast } = useToast()
   const updateAgent = useUpdateAgent()
   const deleteAgent = useDeleteAgent()
   const [showConfig, setShowConfig] = useState(false)
@@ -42,7 +40,12 @@ export function AgentActionsTab({ agent }: { agent: Agent }) {
     setActionError(null)
     updateAgent.mutate(
       { id: agent.id, body: { status: suspended ? 'active' : 'suspended' } },
-      { onError: (err) => setActionError(errorText(err, 'Failed to update agent status')) },
+      {
+        // A non-admin can't undo a suspend (reactivate is admin-only), so the
+        // row disappears -- confirm it rather than leave it silent (B-252 C0).
+        onSuccess: () => { if (!suspended && !can.reactivateAgent(role)) showToast('Agent suspended. Reactivating it requires an admin.', { type: 'success' }) },
+        onError: (err) => setActionError(errorText(err, 'Failed to update agent status')),
+      },
     )
   }
 
@@ -59,17 +62,12 @@ export function AgentActionsTab({ agent }: { agent: Agent }) {
     })
   }
 
-  if (!canWrite) {
-    return (
-      <div className="rounded-[10px] border border-[rgba(228,231,240,0.55)] bg-white px-[26px] py-[22px] text-sm text-gray-500 shadow-l1">
-        Your role has read-only access to this agent. Configuring, suspending, reactivating and deleting agents require the admin or operator role.
-      </div>
-    )
-  }
-
-  const rows: { title: string; description: string; action: React.ReactNode }[] = [
+  // B-253: suspend is containment (admin + operator); reactivate and delete
+  // expand or destroy (admin only).
+  const allRows: { title: string; show: boolean; description: string; action: React.ReactNode }[] = [
     {
       title: 'Configure',
+      show: can.configureAgent(role),
       description: 'Endpoint scanner settings (scan interval, model paths, enabled scanners) served to an endpoint linked to this agent.',
       action: (
         <Button variant="outline" size="sm" onClick={() => setShowConfig(true)}>
@@ -79,6 +77,7 @@ export function AgentActionsTab({ agent }: { agent: Agent }) {
     },
     {
       title: suspended ? 'Reactivate' : 'Suspend',
+      show: suspended ? can.reactivateAgent(role) : can.suspendAgent(role),
       description: suspended
         ? 'Restore this agent so it can obtain tokens and dispatch through the gateway again.'
         : 'Immediately stop this agent from obtaining tokens or dispatching through the gateway. Reversible.',
@@ -91,6 +90,7 @@ export function AgentActionsTab({ agent }: { agent: Agent }) {
     },
     {
       title: 'Delete',
+      show: can.deleteAgent(role),
       description: 'Permanently remove this agent identity. Refused if it has episode, approval or workflow-run history; suspend it instead.',
       action: (
         <Button variant="destructive" size="sm" disabled={updateAgent.isPending} onClick={() => { setActionError(null); setConfirmDelete(true) }}>
@@ -99,6 +99,15 @@ export function AgentActionsTab({ agent }: { agent: Agent }) {
       ),
     },
   ]
+  const rows = allRows.filter((row) => row.show)
+
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-[10px] border border-[rgba(228,231,240,0.55)] bg-white px-[26px] py-[22px] text-sm text-gray-500 shadow-l1">
+        Your role has read-only access to this agent. Configuring and suspending agents require the admin or operator role; reactivating and deleting require admin.
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">

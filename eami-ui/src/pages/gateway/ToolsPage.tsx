@@ -9,7 +9,9 @@ import {
   LoadingSpinner,
   SlideOverPanel,
   Button,
+  useToast,
 } from '@/components/common'
+import { can, useOrgRole } from '@/lib/rbac'
 import { AppTopBar } from '@/components/layout/AppTopBar'
 import { DataTable } from '@/components/common/DataTable'
 import type { Column } from '@/components/common/DataTable'
@@ -877,6 +879,66 @@ function EditToolPanel({ tool, onClose }: { tool: ToolWithActions; onClose: () =
   )
 }
 
+// Edit data handling note panel (B-252 C0) -- the operator's edit path.
+// B-253 lets a non-admin change only data_handling_note, which exists only
+// on ai_provider tools, so this panel shows that one field and PATCHes it
+// ALONE (never echoing the admin-only fields EditToolPanel resends). An
+// empty note is sent as "" -- the backend's "clear the note" value.
+
+function EditToolNotePanel({ tool, onClose }: { tool: ToolWithActions; onClose: () => void }) {
+  const update = useUpdateTool()
+  const { showToast } = useToast()
+  const [note, setNote] = useState(tool.data_handling_note ?? '')
+  const designation = DATA_HANDLING_OPTIONS.find(o => o.value === (tool.data_handling_designation ?? 'unknown'))?.label
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    try {
+      await update.mutateAsync({ id: tool.id, body: { data_handling_note: note } })
+      showToast('Data handling note updated', { type: 'success' })
+      onClose()
+    } catch (err) {
+      showToast((err as { message?: string } | null)?.message ?? 'Failed to update the note', { type: 'error' })
+    }
+  }
+
+  return (
+    <SlideOverPanel onClose={update.isPending ? () => {} : onClose}>
+      <div className="flex items-center justify-between px-6 py-4 border-b">
+        <h2 className="font-semibold text-gray-900">Edit data handling note</h2>
+        <button onClick={onClose} disabled={update.isPending} className="text-gray-400 hover:text-gray-600 text-xl leading-none">x</button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-6 py-4">
+        <form id="tool-note-form" onSubmit={handleSubmit} className="space-y-4">
+          <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-sm">
+            <dt className="text-gray-500">Tool</dt>
+            <dd className="font-medium text-gray-900">{tool.name}</dd>
+            <dt className="text-gray-500">Data handling</dt>
+            <dd className="text-gray-700">{designation ?? tool.data_handling_designation}</dd>
+          </dl>
+          <div>
+            <label htmlFor="tool-note" className="block text-sm font-medium text-gray-700 mb-1">Data handling note (optional)</label>
+            <textarea id="tool-note" value={note} onChange={e => setNote(e.target.value)} rows={3}
+              className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="e.g. Anthropic Enterprise Agreement dated 2026-03-01, ZDR Addendum" />
+          </div>
+          <p className="text-xs text-gray-400">
+            Your role can update this note only. Connection settings, data-handling designation, audit mode and redaction require an admin.
+          </p>
+        </form>
+      </div>
+
+      <div className="px-6 py-4 border-t flex gap-3">
+        <Button type="submit" form="tool-note-form" isLoading={update.isPending} className="flex-1">
+          Save note
+        </Button>
+        <Button variant="secondary" onClick={onClose} disabled={update.isPending}>Cancel</Button>
+      </div>
+    </SlideOverPanel>
+  )
+}
+
 // Helpers
 
 function formatLastUsed(iso?: string | null): string {
@@ -896,9 +958,16 @@ export function ToolsPage() {
   const { data, isLoading, error } = useTools()
   const deleteTool = useDeleteTool()
   const testTool   = useTestTool()
+  // B-252 C0: controls render only for roles the API accepts them from
+  // (lib/rbac.ts, mirroring B-253). Operators edit an ai_provider tool's
+  // data-handling note only, through EditToolNotePanel.
+  const role = useOrgRole()
+  const canEditTool = (tool: ToolWithActions) =>
+    can.editToolFully(role) || (can.editToolNote(role) && tool.type === 'ai_provider')
 
   const [showAdd, setShowAdd]           = useState(false)
   const [editTarget, setEditTarget]     = useState<ToolWithActions | null>(null)
+  const [noteTarget, setNoteTarget]     = useState<ToolWithActions | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<ToolWithActions | null>(null)
   const [testResult, setTestResult]     = useState<Record<string, { state: TestState; message?: string }>>({})
 
@@ -935,6 +1004,10 @@ export function ToolsPage() {
       ),
     },
     { key: 'last_used', header: 'Last used', render: (tool) => <span className="text-xs text-gray-400">{formatLastUsed(tool.last_used)}</span> },
+  ]
+  // Every row action needs at least test rights, so roles without them
+  // (viewer, approver) get no actions column at all.
+  if (can.testTool(role)) toolColumns.push(
     {
       key: 'actions',
       header: '',
@@ -945,7 +1018,7 @@ export function ToolsPage() {
         const Icon = cfg?.icon ?? Zap
         return (
           <div className="flex items-center justify-end gap-3">
-            <button
+            {can.testTool(role) && <button
               onClick={() => handleTest(tool.id)}
               disabled={tr?.state === 'testing'}
               title={tr?.message ?? 'Test connection'}
@@ -957,20 +1030,20 @@ export function ToolsPage() {
             >
               <Icon className="h-3 w-3" />
               {tr?.state === 'testing' ? 'Testing...' : cfg ? cfg.label : 'Test'}
-            </button>
-            <button onClick={() => setEditTarget(tool)}
-              className="text-gray-400 hover:text-indigo-600" title="Edit">
+            </button>}
+            {canEditTool(tool) && <button onClick={() => (can.editToolFully(role) ? setEditTarget : setNoteTarget)(tool)}
+              className="text-gray-400 hover:text-indigo-600" title={can.editToolFully(role) ? 'Edit' : 'Edit data handling note'}>
               <Pencil className="h-4 w-4" />
-            </button>
-            <button onClick={() => setDeleteTarget(tool)}
+            </button>}
+            {can.deleteTool(role) && <button onClick={() => setDeleteTarget(tool)}
               className="text-gray-400 hover:text-red-600" title="Remove">
               <Trash2 className="h-4 w-4" />
-            </button>
+            </button>}
           </div>
         )
       },
     },
-  ]
+  )
 
   async function handleTest(id: string) {
     setTestResult(prev => ({ ...prev, [id]: { state: 'testing' } }))
@@ -1001,13 +1074,13 @@ export function ToolsPage() {
     <div className="flex flex-col h-full">
       <AppTopBar
         breadcrumb={[{ label: 'Tools' }]}
-        action={
+        action={can.createTool(role) ? (
           <button onClick={() => setShowAdd(true)}
             className="flex items-center gap-1.5 bg-indigo-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-indigo-700">
             <Plus className="h-4 w-4" />
             Add tool
           </button>
-        }
+        ) : undefined}
       />
       <PageHeader subtitle="MCP servers and API connections the gateway can route calls to" />
 
@@ -1021,14 +1094,14 @@ export function ToolsPage() {
             <EmptyState
               title="No tools connected"
               description="Add an MCP server or REST API to allow gateway-controlled access."
-              action={
+              action={can.createTool(role) ? (
                 <button
                   onClick={() => setShowAdd(true)}
                   className="mt-4 px-4 py-2 rounded-md bg-indigo-600 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
                 >
                   Add tool
                 </button>
-              }
+              ) : undefined}
             />
           )}
         />
@@ -1040,6 +1113,10 @@ export function ToolsPage() {
 
       {editTarget && (
         <EditToolPanel tool={editTarget} onClose={() => setEditTarget(null)} />
+      )}
+
+      {noteTarget && (
+        <EditToolNotePanel tool={noteTarget} onClose={() => setNoteTarget(null)} />
       )}
 
       {deleteTarget && (

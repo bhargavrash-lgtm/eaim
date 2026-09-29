@@ -5,7 +5,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ConfirmDialog, DataTable, SlideOverPanel, Button, EmptyState } from '@/components/common'
+import { ConfirmDialog, DataTable, SlideOverPanel, Button, EmptyState, useToast } from '@/components/common'
 import { AppTopBar } from '@/components/layout/AppTopBar'
 import type { Column } from '@/components/common'
 import {
@@ -16,6 +16,7 @@ import {
 } from '@/hooks/useAgents'
 import type { Agent } from '@/hooks/useAgents'
 import { AgentConfigPanel } from '@/components/agents/AgentConfigPanel'
+import { can, useOrgRole } from '@/lib/rbac'
 
 // ── Add Agent panel (B-087) ─────────────────────────────────────────────────────
 
@@ -133,6 +134,10 @@ function AddAgentPanel({ onClose }: { onClose: () => void }) {
 export function AgentsPage() {
   const { data, isLoading, error } = useAgents()
   const navigate = useNavigate()
+  // B-252 C0: row and header actions render only for roles the API accepts
+  // them from (lib/rbac.ts, mirroring B-253).
+  const role = useOrgRole()
+  const { showToast } = useToast()
   // Deep-linking/highlighting by ID (B-092): ?highlight=<agent id> lands
   // on and highlights that row via DataTable's getRowId/highlightRowId.
   const [searchParams] = useSearchParams()
@@ -152,7 +157,12 @@ export function AgentsPage() {
     const nextStatus = (agent as any).status === 'suspended' ? 'active' : 'suspended'
     updateAgent.mutate(
       { id: agent.id, body: { status: nextStatus } },
-      { onError: (err) => setActionError((err as any)?.message ?? 'Failed to update agent status') },
+      {
+        // B-252 C0: a non-admin can't undo this (reactivate is admin-only),
+        // so the button vanishes -- say so rather than leave it silent.
+        onSuccess: () => { if (nextStatus === 'suspended' && !can.reactivateAgent(role)) showToast('Agent suspended. Reactivating it requires an admin.', { type: 'success' }) },
+        onError: (err) => setActionError((err as any)?.message ?? 'Failed to update agent status'),
+      },
     )
   }
 
@@ -200,35 +210,48 @@ export function AgentsPage() {
     { key: 'risk_tier', header: 'Risk', render: (agent) => <RiskBadge tier={(agent as any).risk_tier} /> },
     { key: 'status', header: 'Status', render: (agent) => <StatusBadge status={(agent as any).status} /> },
     { key: 'owner', header: 'Owner', render: (agent) => <span className="text-gray-500">{(agent as any).owner}</span> },
-    {
+  ]
+  // Every row action needs at least configure/suspend rights, so roles
+  // without them (viewer, approver) get no Actions column at all.
+  if (can.configureAgent(role) || can.suspendAgent(role)) {
+    agentColumns.push({
       key: 'actions',
       header: 'Actions',
       className: 'text-right',
-      render: (agent) => (
-        <div className="flex items-center justify-end gap-3">
-          <button
-            onClick={(e) => { e.stopPropagation(); setConfigAgent(agent) }}
-            className="text-indigo-600 hover:text-indigo-800 text-xs font-medium"
-          >
-            Configure
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); handleToggleSuspend(agent) }}
-            disabled={updateAgent.isPending}
-            className="text-amber-600 hover:text-amber-800 text-xs font-medium disabled:opacity-50"
-          >
-            {(agent as any).status === 'suspended' ? 'Reactivate' : 'Suspend'}
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); setActionError(null); setDeleteTarget(agent) }}
-            className="text-red-600 hover:text-red-800 text-xs font-medium"
-          >
-            Delete
-          </button>
-        </div>
-      ),
-    },
-  ]
+      render: (agent) => {
+        const suspended = (agent as any).status === 'suspended'
+        return (
+          <div className="flex items-center justify-end gap-3">
+            {can.configureAgent(role) && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setConfigAgent(agent) }}
+                className="text-indigo-600 hover:text-indigo-800 text-xs font-medium"
+              >
+                Configure
+              </button>
+            )}
+            {(suspended ? can.reactivateAgent(role) : can.suspendAgent(role)) && (
+              <button
+                onClick={(e) => { e.stopPropagation(); handleToggleSuspend(agent) }}
+                disabled={updateAgent.isPending}
+                className="text-amber-600 hover:text-amber-800 text-xs font-medium disabled:opacity-50"
+              >
+                {suspended ? 'Reactivate' : 'Suspend'}
+              </button>
+            )}
+            {can.deleteAgent(role) && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setActionError(null); setDeleteTarget(agent) }}
+                className="text-red-600 hover:text-red-800 text-xs font-medium"
+              >
+                Delete
+              </button>
+            )}
+          </div>
+        )
+      },
+    })
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -243,14 +266,14 @@ export function AgentsPage() {
           real action button already migrated in Batches 1-2. */}
       <AppTopBar
         breadcrumb={[{ label: 'Gateway Agents' }]}
-        action={
+        action={can.createAgent(role) ? (
           <button
             onClick={() => setShowAdd(true)}
             className="flex items-center gap-1.5 bg-brand-600 text-white rounded px-3 py-1.5 text-sm font-medium hover:bg-brand-700"
           >
             + Add agent
           </button>
-        }
+        ) : undefined}
       />
       <div className="flex-1 overflow-auto p-6">
       {actionError && (
@@ -264,14 +287,14 @@ export function AgentsPage() {
         <EmptyState
           title="No agents registered yet"
           description="Register a governed agent identity to start issuing scoped, policy-enforced tokens."
-          action={
+          action={can.createAgent(role) ? (
             <button
               onClick={() => setShowAdd(true)}
               className="mt-4 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
             >
               + Add agent
             </button>
-          }
+          ) : undefined}
         />
       ) : (
         <DataTable

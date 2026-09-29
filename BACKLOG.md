@@ -2950,7 +2950,9 @@ Choices, for the founder:
 **Plan (the source of truth):** `IA_CONSOLIDATION_MIGRATION_PLAN.md`. It holds the Part A touchpoint audit, the Part B target state, the Part C ordered steps (each with its dependency, mid-migration UX and B-ID treatment), the Part D questions, and the **Founder decisions** section.
 **Roadmap:** Horizon 1 "CMDB completion" plus Horizon 0 maturity. Minted at founder direction 2026-09-28. B-252 was confirmed free against BACKLOG.md directly: the counter read B-252, and B-252 to B-257 were unused. A grep found no open item overlapping this scope (see the per-item notes where an adjacent item exists).
 **Sequence:** **B-253 (RBAC split) first**, then:
-- [ ] **C0** Foundations: extract `EndpointDrawer`/`LinkedAgentControl`; delete the orphaned `AgentAssetPanel`/`ToolAssetPanel`; UI role-gating parity (after B-253).
+- [~] **C0** Foundations:
+  - **Done 2026-09-29** (`B-252_C0_VERIFICATION.md`): (a) `EndpointDrawer`/`LinkedAgentControl` extracted to `components/endpoints/`; (c) UI role-gating parity via `lib/rbac.ts`, including approver Overview-only on Agent Detail and the operator note-only tool panel.
+  - **Still open:** (b) delete the orphaned `AgentAssetPanel`/`ToolAssetPanel`. It was not in the C0 brief, and nothing imports either file.
 - [ ] **C1** Assets agent rows open Agent Detail at its new `/assets/agents/:id` home (redirect from `/gateway/agents/:id`), with an Agent Classification tab. **Agent cross-links from C10 ship here.**
 - [ ] **C2** Endpoint Detail at `/assets/endpoints/:id`: Overview, Agent Link (scanner settings read-only, "shared by N endpoints"), Classification. Discover rows open it.
 - [ ] **C3** Assets parity for endpoints (OS, last seen, per-domain counts, server filters). **Folds B-228/B-229. Needs Architect contract authorization before its brief; measure query cost in its Part A.**

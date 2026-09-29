@@ -6,13 +6,14 @@
 // this as a route rather than a panel) showing one agent's real Policy/
 // Tool/Workflow/Endpoint connections (Focused Mode only, never an
 // org-wide graph).
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { ShieldCheck } from 'lucide-react'
 import { SlideOverPanel, LoadingSpinner, EmptyState, StatusPill } from '@/components/common'
 import { AppTopBar } from '@/components/layout/AppTopBar'
-import { EndpointDrawer } from '@/pages/discover/DiscoverPage'
+import { EndpointDrawer } from '@/components/endpoints/EndpointDrawer'
 import { useAgent, useAgentConnections } from '@/hooks/useAgents'
+import { can, useOrgRole } from '@/lib/rbac'
 import { usePolicy } from '@/hooks/usePolicies'
 import { useWorkflow } from '@/hooks/useWorkflows'
 import { useTools } from '@/hooks/useTools'
@@ -133,32 +134,46 @@ function Field({ label, value }: { label: string; value: string }) {
 // Actions is the first real tab. The disabled "More actions -- not built
 // yet" top-bar button was removed: this tab is the real home for those
 // actions. The active tab lives in ?tab= (SettingsPage's pattern), so a tab
-// is deep-linkable and survives reload.
+// is deep-linkable and survives reload. Each tab renders only for roles
+// whose API reads it needs (B-252 C0): approvers get Overview only.
 const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'connections', label: 'Connections' },
   { id: 'actions', label: 'Actions' },
 ] as const
 type TabId = (typeof TABS)[number]['id']
+const TAB_VISIBLE: Record<TabId, (role: string | undefined) => boolean> = {
+  overview: () => true,
+  connections: can.viewAgentConnections,
+  actions: can.viewAgentActionsTab,
+}
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function AgentDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data: agent, isLoading: agentLoading, error: agentError } = useAgent(id ?? null)
-  const { data: connections, isLoading: connectionsLoading, error: connectionsError } = useAgentConnections(id ?? null)
+  const role = useOrgRole()
+  const tabs = TABS.filter((t) => TAB_VISIBLE[t.id](role))
+  // A null id disables the query: roles without the connections read
+  // (approver) never request it.
+  const { data: connections, isLoading: connectionsLoading, error: connectionsError } = useAgentConnections(can.viewAgentConnections(role) ? id ?? null : null)
   const [selected, setSelected] = useState<SelectedGraphNode | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
   const tabParam = searchParams.get('tab')
-  const activeTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'overview'
+  const activeTab: TabId = tabs.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'overview'
+  const hiddenTabParam = tabParam != null && TABS.some((t) => t.id === tabParam) && !tabs.some((t) => t.id === tabParam)
+  useEffect(() => {
+    if (hiddenTabParam) setSearchParams({ tab: 'overview' }, { replace: true })
+  }, [hiddenTabParam, setSearchParams])
   function setTab(id: TabId) {
     setSearchParams({ tab: id }, { replace: true })
   }
   // Left/Right arrow keys move between tabs (WAI-ARIA tabs pattern).
   function onTabKeyDown(e: React.KeyboardEvent) {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
-    const i = TABS.findIndex((t) => t.id === activeTab)
-    const next = TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length]
+    const i = tabs.findIndex((t) => t.id === activeTab)
+    const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]
     setTab(next.id)
     document.getElementById(`agent-tab-${next.id}`)?.focus()
   }
@@ -199,7 +214,7 @@ export function AgentDetailPage() {
 
         <div className="mb-6 border-b border-gray-200">
           <nav className="-mb-px flex gap-6" role="tablist" aria-label="Agent sections" onKeyDown={onTabKeyDown}>
-            {TABS.map((tab) => (
+            {tabs.map((tab) => (
               <button
                 key={tab.id}
                 type="button"
@@ -282,9 +297,11 @@ export function AgentDetailPage() {
 
         {/* Kept mounted (hidden) so an in-flight suspend/reactivate's result
             or error isn't lost if the user switches tabs mid-request. */}
-        <div role="tabpanel" id="agent-panel-actions" aria-labelledby="agent-tab-actions" hidden={activeTab !== 'actions'}>
-          <AgentActionsTab agent={agent} />
-        </div>
+        {TAB_VISIBLE.actions(role) && (
+          <div role="tabpanel" id="agent-panel-actions" aria-labelledby="agent-tab-actions" hidden={activeTab !== 'actions'}>
+            <AgentActionsTab agent={agent} />
+          </div>
+        )}
       </div>
 
       {selected?.kind === 'policy' && (

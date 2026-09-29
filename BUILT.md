@@ -1,5 +1,46 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-252 C0 — Endpoint components extracted; UI role gating matches B-253 — 2026-09-29 (Claude Code)
+
+The evidence record is `B-252_C0_VERIFICATION.md`: Part A, the role map, live results, mutations, and both reviews verbatim.
+
+**Files:**
+- **New `eami-ui/src/components/endpoints/`:**
+  - `EndpointDrawer.tsx` (with `Section`), `LinkedAgentControl.tsx` and `format.ts` (`formatBytes`, `formatRelativeTime`).
+  - They were moved verbatim from `pages/discover/DiscoverPage.tsx`. `DiscoverPage` and `AgentDetailPage` import from here.
+- **New `eami-ui/src/lib/rbac.ts`:**
+  - `can.*` predicates, one per server route or field rule, each commented with its route, plus `useOrgRole()`.
+  - This is the UI's single mirror of B-253. **Keep it in step with `router.go`** when a route's roles change (B-262 will need Policies-page entries).
+- **Gated:**
+  - **`AgentsPage.tsx`:** Add agent is admin-only; Configure and Suspend are admin + operator; Reactivate and Delete are admin-only; viewers and approvers get no Actions column.
+  - **`ToolsPage.tsx`:** Add and Remove are admin-only; Test is admin + operator. Edit opens the full panel for admins, and for operators the new `EditToolNotePanel` on ai_provider tools only, which PATCHes `{data_handling_note}` alone. Viewers and approvers get no controls.
+  - **`LinkedAgentControl.tsx`:** the select is admin-only; other roles see read-only text.
+  - **`AgentActionsTab.tsx`:** gated per action.
+  - **`AgentDetailPage.tsx`:**
+    - approvers see the Overview tab only;
+    - a hidden `?tab=` is rewritten to `overview`;
+    - the connections query is disabled for approvers (null id);
+    - the Actions panel is not mounted for approvers.
+- **Non-admin suspend** shows the toast "Agent suspended. Reactivating it requires an admin." Admins see no change.
+- **Test:** `eami-api/internal/api/rbac_split_pg_test.go` gained a note-only operator PATCH block:
+  - only the note column changes;
+  - `""` clears it;
+  - a note on a rest_api tool returns 400 and nothing is written.
+
+**Verified 2026-09-29:**
+- `tsc --noEmit`, `vite build` and `go vet` pass.
+- `go test ./internal/api/` passes with real Postgres (full package).
+- Live Playwright with real logins for all four roles: **77/77**. Fixtures were in the Dev Org, the only discovery-licensed org, and cleanup was proven by snapshot diff.
+- Mutations: 2 server and 2 UI, all caught.
+- Code review and security review found no Critical, High or Medium issues. CR-1, CR-2, CR-4 and CR-6 were fixed.
+
+**Limitations:**
+- UI hiding is UX only; the server remains the enforcement point.
+- The role comes from the login response, persisted in localStorage, so a server-side role change shows on the next login.
+- Approvers reaching `/discover` get the page's existing load error, because the endpoint reads exclude approvers. Sidebar gating is C11.
+- The plan's C0(b), deleting the orphaned `components/cmdb/AgentAssetPanel.tsx` and `ToolAssetPanel.tsx` (no importers), was **not in this brief** and is still open.
+- `data_handling_note` has no server-side length cap (security review SR-1, predates C0). A B-ID was proposed to the founder, not minted.
+
 ## B-253 — RBAC split: operators contain, admins expand or destroy — 2026-09-29 (Claude Code)
 
 Server only (UI gating is B-252 C0(c)). The evidence record, with the field classification table and both reviews verbatim, is `B-253_VERIFICATION.md`.

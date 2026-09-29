@@ -285,6 +285,27 @@ func TestRBACSplit_ToolFields_RealDB(t *testing.T) {
 	if after := snap(ai); !strings.Contains(after, "|per contract X|") || strings.Split(after, "|")[0] != "b253-ai" {
 		t.Fatalf("descriptive edit: %s -> %s", before, after)
 	}
+	// C0: the UI's trimmed operator panel sends the note ALONE. Only the
+	// note changes; every other column is untouched; "" clears it.
+	withNote := func(s, note string) string {
+		f := strings.Split(s, "|")
+		f[6] = note
+		return strings.Join(f, "|")
+	}
+	before = snap(ai)
+	patch(ai, e.op, map[string]any{"data_handling_note": "note-only edit"}, http.StatusOK, "operator note-only edit")
+	if after := snap(ai); after != withNote(before, "note-only edit") {
+		t.Fatalf("note-only edit changed more than the note: %s -> %s", before, after)
+	}
+	patch(ai, e.op, map[string]any{"data_handling_note": ""}, http.StatusOK, "operator note-only clear")
+	if after := snap(ai); after != withNote(before, "") {
+		t.Fatalf("note-only clear: %s -> %s", before, after)
+	}
+	restBefore := snap(rest)
+	patch(rest, e.op, map[string]any{"data_handling_note": "x"}, http.StatusBadRequest, "operator note on non-ai_provider tool")
+	if got := snap(rest); got != restBefore {
+		t.Fatalf("refused note on REST tool wrote: %s -> %s", restBefore, got)
+	}
 	patch(rest, e.op, map[string]any{"name": "b253-rest", "base_url": "https://api.example.com", "action_paths": map[string]any{"read": map[string]any{"path": "/r", "method": "GET"}}}, http.StatusOK, "operator echo REST unchanged")
 	// A credentials value that isn't a write (empty object) is not a rotation.
 	patch(rest, e.op, map[string]any{"credentials": map[string]any{}}, http.StatusOK, "operator empty credentials (no write)")

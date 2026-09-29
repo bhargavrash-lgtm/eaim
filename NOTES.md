@@ -92,3 +92,11 @@ Found by the B-236 reviews. They predate B-236 and sit outside its diff. At foun
   - The spec should document the required role(s) and the 403 response per route.
 - **`eami-ui/src/pages/gateway/ToolsPage.tsx` edit panel drops `input_schema` from action paths on save** (rows are built as `{action, path, method}`). An admin's save silently strips OpenAPI-discovered input schemas. It is pre-existing data loss. It also makes an operator's no-op REST save look "changed" (403), which C0(c) will hide.
 - **`UpdateAgent` doesn't validate `status`:** only the DB CHECK does, so a bad value gives a 500 echoing the constraint text (B-234 class). It also role-checks before validation, while `UpdateTool` validates first. Minor inconsistency.
+
+## 2026-09-29 — B-252 C0 review follow-ups (not fixed; out of scope)
+
+- **`eami-ui/src/stores/authStore.ts:9`: `User.role` is typed `'admin' | 'operator' | 'viewer'`.** Real values also include `approver` (and `platform_admin`).
+  - It's harmless today, because `lib/rbac.ts` types the role as `string`.
+  - Widen the union so future code can't narrow on a wrong one (code review CR-3, security review SR-3).
+- **`ToolsPage.tsx` `EditToolPanel`: clicking the backdrop closes the panel mid-save**, even though Cancel is disabled. It's the same behaviour C0 fixed in its own `EditToolNotePanel` (CR-1).
+- **The operator note panel is last-write-wins:** a stale panel can overwrite an admin's newer note. Only the note is affected. Add optimistic concurrency if it ever matters (SR-2).

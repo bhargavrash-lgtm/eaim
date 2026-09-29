@@ -4,7 +4,19 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-29, newest) — B-262 final: no operator exception; B-263 confirmed; both queued; C0 next
+## Active decision thread (2026-09-29, newest) — B-252 C0 done ((a) extraction + (c) role gating); C0(b) still open
+
+- **C0 (a) and (c) built and pushed.** The record is `B-252_C0_VERIFICATION.md`.
+  - `components/endpoints/` now holds `EndpointDrawer`, `LinkedAgentControl` and `format.ts`.
+  - `lib/rbac.ts` is the UI's single mirror of B-253. Update it with any route-role change; B-262 will need Policies entries.
+  - Approvers see Agent Detail Overview only.
+  - Operators edit ai_provider tools' data-handling note through a trimmed panel.
+  - Founder choice (b): the panel sends `{data_handling_note}` alone. The server's handling was confirmed and pinned by a real-Postgres test.
+- **C0(b)** (delete the orphaned `AgentAssetPanel`/`ToolAssetPanel`) was **not in the brief** and is still open. The founder can fold it into C1 or brief it separately.
+- **Proposed, not minted:** a server-side length cap on `data_handling_note` (security review SR-1, Low, predates C0). It is awaiting founder confirmation for a B-ID. The next free ID is B-264.
+- **Queued:** B-258, B-262 and B-263.
+
+## Active decision thread (2026-09-29) — B-262 final: no operator exception; B-263 confirmed; both queued; C0 next
 
 - **B-262: org policy writes (create, update, delete, reorder) become admin-only** under the same rule.
   - Analysis recorded: under first-match with a default of ALLOW, only **creating a deny** and **enabling a deny** are monotone-tightening, so they are the only candidates for an operator exception.
@@ -2486,6 +2498,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-29 by Claude Code — B-252 C0 (a)+(c) built, reviewed, live-verified with all four roles (77/77) and pushed. C0(b) still open. Marker cleared.
+
+Prior entry:
 2026-09-29 by Claude Code — minted B-262 (policy writes admin-only, with an operator-exception analysis) and B-263 (trimmed approver tool view). Queued, not built. Docs only.
 
 Prior entry:
