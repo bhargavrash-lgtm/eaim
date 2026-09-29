@@ -30,6 +30,22 @@ export function useCMDBClassifications() {
   })
 }
 
+// useCMDBAsset (B-252 C1): one asset's CMDB row by id, for Agent Detail's
+// Classification tab. The ?id= filter isn't in api/openapi.yaml yet
+// (Architect-EAMI-owned; drift logged), so this uses the documented apiFetch
+// escape hatch. The key starts with 'cmdb-assets' so a classification save
+// (which invalidates ['cmdb-assets']) refreshes it too. null data = no row.
+export function useCMDBAsset(kind: CMDBAssetKind, id: string | null) {
+  return useQuery({
+    queryKey: ['cmdb-assets', 'one', kind, id],
+    enabled: id != null,
+    queryFn: async () => {
+      const res = await apiFetch<{ data: CMDBAsset[] }>(`/v1/cmdb/assets?kind=${kind}&id=${encodeURIComponent(id ?? '')}&per_page=1`)
+      return res.data[0] ?? null
+    },
+  })
+}
+
 export function useCMDBAssets(params: CMDBAssetParams) {
   return useQuery({
     queryKey: ['cmdb-assets', params],

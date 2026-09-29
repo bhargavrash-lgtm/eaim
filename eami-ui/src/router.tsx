@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate } from 'react-router-dom'
+import { createBrowserRouter, Navigate, useLocation, useParams } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
 import { WorkspaceShell } from '@/components/layout/WorkspaceShell'
 import { WorkspaceOverviewPage } from '@/pages/workspace/WorkspaceOverviewPage'
@@ -27,6 +27,15 @@ import { AuditPage } from '@/pages/ops/AuditPage'
 import AlertsPage from '@/pages/ops/AlertsPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
 
+// B-252 C1: Agent Detail moved to /assets/agents/:id. The old path is kept
+// only as a redirect for bookmarks and external links (every in-app link
+// points at the new path), carrying ?tab= and any #hash across.
+function AgentDetailRedirect() {
+  const { id } = useParams<{ id: string }>()
+  const { search, hash } = useLocation()
+  return <Navigate to={`/assets/agents/${encodeURIComponent(id ?? '')}${search}${hash}`} replace />
+}
+
 export const router = createBrowserRouter([
   {
     path: '/',
@@ -38,8 +47,9 @@ export const router = createBrowserRouter([
       { path: '/dashboard', element: <DashboardPage /> },
       { path: '/discover', element: <DiscoverPage /> },
       { path: '/assets', element: <AssetsPage /> },
+      { path: '/assets/agents/:id', element: <AgentDetailPage /> },
       { path: '/gateway/agents', element: <AgentsPage /> },
-      { path: '/gateway/agents/:id', element: <AgentDetailPage /> },
+      { path: '/gateway/agents/:id', element: <AgentDetailRedirect /> },
       { path: '/gateway/policies', element: <PoliciesPage /> },
       { path: '/gateway/tools', element: <ToolsPage /> },
       { path: '/gateway/workflows', element: <WorkflowsPage /> },

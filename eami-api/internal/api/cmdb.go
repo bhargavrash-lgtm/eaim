@@ -86,6 +86,9 @@ func (s *Server) cmdbFilter(r *http.Request, includeEndpoints bool) (store.CMDBA
 	if f.WorkspaceID, err = parseOptionalUUID(q.Get("workspace_id")); err != nil {
 		return f, errors.New("invalid workspace_id")
 	}
+	if f.ID, err = parseOptionalUUID(q.Get("id")); err != nil {
+		return f, errors.New("invalid id")
+	}
 	return f, nil
 }
 
@@ -157,7 +160,7 @@ func (s *Server) ListCMDBAssets(w http.ResponseWriter, r *http.Request) {
 	// every unselected classification reads 0. Workspace, search, and license
 	// filters still apply.
 	nav := f
-	nav.CategoryID, nav.TypeID, nav.Kind = nil, nil, ""
+	nav.CategoryID, nav.TypeID, nav.Kind, nav.ID = nil, nil, "", nil
 	counts, err := s.queries.CountCMDBAssetsByType(r.Context(), nav)
 	if err != nil {
 		writeError(w, 500, "internal_error", "failed to count CMDB assets")

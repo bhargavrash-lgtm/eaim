@@ -6,6 +6,7 @@ import { Search, ChevronDown, ChevronRight, CheckCircle, XCircle, AlertTriangle,
 import { PageHeader, LoadingSpinner, EmptyState } from '@/components/common'
 import { AppTopBar } from '@/components/layout/AppTopBar'
 import { apiFetch } from '@/api/client'
+import { AgentLink } from '@/components/agents/AgentLink'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -75,27 +76,33 @@ function EpisodeRow({ ep }: { ep: Episode }) {
 
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">
-      <button
-        className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors"
-        onClick={() => setExpanded(v => !v)}
-      >
-        {expanded
-          ? <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
-          : <ChevronRight className="h-4 w-4 text-gray-400 flex-shrink-0" />
-        }
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-mono text-sm font-medium text-gray-900 truncate">{ep.task}</span>
-            <OutcomeBadge outcome={ep.outcome} />
+      {/* B-252 C1: the metadata line sits outside the expand button so the
+          agent name can be a real link (a link inside a <button> is invalid
+          HTML); both stay in one hover row. */}
+      <div className="hover:bg-gray-50 transition-colors">
+        <button
+          className="w-full text-left px-4 pt-3 pb-0.5 flex items-center gap-3"
+          onClick={() => setExpanded(v => !v)}
+          aria-expanded={expanded}
+        >
+          {expanded
+            ? <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
+            : <ChevronRight className="h-4 w-4 text-gray-400 flex-shrink-0" />
+          }
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-mono text-sm font-medium text-gray-900 truncate">{ep.task}</span>
+              <OutcomeBadge outcome={ep.outcome} />
+            </div>
           </div>
-          <div className="text-xs text-gray-500 mt-0.5">
-            {ep.agent_name} · {ep.steps.length} step{ep.steps.length !== 1 ? 's' : ''} · {ts}
-          </div>
+          {ep.token_total > 0 && (
+            <span className="text-xs text-gray-400 flex-shrink-0">{ep.token_total} tok</span>
+          )}
+        </button>
+        <div className="pl-11 pr-4 pb-3 text-xs text-gray-500 cursor-pointer" onClick={() => setExpanded(v => !v)}>
+          <AgentLink agentId={ep.agent_id} name={ep.agent_name} /> · {ep.steps.length} step{ep.steps.length !== 1 ? 's' : ''} · {ts}
         </div>
-        {ep.token_total > 0 && (
-          <span className="text-xs text-gray-400 flex-shrink-0">{ep.token_total} tok</span>
-        )}
-      </button>
+      </div>
 
       {expanded && (
         <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-3">

@@ -20,6 +20,7 @@ import { useTools } from '@/hooks/useTools'
 import { RelationshipGraph, type SelectedGraphNode } from './RelationshipGraph'
 import { AgentActionsTab } from '@/components/agents/AgentActionsTab'
 import { AgentLineageTab } from '@/components/agents/AgentLineageTab'
+import { AgentClassificationTab } from '@/components/agents/AgentClassificationTab'
 
 // ── Read-only detail panels ──────────────────────────────────────────────────
 // Each wraps the existing SlideOverPanel shell (B-178) -- per this brief's
@@ -141,6 +142,7 @@ const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'connections', label: 'Connections' },
   { id: 'lineage', label: 'Lineage' },
+  { id: 'classification', label: 'Classification' },
   { id: 'actions', label: 'Actions' },
 ] as const
 type TabId = (typeof TABS)[number]['id']
@@ -148,6 +150,7 @@ const TAB_VISIBLE: Record<TabId, (role: string | undefined) => boolean> = {
   overview: () => true,
   connections: can.viewAgentConnections,
   lineage: can.viewAgentLineage,
+  classification: can.viewCMDB,
   actions: can.viewAgentActionsTab,
 }
 
@@ -191,7 +194,10 @@ export function AgentDetailPage() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <AppTopBar
-        breadcrumb={[{ label: 'Agents', href: '/gateway/agents' }, { label: agent.name }]}
+        // B-252 C1: Agent Detail's canonical home is /assets/agents/:id, so
+        // the breadcrumb is Assets -- except for roles that can't read the
+        // CMDB (approvers), who keep "Agents" until C9 retires that list.
+        breadcrumb={[can.viewCMDB(role) ? { label: 'Assets', href: '/assets' } : { label: 'Agents', href: '/gateway/agents' }, { label: agent.name }]}
       />
       <div className="flex-1 overflow-y-auto px-10 py-8">
         <div className="mb-6 flex items-center justify-between">
@@ -303,6 +309,15 @@ export function AgentDetailPage() {
         {activeTab === 'lineage' && (
           <div role="tabpanel" id="agent-panel-lineage" aria-labelledby="agent-tab-lineage">
             <AgentLineageTab agentId={agent.id} />
+          </div>
+        )}
+
+        {/* Classification (B-252 C1): mounted only while open. Leaving mid-save
+            only loses the spinner: the mutation's cache invalidation and the
+            toast still run (unlike Actions, whose inline error must survive). */}
+        {activeTab === 'classification' && (
+          <div role="tabpanel" id="agent-panel-classification" aria-labelledby="agent-tab-classification">
+            <AgentClassificationTab agentId={agent.id} />
           </div>
         )}
 

@@ -305,7 +305,7 @@ export function AgentsPage() {
           // regression. The "Configure" button in the Actions column
           // (below, e.stopPropagation()'d) is untouched and still opens
           // the scan-config ConfigPanel exactly as before.
-          onRowClick={(agent) => navigate(`/gateway/agents/${agent.id}`)}
+          onRowClick={(agent) => navigate(`/assets/agents/${agent.id}`)}
           pageSize={1000}
           getRowId={(agent) => agent.id}
           highlightRowId={highlightId}

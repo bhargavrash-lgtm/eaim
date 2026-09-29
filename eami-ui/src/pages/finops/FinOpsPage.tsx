@@ -18,6 +18,7 @@ import { useFinOpsSummary, useFinOpsTimeSeries } from '@/hooks/useFinOps'
 import { CHART_PALETTE } from '@/lib/chartPalette'
 import type { components } from '@/api/schema'
 import { buildCSV, downloadCSV } from '@/lib/csv'
+import { AgentLink } from '@/components/agents/AgentLink'
 
 type AgentSpend = components['schemas']['AgentSpend']
 type TeamSpend = components['schemas']['TeamSpend']
@@ -265,7 +266,8 @@ export function FinOpsPage() {
   }
 
   const agentSpendColumns: Column<AgentSpend>[] = [
-    { key: 'agent_name', header: 'Agent', render: (a) => <span className="font-medium text-gray-900">{a.agent_name}</span> },
+    // B-252 C1: links to Agent Detail when the agent still exists (agent_id is "" for usage with no agent).
+    { key: 'agent_name', header: 'Agent', render: (a) => <AgentLink agentId={a.agent_id} name={a.agent_name ?? ""} className="font-medium text-gray-900" /> },
     { key: 'tokens_in', header: 'Input tokens', render: (a) => <span className="text-gray-600">{formatTokens(a.tokens_in)}</span> },
     { key: 'tokens_out', header: 'Output tokens', render: (a) => <span className="text-gray-600">{formatTokens(a.tokens_out)}</span> },
     { key: 'request_count', header: 'Requests', render: (a) => <span className="text-gray-600">{a.request_count ?? '—'}</span> },

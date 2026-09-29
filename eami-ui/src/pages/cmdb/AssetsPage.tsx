@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { ChevronRight, FolderTree, Search, Settings2, X } from 'lucide-react'
 import { AppTopBar } from '@/components/layout/AppTopBar'
 import { AssetWorkspaceBadge } from '@/components/cmdb/AssetWorkspaceBadge'
+import { AssetClassificationForm, KIND_LABEL, cmdbErrorMessage as errorMessage } from '@/components/cmdb/AssetClassificationForm'
 import { Button, DataTable, EmptyState, SlideOverPanel, useToast } from '@/components/common'
 import type { Column } from '@/components/common/DataTable'
 import { PageHeader } from '@/components/common/PageHeader'
@@ -10,16 +12,15 @@ import { StatusPill } from '@/components/common/StatusPill'
 import {
   type CMDBAsset, type CMDBAssetKind, type CMDBCategory, type CMDBType,
   useCMDBAssets, useCMDBClassifications, useCreateCMDBCategory, useCreateCMDBType,
-  useDeleteCMDBCategory, useDeleteCMDBType, useSetCMDBAssetClassification,
+  useDeleteCMDBCategory, useDeleteCMDBType,
   useUpdateCMDBCategory, useUpdateCMDBType, useCMDBWorkspaces,
 } from '@/hooks/useCMDB'
 import { useAuthStore } from '@/stores/authStore'
 
-const KIND_LABEL: Record<CMDBAssetKind, string> = { endpoint: 'Endpoint', agent: 'Agent', tool: 'Tool' }
-function errorMessage(error: unknown) { return error && typeof error === 'object' && 'message' in error && typeof error.message === 'string' ? error.message : 'The request could not be completed.' }
 
 export function AssetsPage() {
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
+  const navigate = useNavigate()
   const [page, setPage] = useState(1); const [search, setSearch] = useState('')
   const [kind, setKind] = useState<CMDBAssetKind>(); const [categoryId, setCategoryId] = useState<string>(); const [typeId, setTypeId] = useState<string>(); const [workspaceId, setWorkspaceId] = useState<string>()
   const [manageOpen, setManageOpen] = useState(false); const [selected, setSelected] = useState<CMDBAsset | null>(null)
@@ -48,6 +49,13 @@ export function AssetsPage() {
     { key: 'risk_tier', header: 'Risk', render: (r) => r.risk_tier ? <RiskPill tier={r.risk_tier as 'low' | 'medium' | 'high' | 'critical'} /> : <span className="text-gray-400">—</span> },
     { key: 'workspace_label', header: 'Workspace', render: (r) => <AssetWorkspaceBadge scoped={r.workspace_label !== 'not_workspace_scoped'} workspaceName={r.workspace_name} /> },
   ]
+  // B-252 C1: an agent row opens its real Agent Detail page. Endpoint and
+  // tool rows keep the classification panel until Endpoint Detail (C2) and
+  // Tool Detail (C5) exist; the panel says so.
+  function openAsset(r: CMDBAsset) {
+    if (r.asset_kind === 'agent') navigate(`/assets/agents/${r.id}`)
+    else setSelected(r)
+  }
   function clearFilters() { setKind(undefined); setCategoryId(undefined); setTypeId(undefined); setWorkspaceId(undefined); setSearch('') }
 
   return <div className="flex h-full flex-col">
@@ -65,7 +73,7 @@ export function AssetsPage() {
       <main className="min-w-0 flex-1 overflow-y-auto p-6">
         {!classifications.data?.endpoint_inventory_available && <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">Endpoint inventory requires a Discovery license. Governed agents and tools remain visible.</div>}
         <div className="mb-4 flex flex-wrap items-center gap-3"><div className="relative min-w-64 flex-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search this classification" className="w-full rounded-md border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm outline-none focus:border-brand-500" />{search && <button onClick={() => setSearch('')} className="absolute right-3 top-2.5 text-gray-400"><X className="h-4 w-4" /></button>}</div><select value={kind ?? ''} onChange={(e) => { const next = e.target.value as CMDBAssetKind | ''; setKind(next || undefined); setCategoryId(undefined); setTypeId(undefined) }} className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"><option value="">All kinds</option><option value="endpoint">Endpoints</option><option value="agent">Agents</option><option value="tool">Tools</option></select><select value={workspaceId ?? ''} onChange={(e) => setWorkspaceId(e.target.value || undefined)} className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"><option value="">All workspaces</option>{(workspaces.data?.data ?? []).map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select><span className="text-sm text-gray-500">{total} assets</span></div>
-        {assets.isError ? <div className="rounded-lg border border-red-200 bg-white p-8 text-center"><p className="mb-3 text-sm text-red-700">{errorMessage(assets.error)}</p><Button variant="outline" isLoading={assets.isFetching} onClick={() => assets.refetch()}>Retry</Button></div> : <DataTable columns={columns} data={rows} loading={assets.isLoading} pageSize={25} getRowId={(r) => `${r.asset_kind}-${r.id}`} onRowClick={setSelected} renderEmpty={() => <EmptyState title={filtered ? 'No assets match these filters' : 'No CMDB assets yet'} description={filtered ? 'Clear or change the current classification and search filters.' : 'Discovered endpoints and configured agents or tools will appear here.'} />} />}
+        {assets.isError ? <div className="rounded-lg border border-red-200 bg-white p-8 text-center"><p className="mb-3 text-sm text-red-700">{errorMessage(assets.error)}</p><Button variant="outline" isLoading={assets.isFetching} onClick={() => assets.refetch()}>Retry</Button></div> : <DataTable columns={columns} data={rows} loading={assets.isLoading} pageSize={25} getRowId={(r) => `${r.asset_kind}-${r.id}`} onRowClick={openAsset} renderEmpty={() => <EmptyState title={filtered ? 'No assets match these filters' : 'No CMDB assets yet'} description={filtered ? 'Clear or change the current classification and search filters.' : 'Discovered endpoints and configured agents or tools will appear here.'} />} />}
         {!assets.isError && totalPages > 1 && <div className="mt-4 flex items-center justify-between text-sm text-gray-500"><span>Page {page} of {totalPages}</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>Previous</Button><Button size="sm" variant="outline" disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button></div></div>}
       </main>
     </div>
@@ -93,8 +101,9 @@ function ManageClassificationsPanel({ categories, onClose }: { categories: CMDBC
 }
 
 function AssetClassificationPanel({ asset, categories, canEdit, onClose }: { asset: CMDBAsset; categories: CMDBCategory[]; canEdit: boolean; onClose: () => void }) {
-  const { showToast } = useToast(); const mutation = useSetCMDBAssetClassification(); const [value, setValue] = useState(asset.classification.classification_source === 'explicit' ? asset.classification.type_id : '')
-  const types = useMemo(() => categories.flatMap((c) => c.types).filter((t) => t.asset_kind === asset.asset_kind), [categories, asset.asset_kind])
-  async function save() { try { await mutation.mutateAsync({ kind: asset.asset_kind, id: asset.id, ciTypeId: value || null }); showToast(value ? 'Asset classification updated.' : 'Asset reset to its default classification.', { type: 'success' }); onClose() } catch (e) { showToast(errorMessage(e), { type: 'error' }) } }
-  return <SlideOverPanel onClose={onClose}><div className="flex items-center justify-between border-b border-gray-200 px-6 py-4"><div><h2 className="font-semibold text-ink">{asset.name}</h2><p className="text-xs text-gray-500">{KIND_LABEL[asset.asset_kind]} classification</p></div><button disabled={mutation.isPending} onClick={onClose}><X className="h-5 w-5 text-gray-400" /></button></div><div className="flex-1 space-y-5 overflow-y-auto p-6"><div className="rounded-md border border-gray-200 p-4"><div className="text-xs uppercase tracking-wide text-gray-400">Resolved classification</div><div className="mt-1 font-medium text-gray-800">{asset.classification.category_name} / {asset.classification.type_name}</div><div className="mt-1 text-xs text-gray-500">Source: {asset.classification.classification_source}</div></div>{canEdit ? <label className="block text-sm text-gray-700">Type<select value={value} onChange={(e) => setValue(e.target.value)} className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2"><option value="">Use {KIND_LABEL[asset.asset_kind]} default</option>{types.map((t) => <option key={t.id} value={t.id}>{categories.find((c) => c.id === t.category_id)?.name} / {t.name}{t.is_default ? ' (default)' : ''}</option>)}</select></label> : <p className="text-sm text-gray-500">Your role has read-only access to CMDB classifications.</p>}</div><div className="flex justify-end gap-2 border-t border-gray-200 px-6 py-4"><Button variant="secondary" disabled={mutation.isPending} onClick={onClose}>Cancel</Button>{canEdit && <Button isLoading={mutation.isPending} onClick={save}>Save classification</Button>}</div></SlideOverPanel>
+  // B-252 C1: the logic now lives in AssetClassificationForm (shared with
+  // Agent Detail's Classification tab). Only endpoint and tool rows open this
+  // panel now, so it carries the honest transition note.
+  return <SlideOverPanel onClose={onClose}><AssetClassificationForm asset={asset} categories={categories} canEdit={canEdit} header={{ onClose }} onCancel={onClose} onDone={onClose}
+    note="Full detail page coming soon — classification available here for now." /></SlideOverPanel>
 }

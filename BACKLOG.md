@@ -2953,7 +2953,7 @@ Choices, for the founder:
 - [~] **C0** Foundations:
   - **Done 2026-09-29** (`B-252_C0_VERIFICATION.md`): (a) `EndpointDrawer`/`LinkedAgentControl` extracted to `components/endpoints/`; (c) UI role-gating parity via `lib/rbac.ts`, including approver Overview-only on Agent Detail and the operator note-only tool panel.
   - **(b) moved to C1** (founder decision 2026-09-29): delete the orphaned `AgentAssetPanel`/`ToolAssetPanel` as part of C1, not as a separate brief. Nothing imports either file.
-- [ ] **C1** Assets agent rows open Agent Detail at its new `/assets/agents/:id` home (redirect from `/gateway/agents/:id`), with an Agent Classification tab. **Agent cross-links from C10 ship here.** **Also deletes the orphaned `components/cmdb/AgentAssetPanel.tsx` and `ToolAssetPanel.tsx`** (moved from C0(b), founder 2026-09-29).
+- [x] **C1 — DONE 2026-09-30** (`B-252_C1_VERIFICATION.md`; filter named `?id=`, a deliberate deviation from the approved `agent_id` wording, reasoning recorded). Assets agent rows open Agent Detail at its new `/assets/agents/:id` home (redirect from `/gateway/agents/:id`), with an Agent Classification tab. **Agent cross-links from C10 ship here.** **Also deletes the orphaned `components/cmdb/AgentAssetPanel.tsx` and `ToolAssetPanel.tsx`** (moved from C0(b), founder 2026-09-29).
 - [ ] **C2** Endpoint Detail at `/assets/endpoints/:id`: Overview, Agent Link (scanner settings read-only, "shared by N endpoints"), Classification. Discover rows open it.
 - [ ] **C3** Assets parity for endpoints (OS, last seen, per-domain counts, server filters). **Folds B-228/B-229. Needs Architect contract authorization before its brief; measure query cost in its Part A.**
 - [ ] **C4** Retire Discover (redirect).

@@ -115,3 +115,9 @@ Found by the B-236 reviews. They predate B-236 and sit outside its diff. At foun
 - **The gateway records a dispatch failure (upstream error, SSRF-guard refusal) as `denied` with no `policy_id`,** the same word as a policy denial (B-121's vocabulary).
   - Lineage and Audit can't tell them apart except by `policy_id` being NULL.
   - Separating them needs new audit vocabulary. **The founder decided 2026-09-29: queued as B-266.**
+
+## 2026-09-30 — B-252 C1 follow-ups (not fixed; out of scope)
+
+- **`api/openapi.yaml` (Architect-EAMI, not edited): `GET /v1/cmdb/assets` gained an optional `id` (uuid) query parameter** (B-252 C1).
+  - Add it before C2 and C5 reuse it for Endpoint and Tool Detail, so `useCMDBAsset` can drop the `apiFetch` escape hatch (security review SR-1).
+- **The Assets nav item is visible to approvers**, but CMDB reads refuse them, so the page's queries fail for them. This existed before C1. C1 only stopped Agent Detail's breadcrumb from sending approvers there. The sidebar role-based hiding belongs to C11.

@@ -4,7 +4,20 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-29, newest) — Lineage allowed path verified live; B-266 minted; C1 next
+## Active decision thread (2026-09-30, newest) — B-252 C1 done (agent handoff from Assets)
+
+- **C1 is built, reviewed, live-verified and pushed.** The record is `B-252_C1_VERIFICATION.md`.
+  - Agent Detail now lives at `/assets/agents/:id`; `/gateway/agents/:id` redirects. The Assets agent row opens it.
+  - It adds a Classification tab: admin edits, operator and viewer read-only, hidden from approvers.
+  - Agent names on Audit, FinOps and Memory link to it, with "agent no longer exists" for stale ids.
+  - Endpoint and tool panels carry the transition note. `AgentAssetPanel` and `ToolAssetPanel` are deleted.
+- **Deliberate deviation, surfaced:** the approved "agent_id filter" is `/v1/cmdb/assets?id=`, used with `kind=agent`, because the endpoint spans all asset kinds and `id` is the row key.
+  - The code review called it sound. It is a one-line rename if the founder prefers `agent_id`.
+  - `openapi.yaml` drift is logged for Architect-EAMI.
+- **Breadcrumb refinement:** approvers keep "Agents" (they can't read CMDB); all other roles get "Assets" as approved.
+- **Next:** C2 (Endpoint Detail) per the plan. B-258, B-262, B-263, B-264, B-265 and B-266 are queued.
+
+## Active decision thread (2026-09-29) — Lineage allowed path verified live; B-266 minted; C1 next
 
 - **Allowed-call gap closed:** one founder-approved real call went to postman-echo.com through a throwaway no-policy REST tool, and the gateway recorded a direct allow. The Lineage API and UI equal psql. See `AGENT_LINEAGE_VERIFICATION.md` §8. The total fixture audit rows left in the Dev Org is 37.
 - **B-266 minted (queued):** failed upstream dispatches get their own audit decision value, separate from a policy denial. This revisits B-121's precedent. It means a CHECK migration, never rewriting old rows, and updating every consumer. The next B-ID is B-267.
@@ -2525,6 +2538,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — B-252 C1 done: /assets/agents/:id + redirect, Classification tab, cross-links, orphan panels deleted; live 33/33, mutations 4/4, both reviews. Marker cleared.
+
+Prior entry:
 2026-09-29 by Claude Code — Lineage allowed path verified live (one real postman-echo call); minted B-266 (distinct decision for failed dispatches, queued). Marker cleared.
 
 Prior entry:

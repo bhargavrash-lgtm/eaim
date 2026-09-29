@@ -9,6 +9,7 @@ import type { Column } from '@/components/common/DataTable'
 import { useAudit, exportAuditCSV } from '@/hooks/useAudit'
 import type { AuditParams, AuditEntry } from '@/hooks/useAudit'
 import { AuditEntryDetailPanel } from './AuditEntryDetailPanel'
+import { AgentLink } from '@/components/agents/AgentLink'
 import { downloadCSV } from '@/lib/csv'
 
 // Decision badge -- renders an icon alongside the label, which StatusPill
@@ -142,7 +143,8 @@ export function AuditPage() {
     {
       key: 'agent_name',
       header: 'Agent',
-      render: (entry) => <span className="text-gray-700 max-w-[140px] truncate block" title={entry.agent_name}>{entry.agent_name}</span>,
+      // B-252 C1: links to Agent Detail when the agent still exists.
+      render: (entry) => <span className="text-gray-700 max-w-[140px] block" title={entry.agent_name}><AgentLink agentId={entry.agent_id} name={entry.agent_name} stacked /></span>,
     },
     {
       key: 'tool_name',

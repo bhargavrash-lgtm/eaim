@@ -1,5 +1,37 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-252 C1 — Agent handoff from Assets — 2026-09-30 (Claude Code)
+
+The evidence record, with both reviews verbatim, is `B-252_C1_VERIFICATION.md`. **Deliberate deviation:** the approved "agent_id filter" is implemented as `GET /v1/cmdb/assets?id=`, used with `kind=agent`. The reasoning is in the verification file; the code review called it "sound".
+
+**Server**
+- `store/cmdb.sql.go` and `api/cmdb.go`: an optional `id` filter. It is a UUID (400 otherwise), org-scoped inside the CTE, and the sidebar counts ignore it.
+- Test: `api/cmdb_id_filter_pg_test.go` (real Postgres):
+  - one exact row even beside a near-namesake;
+  - a foreign-org id, a random id, and a tool id queried as an agent all return empty (no oracle);
+  - counts unchanged;
+  - **the updated classification is returned on the very next read after an admin reclassifies to a new, non-default type**, and the default after a reset;
+  - a bad id gets 400 and an approver gets 403.
+
+**UI**
+- `components/cmdb/AssetClassificationForm.tsx` (new): the classification logic extracted from Assets' panel, shared with the tab.
+- `AssetsPage.tsx`: agent rows navigate to `/assets/agents/:id`. Endpoint and tool rows keep the panel with "Full detail page coming soon — classification available here for now."
+- `components/agents/AgentClassificationTab.tsx` (new) and `useCMDBAsset`: admin edits; operators and viewers read-only; hidden from approvers.
+- **Agent Detail:** tabs are now Overview, Connections, Lineage, **Classification**, Actions. The breadcrumb is "Assets › {agent}" ("Agents" for approvers, who can't read CMDB).
+- **Routes:** `/assets/agents/:id`. `/gateway/agents/:id` is now only a redirect (it carries `?tab=` and `#hash`). The Agents list links to the new path directly.
+- `components/agents/AgentLink.tsx` (new): agent names on **Audit, FinOps and Memory** link to Agent Detail when the agent exists. They show "agent no longer exists" otherwise, after one refresh of the list. On Memory, the metadata line moved outside the expand button.
+- **Deleted:** `AgentAssetPanel.tsx` and `ToolAssetPanel.tsx`.
+- `lib/rbac.ts`: `viewCMDB` and `classifyAsset`.
+
+**Verified 2026-09-30:**
+- Builds and tests: `tsc`, `vite build`, `go vet` and the full `go test ./internal/...` pass. Mutations: 4/4 killed.
+- Live with real logins for 4 roles: 33/33 PASS, cross-checked with psql. That covers the Assets handoff, Classification edit and reset (the updated value shown immediately), the redirect, direct links, the transition note, real cross-links from Audit, FinOps and Memory (including a deleted agent), and the role views. The snapshot was identical.
+- Code and security reviews: no Critical, High or Medium. Fixes applied.
+
+**Limitations**
+- `?id=` isn't in `openapi.yaml` (Architect-EAMI; logged).
+- Endpoint and tool rows still use the panel until C2 and C5.
+
 ## Agent Lineage — the Lineage tab on Agent Detail — 2026-09-29 (Claude Code)
 
 **Roadmap:** Horizon 1, "Agent lineage" (added in `c740c15`). DESIGN_SYSTEM.md §7.7 has a Lineage row. The evidence record, with all three reviews verbatim, is `AGENT_LINEAGE_VERIFICATION.md`.

@@ -60,9 +60,13 @@ type CMDBAssetFilter struct {
 	CategoryID       *uuid.UUID
 	TypeID           *uuid.UUID
 	WorkspaceID      *uuid.UUID
-	Query            string
-	Limit            int
-	Offset           int
+	// ID narrows to one asset (B-252 C1: Agent Detail's Classification tab
+	// reads a single agent's resolved classification). Still org-scoped
+	// like every other filter, so a foreign id matches nothing.
+	ID     *uuid.UUID
+	Query  string
+	Limit  int
+	Offset int
 }
 
 type CMDBTypeCount struct {
@@ -247,6 +251,9 @@ func cmdbFilteredSQL(f CMDBAssetFilter) (string, []any) {
 	}
 	if f.WorkspaceID != nil {
 		add("a.workspace_id=$%d", *f.WorkspaceID)
+	}
+	if f.ID != nil {
+		add("a.id=$%d", *f.ID)
 	}
 	if strings.TrimSpace(f.Query) != "" {
 		// Search is a literal substring match: escape ILIKE's own metacharacters

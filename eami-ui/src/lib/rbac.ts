@@ -25,6 +25,10 @@ export const can = {
   // GET /v1/gateway/agents/{id}/lineage (admin, operator, viewer): audit
   // reads exclude approvers.
   viewAgentLineage: (r: Role) => r === 'admin' || r === 'operator' || r === 'viewer',
+  // CMDB (B-252 C1): reads are admin/operator/viewer (approvers excluded);
+  // taxonomy and per-asset classification writes are admin-only.
+  viewCMDB: (r: Role) => r === 'admin' || r === 'operator' || r === 'viewer', // GET /v1/cmdb/*
+  classifyAsset: admin, // PATCH /v1/cmdb/assets/{kind}/{id}/classification
   // Tools
   createTool: admin, // POST /v1/gateway/tools (incl. OpenAPI discovery in the Add panel)
   editToolFully: admin, // PATCH of any admin-only tool field
