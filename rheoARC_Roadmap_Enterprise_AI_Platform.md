@@ -46,6 +46,18 @@ Scoped, logged, real backlog items — not yet built, no invented urgency, seque
 - **B-158/B-159 (Curated connector registry, hosted MCP wrapper)** — real Gateway completeness items, closing gaps found during the original TrueFoundry competitive research
 - **B-154 (Onboarding templates)** — reduces real time-to-value for a new deployment
 - **Step-up authentication for sensitive actions (B-231)** — server-enforced re-authentication before rotating a tool credential or changing a credentialed tool's URL, deleting/reactivating an agent, creating an agent API key, deleting a policy, promoting a user to admin, and generating an admin password-reset link. Suspending agents and revoking keys are excluded: emergency containment must stay frictionless. Must account for SSO-only users who have no password.
+- **Agent lineage: real, per-agent activity from the dispatch path** (added 2026-09-29 at founder direction). A **Lineage** tab on Agent Detail shows what an agent has *actually done*, built only from data the gateway already records:
+  - a summary: tools ever touched, escalations and denials in the last 30 days, first and last seen, and Risk and Owner;
+  - an activity table over each real tool, policy and workflow relationship: calls in a 24h, 7d or 30d window, last call, and a decision breakdown;
+  - cost per agent and per AI-provider tool, from `token_usage` ("—" for tools that don't produce token usage, never a fabricated $0).
+
+  **Why it matters:** a gateway in the real dispatch path can show real behaviour; a system that only discovers an agent from outside cannot. **Honest limits:**
+  - No data classification: redaction records only a count, not which pattern matched.
+  - No behavioural drift, which needs a real historical baseline.
+  - No SIEM or other external export (see B-135/B-136).
+  - No org-wide or Workspace view yet.
+
+  At scale, the per-agent reads want an `audit_log (org_id, agent_id, timestamp)` index (**B-265**, queued).
 - **The small, already-disclosed items** — B-213 (doc correction), B-218 (gateway_tools/nodes workspace scoping), the Status field allow-list nit, custom-roles investigation (deferred, correctly, pending real demonstrated need), Groups-for-users bulk-tagging (small, real, not blocked on custom roles per tonight's own analysis)
 
 ---

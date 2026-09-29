@@ -2,7 +2,7 @@
 # Updated by: Claude Code (after every task) AND the PM chat (after every
 # planning decision). Read by both at the start of every session, before
 # anything else.
-ACTIVE AGENT: none
+ACTIVE AGENT: Code — Agent Lineage (Part A investigation) — started 2026-09-29T10:54:11Z
 
 ## Active decision thread (2026-09-29, newest) — B-264 minted (tool note size cap); C0(b) folds into C1
 

@@ -3208,4 +3208,18 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 
 **Status:** QUEUED (Low). Not built.
 
-## Next B-ID: B-265
+### B-265 — `audit_log (org_id, agent_id, timestamp)` index for per-agent reads — **QUEUED (Low), 2026-09-29**
+**Origin:** Agent Lineage Part A (2026-09-29). Minted at founder direction 2026-09-29. B-265 was confirmed free against BACKLOG.md directly: the counter read B-265, and the ID was referenced nowhere. A grep found no open item covering an `audit_log` agent index.
+
+**Problem:** `audit_log` (20 monthly partitions) is indexed on `(org_id, timestamp DESC)`, `(agent_name, timestamp DESC)` and `(decision, timestamp DESC)`. It has **no `agent_id` index**.
+- Every per-agent read filters `agent_id` inside the org's partitions: B-200's Connections queries (`store/agent_connections.sql.go`) and Agent Lineage.
+- So the cost of those reads grows with the **whole org's** audit volume, not the agent's.
+- Measured 2026-09-29: 0.87 ms for the lineage summary on the Dev Org (88 audit rows). Fine now, linear in org volume later.
+
+**Fix:** a migration adding `(org_id, agent_id, "timestamp" DESC)` to the partitioned parent, so partitions inherit it.
+- Confirm in Part A whether building it on existing partitions needs a per-partition `CONCURRENTLY` approach at real volume.
+- Re-run EXPLAIN on the Connections and Lineage queries before and after.
+
+**Status:** QUEUED (Low). Do not build now.
+
+## Next B-ID: B-266
