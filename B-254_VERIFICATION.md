@@ -100,7 +100,7 @@ Screenshots are in `shots_b254/`: both lists and both forms. In the form, the no
 - At startup, if the DB policy load fails **and** the YAML fallback fails or is absent, the loader serves an **empty evaluator, so every call is allowed**. It is logged only as a Warn (`cmd/gateway/main.go:116-121`, `policyloader/loader.go:50-55`).
 - A later reload failure keeps the previous rule set (safe).
 
-Both are recorded in **B-259**.
+Both were recorded in **B-259**. On 2026-09-29 the unvalidated glob was split out to **B-260** (reachable today); the error branch and the startup fallback stay in B-259, tied to B-007.
 
 ## 6. Code review (mandatory; quoted verbatim)
 > ## B-254 review: "Never fires" badge, semantic-rule note, and pinning test

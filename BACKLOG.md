@@ -66,7 +66,7 @@ _(empty — founder/PM assigns from QUEUED)_
 
 ### B-007 — Implement real semantic policy evaluation
 **Objective:** `eami-policy/semantic.go` does real LLM-based intent evaluation instead of always returning no-match.
-**Correction (2026-09-28):** until this ships, **every policy with a semantic rule never fires**, not only semantic-only ones. `Evaluate` skips the whole rule when the stub says no, so mixed policies are skipped too. Disclosed in the UI by B-254. `TestEvaluate_MixedSemanticRuleSkippedByStub` (with the existing `…SemanticRuleSkippedByStub`) pins this, and must be deliberately updated here. See also B-258 (an interim enforcement decision) and B-259 (the evaluator-error fail-open).
+**Correction (2026-09-28):** until this ships, **every policy with a semantic rule never fires**, not only semantic-only ones. `Evaluate` skips the whole rule when the stub says no, so mixed policies are skipped too. Disclosed in the UI by B-254. `TestEvaluate_MixedSemanticRuleSkippedByStub` (with the existing `…SemanticRuleSkippedByStub`) pins this, and must be deliberately updated here. See also B-258 (the interim fail-closed decision, approved; briefed after B-253) and B-259 (the evaluator-error and no-rules-startup fail-open, to be scheduled with this item).
 **Acceptance criteria:**
 - [ ] Configurable LLM endpoint (local or API) per ADR-009's decision
 - [ ] `TestEvaluate_SemanticRuleSkippedByStub` replaced/updated to test real matching behavior
@@ -3056,7 +3056,7 @@ The inline-test-on-detail-page part lands in **B-252 C5**.
 
 **Status:** QUEUED.
 
-### B-258 — Interim enforcement for policies with a semantic rule (fail closed for deny/escalate?) — **QUEUED, 2026-09-28 — FOUNDER DECISION; needs its own brief with BOTH reviews**
+### B-258 — Interim enforcement for policies with a semantic rule: fail closed for deny/escalate, plus skip visibility — **QUEUED, 2026-09-28 — DECIDED 2026-09-29; brief to be sent once B-253 closes**
 **Origin:** B-254's trace (`B-254_VERIFICATION.md` §4). Minted at founder direction 2026-09-28. B-258 was confirmed free against BACKLOG.md directly: the counter read B-258, and B-258 and B-259 were unused. A grep found no open item covering evaluator fail-open behaviour (B-128, the old org-scoping fix, doesn't overlap).
 
 **The question:** until B-007 ships real semantic evaluation, every policy with a semantic rule is skipped entirely, so deny and escalate policies built on one protect nothing. **Proposed interim:**
@@ -3070,26 +3070,54 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 - Decide whether to **log or annotate skips**. For example, an audit field or `Decision.Reason` note such as "skipped N semantic-rule policies (not evaluated)", or a counter metric.
 - **The workflow `ProjectedDecision` skips identically:** `executor.go:182` calls the same evaluator, so the preview shows the fallback decision too. Any annotation must cover both paths.
 
-**Status:** QUEUED, awaiting the founder's decision.
+**Founder decision (2026-09-29): approved as recommended.**
+- **Deny and escalate** policies with a semantic rule **fail closed**: when their structural conditions match, they apply their action.
+- **Allow** policies with a semantic rule **stay skipped**.
+- **The audit-trace gap is in the same brief:** a skipped policy leaves no record, and the workflow `ProjectedDecision` hides it too.
 
-### B-259 — Policy evaluation fails open to ALLOW on error (latent), plus two adjacent fail-open paths — **QUEUED (severity TBD, see trace), 2026-09-28**
+**Build requirements** (it changes evaluator behaviour):
+- code **and** security reviews;
+- **mutation tests** for each branch (deny fails closed, escalate fails closed, allow stays skipped, skip annotation present on both the dispatch and workflow-preview paths);
+- the B-254 pinning tests (`TestEvaluate_SemanticRuleSkippedByStub`, `TestEvaluate_MixedSemanticRuleSkippedByStub`) updated deliberately;
+- B-254's "Never fires" badge and note reworded to match the new behaviour.
+
+**Sequencing:** the brief is sent **once B-253 (RBAC split) closes**. Do not build before then.
+**Status:** QUEUED, decided, not yet briefed.
+
+### B-259 — Policy evaluation fails open to ALLOW: evaluator-error branch and no-rules startup (both tied to B-007) — **QUEUED (severity TBD), 2026-09-28; split 2026-09-29**
 **Origin:** B-254's trace (`B-254_VERIFICATION.md` §5). Minted at founder direction 2026-09-28. B-259 was confirmed free against BACKLOG.md directly: the counter read B-258, and B-258 and B-259 were unused. A grep found no open item covering evaluator fail-open behaviour (B-128, the old org-scoping fix, doesn't overlap).
 
 **1. The dispatcher's evaluator-error → ALLOW** (`eami-gateway/cmd/gateway/dispatcher.go:545-548`).
 - **Trace verdict: unreachable today.** `Evaluate` returns a `nil` error on every path, and `evaluateSemantic` never errors. **It becomes live when B-007 lands**, when semantic evaluation can time out or fail.
 - That would make a failing semantic check allow the call. **It must be decided before or with B-007:** fail closed (deny or escalate) on evaluator error, per ADR-009's own "ESCALATE-on-timeout" design.
 
-**2. A malformed agent-name glob silently disables its own policy.**
-- `path.Match` errors are swallowed (`eami-policy/structural.go:101-105`), and **nothing validates the glob on save** (org or workspace policy routes).
-- A pattern like `agent-[` in a deny policy never matches. The effect is contained to that one rule: the org and workspace checks run first, so it can't affect another org or another rule.
-- Fix: validate with `path.Match(pattern, "")` on create and update (400), and surface existing invalid patterns.
+**2. (Split out 2026-09-29 → B-260: agent-name pattern validation on save.)**
 
 **3. Startup with no policies means allow everything.**
 - If the DB policy load fails **and** the YAML fallback fails or is absent, the gateway runs with an **empty evaluator, and every call is allowed**. It is logged only as a Warn (`cmd/gateway/main.go:116-121`, `policyloader/loader.go:50-55`).
 - Fix options: refuse to start or become ready; deny-by-default until a successful load; at minimum an Error log plus a health flag.
 - A later reload failure keeps the previous rule set, which is safe.
 
-**Severity:** TBD by the founder. Item 1 is latent; item 3 is a real availability-vs-safety trade-off; item 2 is low.
+**Scope after the split (founder, 2026-09-29):** items 1 and 3 stay together here, **both tied to B-007.** Item 1 becomes live the moment semantic evaluation can fail. Item 3's fallback behaviour should be decided alongside the same fail-closed stance.
+**Severity:** TBD by the founder. Item 1 is latent; item 3 is a real availability-vs-safety trade-off.
+**Status:** QUEUED, to be scheduled with B-007.
+
+### B-260 — Agent-name pattern (glob) not validated on save: a malformed pattern silently disables its own policy — **QUEUED (Low–Medium), 2026-09-29**
+**Origin:** split out of B-259 (item 2) at founder direction 2026-09-29, because it is **reachable today**, unlike the rest of B-259. B-260 was confirmed free against BACKLOG.md directly: the counter read B-260, and a grep found no open item covering glob or pattern validation.
+
+**Problem:**
+- The evaluator matches `agent_name_pattern` with `path.Match` and **swallows its error** (`eami-policy/structural.go:101-105`).
+- Neither the org policy routes (`policies.go`) nor the workspace policy routes (`workspace_policies.go`) validate the pattern on create or update.
+- So a malformed pattern (e.g. `agent-[`) saves successfully, and that policy then **never matches**. A deny written that way silently protects nothing.
+- Workspace admins can write it too, via the shared `PolicyPanel`.
+- The effect is contained to that one rule: the org and workspace checks run first and the error is per-rule, so no other rule or org is affected.
+
+**Fix:**
+- Server-side validation on create and update, on both route sets: `if _, err := path.Match(p, ""); err != nil` → 400 `invalid_agent_name_pattern` with a clear message.
+- Optional inline client-side validation in `PolicyPanel`.
+- A one-off report of existing invalid patterns (the dev DB can be checked in Part A).
+
+**Tests:** create and update with a malformed pattern returns 400 on both route sets; a valid glob still saves; existing policies are unaffected. Mutation-test the validation.
 **Status:** QUEUED.
 
-## Next B-ID: B-260
+## Next B-ID: B-261

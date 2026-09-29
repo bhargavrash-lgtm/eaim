@@ -4,7 +4,19 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-28, newest) — B-254 DONE ("Never fires"); B-258 and B-259 minted
+## Active decision thread (2026-09-29, newest) — B-258 decided; B-259 split (B-260 minted); docs only
+
+- **B-258 is approved as recommended:**
+  - deny and escalate with a semantic rule fail closed; allow stays skipped;
+  - the audit-trace gap (a skipped policy leaves no record; the workflow preview hides it) is in the **same brief**;
+  - both reviews plus mutation tests are required, since it changes evaluator behaviour;
+  - **the brief is sent once B-253 closes; not built now.**
+- **B-259 is narrowed** to the evaluator-error→ALLOW branch and the no-rules startup fallback, both tied to B-007.
+- **B-260 is minted:** agent-name pattern validation on save (reachable today; a malformed glob silently disables its own policy).
+
+The next B-ID is B-261.
+
+## Active decision thread (2026-09-28) — B-254 DONE ("Never fires"); B-258 and B-259 minted
 
 **B-254 is done.** A "Never fires" badge (warning colours, tooltip) on every policy with a semantic rule, on the org Policies and workspace Our Policies pages; a not-enforced note at the form field; and a temporary test pinning the mixed-rule skip.
 - Verified live, both pages; code review completed; snapshot identical.
@@ -2449,6 +2461,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-29 by Claude Code — B-258 decision recorded (briefed after B-253); B-259 split, B-260 minted. Docs only.
+
+Prior entry:
 2026-09-28 by Claude Code — B-254 done ("Never fires" warnings; live-verified on both pages; code review completed); B-258 and B-259 minted; B-254/B-007 corrected. Marker cleared.
 
 Prior entry:
