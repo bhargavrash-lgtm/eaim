@@ -4,12 +4,12 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-29, newest) — B-262 and B-263 queued (not built); C0 next
+## Active decision thread (2026-09-29, newest) — B-262 final: no operator exception; B-263 confirmed; both queued; C0 next
 
 - **B-262: org policy writes (create, update, delete, reorder) become admin-only** under the same rule.
   - Analysis recorded: under first-match with a default of ALLOW, only **creating a deny** and **enabling a deny** are monotone-tightening, so they are the only candidates for an operator exception.
   - "Disable during an incident" loosens (disabling a deny) and stays admin.
-  - The founder confirms any exception in the brief.
+  - **Founder, final: no exception.** All org policy writes are admin-only, including create-deny and enable/disable. Why: a deny's conditions can be silently ineffective (unlike binary suspend), and org authorship must meet B-209's workspace_admin bar.
 - **B-263:** an approver tool-list view with **name and status only**.
 - **Both are queued and not built.** B-252 C0 goes next. The next B-ID is B-264.
 

@@ -3146,30 +3146,25 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 
 **Status:** QUEUED.
 
-### B-262 — Org policy writes become admin-only (same "operators contain; admins expand or destroy" rule) — **QUEUED, 2026-09-29 — decided; brief after B-252 C0**
+### B-262 — Org policy writes become admin-only, no operator exception (same "operators contain; admins expand or destroy" rule) — **QUEUED, 2026-09-29 — decided; brief after B-252 C0**
 **Origin:** B-253 security review M1 (`B-253_VERIFICATION.md` §6). Founder decision 2026-09-29. Minted at founder direction 2026-09-29. B-262 was confirmed free against BACKLOG.md directly: the counter read B-262, and B-262 and B-263 were unused. A grep found no open item overlapping this scope.
 
 **Decision:** `POST /v1/gateway/policies`, `PATCH /v1/gateway/policies/{id}`, `DELETE /v1/gateway/policies/{id}` and `PUT`/`POST /v1/gateway/policies/reorder` (today admin + operator, `router.go`) become **admin-only**. **Do not default the whole surface back open.** Any operator exception must be named and justified the way suspend was.
 
-**Analysis for the brief** (Claude Code, 2026-09-29): the evaluator is first-match (org floor first, then priority) with a default of ALLOW.
-- **Truly containment (monotone tightening)**, the only candidates for an operator exception:
-  - **(a) Create a new `deny` policy.** A matched call can only become "deny", never looser, whatever its priority. The policy analogue of suspend: stop something now.
-  - **(b) Activate an existing draft or disabled `deny` policy.** The same reasoning.
-- **Not containment, so admin-only:**
-  - **Disabling or deleting any deny or escalate policy.** "Disable a policy during an incident" *sounds* like containment, but disabling a deny **loosens**. It is excluded unless the founder names it anyway.
-  - **Creating or enabling an `escalate` policy.** It can outrank a deny and turn "deny" into "approvable".
-  - **Any `allow` create or edit.**
-  - **Any reorder,** which can move an allow above a deny.
-  - **Editing conditions or action on any existing policy,** which can narrow a deny.
-- **Borderline, recommended admin for simplicity:** disabling an `allow` (it tightens under a default of ALLOW, but it's rare in incidents and confusing to reason about).
-- **Recommendation:** operators get (a) and (b) only, if the founder wants any exception at all. Enforce them in-handler (`action=deny`, and for (b) only a status change to `active` on a deny policy with nothing else changed), using B-253's reject-whole plus 403 pattern.
+**Founder decision (2026-09-29, final): NO operator exception.** Every org policy write is **admin-only**: create, edit, delete, reorder, and enable/disable (status changes). There is **no carve-out** for creating a deny or enabling a deny.
+
+**Why** (recorded per the founder):
+- **A different risk shape from suspend.** A deny policy's conditions can be imprecise in a way that makes it ineffective, for example a wrong tool name, an agent glob that matches nothing (see B-260), or a semantic rule (B-254). No malicious intent is needed. An operator "containing" an incident with a new deny can therefore believe something is blocked when it isn't. Suspend is binary and self-evidently effective.
+- **The same bar as B-209.** Org-level policy authorship should meet the standard already set for workspace-scoped policy creation, not a looser one. B-209 made workspace policy writes require `workspace_admin` (the admin tier of that scope; `router.go` `requireWorkspaceRole(..., "workspace_admin")`), not `workspace_member`. The org floor, which outranks every workspace policy, gets the org's admin tier.
+
+*(An earlier analysis on 2026-09-29 identified "create a deny" and "enable a deny" as the only monotone-tightening actions and floated them as possible operator exceptions. The founder considered and rejected that for the reasons above. Operators contain incidents with agent suspend and key revoke.)*
 
 **Scope notes:**
 - **Workspace policy routes** (`/v1/workspaces/{id}/policies`, gated by `requireWorkspaceRole`) can only add restrictions on top of the org floor (floor-first ordering). They are out of this item unless the founder says otherwise.
-- **UI gating** on the Policies page is needed after the server change (B-252 C0(c) pattern).
-- **Semantic-rule policies:** they never fire today (B-254). B-258 makes deny and escalate with a semantic rule fail closed, which keeps (a)/(b) monotone.
+- **UI gating** on the Policies page (and the workspace page's view of floor policies, which is already read-only there) is needed after the server change (B-252 C0(c) pattern).
+- **Semantic-rule policies:** they never fire today (B-254); B-258 changes that for deny and escalate.
 
-**Tests** (same discipline as B-253): operator 403 with nothing written on every restricted policy route and action; admin succeeds; the (a)/(b) exceptions, if granted, pass while every loosening variant (escalate, allow, disable, reorder, condition edits, a mixed request) is refused; a mutation test for each. Both reviews and live verification with real tokens.
+**Tests** (same discipline as B-253): operator 403 with nothing written on **every** org policy write route and action, including create-deny, enable/disable and reorder; admin succeeds; approver and viewer are unchanged (403); a mutation test for each route move. Both reviews and live verification with real tokens.
 
 **Status:** QUEUED. Do not build now; B-252 C0 goes first.
 
@@ -3181,7 +3176,7 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 **Decision:** approvers get a **trimmed projection: name and status only.** No `base_url`, `mcp_command` or redaction settings.
 
 **Fix:**
-- Role-aware response shaping on `GET /v1/gateway/tools`: approver gets `{id, name, status}` (the ID stays so the UI can key rows and link later; confirm when briefing).
+- Role-aware response shaping on `GET /v1/gateway/tools`: approver gets `{id, name, status}`. **Founder confirmed 2026-09-29.** The ID stays so the UI can key rows and link later.
 - Other roles are unchanged.
 - The same check applies if a tool by-id route is added later (B-252 C5).
 - Tests: the approver response contains exactly the allowed keys; other roles are unchanged; a mutation test.
