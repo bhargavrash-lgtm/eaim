@@ -402,4 +402,17 @@ All three reviewers noted that the real-Postgres tests skipped in their sandboxe
 | SR-7 no general read rate limit | **Logged** in NOTES.md |
 | RR-4, 5, 6 | **Fixed:** comment, equivalence note, "Last seen" shown only when known |
 
-**Observation for the founder (not changed):** the gateway records a **dispatch failure** (an upstream error, or the SSRF guard refusing the target) as `denied` with no `policy_id`, the same vocabulary as a policy denial (B-121's precedent). Lineage faithfully shows these as denials. It would need new audit vocabulary to separate them, which is out of scope ("no new instrumentation").
+## 8. Addendum (2026-09-29): the allowed-call path, verified live
+
+On founder approval, **exactly one real call** went to postman-echo.com.
+- **Why a fixture tool:** it went through `lin-live-echo`, a throwaway REST tool with `base_url https://postman-echo.com` and `read → GET /get`, with no policy matching it.
+- **Why not `manual_verify_tool`:** the Dev Org's active "manual verify" escalate policy matches it, so a call through it would have escalated rather than been allowed.
+- **What left the machine:** `Content-Type` plus the JSON body (tool name, action and an opaque, now-expired MCP session ID). No agent token and no credentials: the fixture tool had none, and the gateway only adds `Authorization` from a tool's own credentials.
+- **Script:** `lin_allowed.js`, driven by `lin_allowed_run.sh`. **4/4 PASS:**
+  - no policy matched the tool;
+  - the gateway wrote exactly one audit row: `lin-live-echo | allowed | no policy | no approval`, a **direct allow**, with the real echo returned over SSE;
+  - the API's 24h calls and allowed counts equal psql (1/1), with cost "—" for a REST tool;
+  - the UI tool row shows Calls 1, Allowed 1, Escalated 0, Denied 0, Cost "—".
+- **Cleanup:** proven by the snapshot diff. The only difference is `audit_log` +1, which stays because of the hash chain. That brings the **total fixture audit rows left by this brief's live runs to 37** (1,669 to 1,706). The org count is 6.
+
+**Observation for the founder (now queued as B-266):** the gateway records a **dispatch failure** (an upstream error, or the SSRF guard refusing the target) as `denied` with no `policy_id`, the same vocabulary as a policy denial (B-121's precedent). Lineage faithfully shows these as denials. It would need new audit vocabulary to separate them, which is out of scope ("no new instrumentation").

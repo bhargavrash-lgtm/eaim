@@ -33,10 +33,10 @@
 
 **Limitations**
 - Full-history scans without an `agent_id` index. **B-265** is queued.
-- A directly *allowed* call was not exercised live. The Dev Org has none in any window, and a successful dispatch needs an external upstream. The real-Postgres tests cover it.
-- The gateway records dispatch failures as `denied` with no policy, and Lineage shows them that way.
+- A directly *allowed* call was then verified live with one founder-approved real call to postman-echo.com (addendum §8): the gateway recorded a direct allow, and the API and UI numbers equal psql.
+- The gateway records dispatch failures as `denied` with no policy, and Lineage shows them that way. A distinct decision value is queued as **B-266**.
 - The route isn't in `openapi.yaml` (Architect-EAMI); the UI uses the `apiFetch` escape hatch.
-- The 36 fixture audit rows from the live runs stay in the Dev Org's hash chain.
+- The 37 fixture audit rows from the live runs stay in the Dev Org's hash chain.
 
 ## B-252 C0 — Endpoint components extracted; UI role gating matches B-253 — 2026-09-29 (Claude Code)
 

@@ -4,7 +4,14 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-29, newest) — Agent Lineage shipped (Horizon 1); C1 next
+## Active decision thread (2026-09-29, newest) — Lineage allowed path verified live; B-266 minted; C1 next
+
+- **Allowed-call gap closed:** one founder-approved real call went to postman-echo.com through a throwaway no-policy REST tool, and the gateway recorded a direct allow. The Lineage API and UI equal psql. See `AGENT_LINEAGE_VERIFICATION.md` §8. The total fixture audit rows left in the Dev Org is 37.
+- **B-266 minted (queued):** failed upstream dispatches get their own audit decision value, separate from a policy denial. This revisits B-121's precedent. It means a CHECK migration, never rewriting old rows, and updating every consumer. The next B-ID is B-267.
+- **Lineage has no B-ID** (founder decision); it is recorded under its own verification file.
+- **C1 is next.**
+
+## Active decision thread (2026-09-29) — Agent Lineage shipped (Horizon 1); C1 next
 
 - **Agent Lineage is built, reviewed, live-verified and pushed.** The record is `AGENT_LINEAGE_VERIFICATION.md`.
   - Roadmap Horizon 1 "Agent lineage" and the DESIGN_SYSTEM §7.7 row were added in `c740c15` and are now marked shipped and built.
@@ -2518,6 +2525,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-29 by Claude Code — Lineage allowed path verified live (one real postman-echo call); minted B-266 (distinct decision for failed dispatches, queued). Marker cleared.
+
+Prior entry:
 2026-09-29 by Claude Code — Agent Lineage shipped: API + tab, real-Postgres tests, 16/16 mutations, live 42/42 with real gateway dispatches, 3 reviews. Marker cleared.
 
 Prior entry:

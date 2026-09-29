@@ -3224,4 +3224,33 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 
 **Status:** QUEUED (Low). Do not build now.
 
-## Next B-ID: B-266
+### B-266 — A distinct audit decision for failed upstream dispatches, separate from a policy denial — **QUEUED, 2026-09-29**
+**Origin:** Agent Lineage live verification (`AGENT_LINEAGE_VERIFICATION.md` §7, "Observation for the founder"). Minted at founder direction 2026-09-29. B-266 was confirmed free against BACKLOG.md directly: the counter read B-266, and the ID was referenced nowhere else. A grep found no open item covering the audit decision vocabulary.
+
+**Problem:** `audit_log.decision` has three values (CHECK: `allowed`/`denied`/`escalated`). A dispatch that the policy engine **allowed** but that **failed to execute** is written as `denied`, the same word as a real policy denial. The two can only be told apart by `policy_id` being NULL.
+- **Where it's written:**
+  - the direct Allow-branch proxy failure (B-121's vocabulary precedent);
+  - the escalation-resolution row when an **approved** call's resumed dispatch fails (`eami-gateway/cmd/gateway/dispatcher.go`, the `holdOutcome.Resolved` clone, where B-121's attribution fix already blanks `approved_by`).
+- **Causes:** an upstream error or timeout, DNS failure, the SSRF guard refusing a private target, a TOCTOU rejection, or a deleted connector.
+- **Seen live 2026-09-29:** calls to a `.invalid` host and to an internal host (SSRF-refused) were recorded as `denied` with no policy.
+- **Impact:** Audit, FinOps outcome views, alert rules on `decision`, and Lineage's "Denials (30d)" all count infrastructure failures as governance denials. That overstates enforcement and hides reliability problems.
+
+**Decision:** failed upstream calls get **their own distinct decision value**, separate from a real policy denial. The founder decided this 2026-09-29, deliberately revisiting B-121's "denied for any non-success" choice.
+
+**Scope for the brief (Part A first):**
+- **Name and meaning:** e.g. `failed`. Decide whether identity or scope refusals (not policy) also need separating, or stay `denied`.
+- **Migration:** extend the `audit_log_decision_check` CHECK. **Never rewrite existing rows** (hash chain). Historical failures stay `denied`, and the UI must say that data before the cut-over is mixed.
+- **Hash chain:** `decision` is part of each row's hash input, so a new value is fine for new rows. Confirm `verify-audit-log.sh` and the API's `/v1/audit/verify` accept it.
+- **Every consumer:**
+  - the gateway writers: the Allow-branch failure and the resolution clone, including an approved-then-failed call;
+  - `eami-api` audit filters and export;
+  - FinOps outcome mapping;
+  - alerting rules that match `decision`;
+  - Lineage (`isCall` and the denial counts; a "Failed" column);
+  - the Audit page and its badges;
+  - the `api/openapi.yaml` enum, which is **Architect-EAMI's**: log the drift, don't edit it.
+- **Tests:** a real-Postgres test per writer path; a mutation test that restores `denied`; live verification with a real failing dispatch plus a real policy denial side by side.
+
+**Status:** QUEUED. Do not build now.
+
+## Next B-ID: B-267

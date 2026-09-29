@@ -114,4 +114,4 @@ Found by the B-236 reviews. They predate B-236 and sit outside its diff. At foun
   - B-265's index is the main fix; a per-org limiter is optional (SR-1/SR-7).
 - **The gateway records a dispatch failure (upstream error, SSRF-guard refusal) as `denied` with no `policy_id`,** the same word as a policy denial (B-121's vocabulary).
   - Lineage and Audit can't tell them apart except by `policy_id` being NULL.
-  - Separating them needs new audit vocabulary. That is a founder decision, not a UI fix.
+  - Separating them needs new audit vocabulary. **The founder decided 2026-09-29: queued as B-266.**
