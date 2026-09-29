@@ -2952,8 +2952,8 @@ Choices, for the founder:
 **Sequence:** **B-253 (RBAC split) first**, then:
 - [~] **C0** Foundations:
   - **Done 2026-09-29** (`B-252_C0_VERIFICATION.md`): (a) `EndpointDrawer`/`LinkedAgentControl` extracted to `components/endpoints/`; (c) UI role-gating parity via `lib/rbac.ts`, including approver Overview-only on Agent Detail and the operator note-only tool panel.
-  - **Still open:** (b) delete the orphaned `AgentAssetPanel`/`ToolAssetPanel`. It was not in the C0 brief, and nothing imports either file.
-- [ ] **C1** Assets agent rows open Agent Detail at its new `/assets/agents/:id` home (redirect from `/gateway/agents/:id`), with an Agent Classification tab. **Agent cross-links from C10 ship here.**
+  - **(b) moved to C1** (founder decision 2026-09-29): delete the orphaned `AgentAssetPanel`/`ToolAssetPanel` as part of C1, not as a separate brief. Nothing imports either file.
+- [ ] **C1** Assets agent rows open Agent Detail at its new `/assets/agents/:id` home (redirect from `/gateway/agents/:id`), with an Agent Classification tab. **Agent cross-links from C10 ship here.** **Also deletes the orphaned `components/cmdb/AgentAssetPanel.tsx` and `ToolAssetPanel.tsx`** (moved from C0(b), founder 2026-09-29).
 - [ ] **C2** Endpoint Detail at `/assets/endpoints/:id`: Overview, Agent Link (scanner settings read-only, "shared by N endpoints"), Classification. Discover rows open it.
 - [ ] **C3** Assets parity for endpoints (OS, last seen, per-domain counts, server filters). **Folds B-228/B-229. Needs Architect contract authorization before its brief; measure query cost in its Part A.**
 - [ ] **C4** Retire Discover (redirect).
@@ -3185,4 +3185,27 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 
 **Status:** QUEUED. Do not build now; B-252 C0 goes first.
 
-## Next B-ID: B-264
+### B-264 — Server-side size cap on a tool's `data_handling_note` — **QUEUED (Low), 2026-09-29**
+**Origin:** B-252 C0 security review SR-1 (`B-252_C0_VERIFICATION.md` §6.2). Minted at founder direction 2026-09-29. B-264 was confirmed free against BACKLOG.md directly: the counter read B-264, and the only mentions of it were this proposal in CONTEXT.md. A grep found no open item overlapping this scope.
+
+**Problem:** `data_handling_note` is plain `TEXT` with no length check.
+- `UpdateTool` and `CreateTool` (`eami-api/internal/api/tools.go`) pass it straight through. No route-level `MaxBytesReader` or global body limit applies; the only one is in `openapi_discover.go`.
+- Since B-253, **operators** can write it: via `PATCH`, and since C0 through the trimmed note panel.
+- Every role's `GET /v1/gateway/tools` returns it, viewer and approver included.
+- So one operator can store a multi-MB note that bloats the tool list for the whole org, a cheap persistent nuisance or DoS from a non-admin role. This predates C0.
+
+**Fix:**
+- Reject a note over a real cap with a 400 in both `UpdateTool` and `CreateTool`, validated before the role check like the other field validation.
+- Confirm the exact cap in the brief; the review suggests 2–4 KB. Measure in characters (runes), not bytes, so non-ASCII notes aren't penalised oddly, and say which.
+- Optionally add `http.MaxBytesReader` on the tool write routes. Decide in the brief whether that belongs here or in a wider body-limit item.
+- The UI note fields (the full and trimmed tool panels) get a matching `maxLength` so the limit is visible before submit. The server stays the enforcement point.
+- Existing over-cap rows, if any, must stay readable. Check the real data in Part A, and don't truncate silently.
+
+**Tests:**
+- Real Postgres: at the cap returns 200; cap+1 returns 400 with nothing written; the same for create; the operator and admin paths both apply.
+- A mutation test (remove the check, and the cap+1 case fails).
+- Live verification with a real operator token.
+
+**Status:** QUEUED (Low). Not built.
+
+## Next B-ID: B-265

@@ -4,7 +4,12 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-29, newest) — B-252 C0 done ((a) extraction + (c) role gating); C0(b) still open
+## Active decision thread (2026-09-29, newest) — B-264 minted (tool note size cap); C0(b) folds into C1
+
+- **B-264 minted (Low, queued):** a server-side size cap on `data_handling_note`, returning 400 over the cap on both create and update. The UI gets a matching `maxLength`. The exact cap is confirmed in the brief. It comes from the B-252 C0 security review, SR-1. The next B-ID is B-265.
+- **C0(b)**, deleting the orphaned `AgentAssetPanel`/`ToolAssetPanel`, **is part of C1**, not a separate brief.
+
+## Active decision thread (2026-09-29) — B-252 C0 done ((a) extraction + (c) role gating); C0(b) still open
 
 - **C0 (a) and (c) built and pushed.** The record is `B-252_C0_VERIFICATION.md`.
   - `components/endpoints/` now holds `EndpointDrawer`, `LinkedAgentControl` and `format.ts`.
@@ -2498,6 +2503,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-29 by Claude Code — minted B-264 (tool note size cap, queued). C0(b) folded into C1. Docs only.
+
+Prior entry:
 2026-09-29 by Claude Code — B-252 C0 (a)+(c) built, reviewed, live-verified with all four roles (77/77) and pushed. C0(b) still open. Marker cleared.
 
 Prior entry:
