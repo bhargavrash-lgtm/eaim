@@ -3283,11 +3283,11 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 - **Least-privilege guidance** is published per protocol.
 
 **Dependencies:**
-- Discovery presets and enrollment (roadmap: build order item 1).
+- **B-269** Discovery presets and enrollment (build order item 1).
 - B-231 step-up, for credential writes.
 - B-252 C2 (Endpoint Detail), to show probe results.
 
-**Status:** QUEUED. Do not build now. Per the founder-approved build order, it comes after presets, Endpoint Detail's read-only view and shadow-agent surfacing.
+**Status:** QUEUED. Do not build now. It is **item 5** in the founder-approved build order: after B-269 presets, B-270's Endpoint Detail view, shadow-agent surfacing, and localhost LLM characterisation.
 
 ### B-268 — Capture install time and process start time in eami-agent (deep-discovery case 2a) — **QUEUED (future), 2026-09-30**
 **Origin:** `DISCOVERY_ADMIN_INVESTIGATION.md` Part 2.2, founder decision D6 (2026-09-30). Minted at founder direction 2026-09-30. B-268 was confirmed free against BACKLOG.md directly: the counter read B-267, and B-267 and B-268 were referenced nowhere. A grep of BACKLOG.md for open items covering WinRM, vCenter, credentialed or active scanning, install time or process start time found none. No number was reserved in conversation.
@@ -3308,4 +3308,46 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 
 **Status:** QUEUED (future). **Not blocking.** Case 2a ships first on the real signals already collected (founder D6).
 
-## Next B-ID: B-269
+### B-269 — Discovery presets and enrollment (Layer 1, and the Layer 2 re-key) — **QUEUED, 2026-09-30 — build order item 1**
+**Origin:** `DISCOVERY_ADMIN_INVESTIGATION.md` Part 1B(a). Founder-approved build order, 2026-09-30. Minted at founder direction 2026-09-30. B-269 was confirmed free against BACKLOG.md directly: the counter read B-269, and B-269 and B-270 were referenced nowhere. A grep for open items covering presets, effective config or enrollment keys found only B-267's own forward references to this work.
+
+**Problem (traced):**
+- There is no fleet-level scanner configuration. Installers inject only the collector URL, API key and CA path.
+- Remote scanner config (`agent_configs`) is keyed by a **governed agent** and reaches an endpoint only when an admin has manually linked it. Unlinked endpoints get 404 and keep their local YAML.
+- Config resolution is single-org (`GetDefaultOrgID`).
+
+**Fix (to be confirmed in the brief's Part A):**
+- **`discovery_presets`:**
+  - identity: `id`, `org_id`, `name`, `description`;
+  - fields: `scan_interval_seconds`, `enabled_scanners[]`, `model_scan_paths[]`, `max_report_size_bytes`, `model_file_size_mb`, `is_default` (one per org);
+  - bookkeeping: `version` (bumped on every change) and the timestamps.
+- **`endpoints.discovery_preset_id`:** nullable, meaning the org default. **Assignment is per endpoint, never per governed agent.**
+- **Per-preset enrollment keys**, stored hashed, with a prefix, expiry and revocation. They identify the org and preset at first ingest, which ends the single-org resolution.
+- **Remote config** resolves **endpoint → preset**.
+- **Migration:** each of today's `agent_configs` rows becomes a preset, and linked endpoints are assigned to it.
+- **Deployment bundles:**
+  - the **existing signed installers, unchanged**; never rebuilt per preset (that would break code signing and notarization);
+  - plus per-channel install parameters: an MSI command line or `.mst` transform for Intune/SCCM, Jamf `$4`–`$7`, and env-var lines for Ansible.
+- **UI:** a **"Discovery setup"** destination (C11's configure group), **not** a Settings tab. Admin-only writes.
+
+**Tests:** real Postgres for preset CRUD, the single default and assignment; endpoint → preset resolution per org; enrollment-key hashing, expiry and revocation; the migration; mutation tests; live verification with a real agent pulling its preset.
+
+**Dependencies:** none blocking. It feeds B-270 and B-267.
+
+**Status:** QUEUED. Do not build until briefed.
+
+### B-270 — Read-only effective-config view on Endpoint Detail (Layer 3) — **QUEUED, 2026-09-30 — build order item 2 (with B-252 C2)**
+**Origin:** `DISCOVERY_ADMIN_INVESTIGATION.md` Part 1B(d). Founder-approved build order, 2026-09-30. Minted at founder direction 2026-09-30. B-270 was confirmed free against BACKLOG.md directly: the counter read B-269, and B-269 and B-270 were referenced nowhere. A grep for open items covering presets, effective config or enrollment keys found only B-267's own forward references to this work.
+
+**Scope:**
+- **Endpoint Detail (B-252 C2)** shows the endpoint's **effective config**: the assigned preset's name and version, the values in force, and the **last config the agent actually applied**. That needs the agent to report its applied preset version: one report field, confirmed in the brief.
+- The only write is a **narrow, admin-only "change preset assignment"** control. **No per-endpoint field editing**; presets (B-269) are the edit surface.
+- The **Agent Detail "Configure" action retires**, since scanner config was never a property of an AI agent. This affects `AgentActionsTab` and the Agents list.
+
+**Dependencies:**
+- **B-269**, the presets it displays.
+- **B-252 C2**, the Endpoint Detail page it lives on, so they are built alongside each other.
+
+**Status:** QUEUED. Do not build until briefed.
+
+## Next B-ID: B-271

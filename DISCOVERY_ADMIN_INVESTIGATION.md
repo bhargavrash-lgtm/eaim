@@ -211,13 +211,12 @@
 - **D5:** a discovered but unregistered model server gets a real section on Endpoint Detail before Model Details applies.
 - **D6:** ship on the real signals first. Install and start-time capture is **B-268** (future, not blocking).
 
-**Approved build order:**
-1. Presets.
-2. The read-only Endpoint Detail view, alongside C2.
+**Approved build order (final, 2026-09-30):**
+1. **B-269** presets.
+2. **B-270**, the read-only Endpoint Detail view, alongside C2.
 3. Shadow-agent surfacing and onboarding.
-4. The probe (B-267).
-
-**LLM characterisation is not yet placed in that order.**
+4. **LLM characterisation on the endpoint's own machine.** It extends the agent's Ollama call, with the same discovery pass and trust boundary, and needs no new credential or scan-range work.
+5. **B-267**, the probe, which also takes on network-hosted model characterisation.
 
 ## Decisions that were needed before any build brief (as originally asked)
 

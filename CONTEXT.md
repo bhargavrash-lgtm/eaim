@@ -4,7 +4,18 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-30, newest) — Discovery decisions D1–D6 recorded; B-267/B-268 minted; roadmap lines added
+## Active decision thread (2026-09-30, newest) — B-269/B-270 minted; model characterisation sequenced
+
+- **B-269 (Discovery presets and enrollment)** and **B-270 (read-only effective-config view on Endpoint Detail, with C2)** are minted and queued.
+- **Final discovery build order:**
+  1. B-269 presets.
+  2. B-270, the Endpoint Detail view, alongside C2.
+  3. Shadow-agent surfacing and onboarding.
+  4. **LLM characterisation on localhost:** it extends the agent's Ollama call, with the same pass and trust boundary and no new credential or range work.
+  5. B-267, the probe (which also takes on network-hosted models).
+- Roadmap, backlog and the investigation doc are updated. The next B-ID is B-271.
+
+## Active decision thread (2026-09-30) — Discovery decisions D1–D6 recorded; B-267/B-268 minted; roadmap lines added
 
 - **B-267 (Discovery Probe)** is minted: active, credentialed agentless scanning, **separate from B-139**, which stays passive network inspection. Its credentials are probe-sealed and held to a stricter standard than tool credentials.
 - **B-268** is minted: install-time and start-time capture (future, not blocking).
@@ -2573,6 +2584,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — minted B-269 (presets) and B-270 (Endpoint Detail effective-config view); sequenced localhost LLM characterisation as build item 4 (before B-267). Docs only. Marker cleared.
+
+Prior entry:
 2026-09-30 by Claude Code — recorded discovery decisions D1–D6; minted B-267 (Discovery Probe) and B-268 (install/start-time capture); added Horizon 1 roadmap lines. Docs only. Marker cleared.
 
 Prior entry:

@@ -42,17 +42,21 @@ Scoped, logged, real backlog items — not yet built, no invented urgency, seque
 - **B-138 (SSO/IdP)** — a genuine enterprise procurement requirement; local provisioning (just closed) was correctly built first so this has a working foundation to federate on top of
 - **B-139 (Agentless discovery, passive)** — network-level detection with no endpoint install required; already has real technical framing from B-164's own investigation (mirror-port/proxy traffic inspection vs. DNS-query inspection), not starting from zero. **Scope confirmed 2026-09-30: it stays passive network inspection exactly as originally scoped.** Active, credentialed scanning is a separate item, **B-267**, below.
 - **Discovery administration: the three-layer model** (added 2026-09-30 at founder direction; plan in `DISCOVERY_ADMIN_INVESTIGATION.md`). The build order is founder-approved:
-  1. **Discovery presets and enrollment (Layer 1, and the Layer 2 re-key).**
+  1. **B-269: Discovery presets and enrollment (Layer 1, and the Layer 2 re-key).**
      - Named, versioned scanner presets that **endpoints** are assigned to (today, remote scanner config is keyed by a *governed agent* and reaches only manually linked endpoints).
      - Per-preset enrollment keys, which also end the single-org config resolution.
      - The signed installers stay unchanged; a deployment bundle is the installer plus per-channel install parameters (Intune/SCCM, Jamf, Ansible).
-     - Its own "Discovery setup" destination, not a Settings tab. B-ID assigned when briefed.
-  2. **A read-only effective-config view on Endpoint Detail (Layer 3)**, built alongside B-252 C2.
+     - Its own "Discovery setup" destination, not a Settings tab.
+  2. **B-270: a read-only effective-config view on Endpoint Detail (Layer 3)**, built alongside B-252 C2.
      - It shows the assigned preset, its version, the values in force, and the last config the agent applied.
      - The only write is an admin-only preset-assignment change; no per-endpoint field editing.
-     - The Agent Detail "Configure" action retires. B-ID assigned when briefed.
+     - The Agent Detail "Configure" action retires.
   3. **Shadow-agent surfacing and "Onboard as Governed Agent"**: deep-discovery case 2a, below.
-  4. **B-267, the Discovery Probe**: active, credentialed agentless scanning, below.
+  4. **LLM characterisation on the endpoint's own machine** (sequenced by the founder 2026-09-30).
+     - It extends the agent's existing localhost Ollama call.
+     - It shares the same discovery pass and trust boundary as Tier 1, so it needs **no new credential or scan-range work**.
+     - Network-hosted model servers come later, through B-267.
+  5. **B-267, the Discovery Probe**: active, credentialed agentless scanning, below.
 - **B-267: the Discovery Probe** (`eami-probe`; deliberately **not** "Collector", which is a passive relay). This is **active, credentialed** agentless scanning, **separate from B-139**.
   - **v1 coverage:**
     - SSH for Linux and macOS, with a read-only command allowlist;
@@ -68,9 +72,8 @@ Scoped, logged, real backlog items — not yet built, no invented urgency, seque
 - **Deep-discovery tiers: triggered, not universal** (added 2026-09-30).
   - **LLM characterisation of customer-hosted models:**
     - metadata and health APIs only (Ollama, OpenAI-compatible servers, TGI, Triton/NIM), no inference by default;
-    - the endpoint agent covers localhost; B-267 covers network-hosted servers;
+    - the endpoint agent covers localhost **first (build order item 4)**; B-267 covers network-hosted servers later (item 5);
     - a discovered but unregistered model server gets **its own section on Endpoint Detail**, and the same record feeds Model Details (Tool Detail) once it is registered as an `ai_provider` tool;
-    - **not yet placed in the approved order** (founder to sequence).
   - **Case 2a, shadow agents:**
     - observational depth only, never implied to be dispatch-level;
     - shipped on the real signals first: `ai_processes` (collected, never surfaced today), executable path, command line, and PID-joined direct connections to known providers, which is the "bypasses the gateway" signal;
