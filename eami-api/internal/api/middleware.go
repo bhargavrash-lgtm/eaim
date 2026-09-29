@@ -121,13 +121,21 @@ func (s *Server) requireRole(allowed ...string) func(http.Handler) http.Handler 
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			uc := claimsFromContext(r)
 			if !set[uc.Role] {
-				writeError(w, http.StatusForbidden, "forbidden",
-					"your role ("+uc.Role+") does not have access to this resource")
+				writeRoleForbidden(w, uc.Role)
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// writeRoleForbidden is requireRole's 403. B-253's in-handler admin checks
+// (a PATCH that touches a restricted field on a route operators may
+// otherwise use) call it too, so a restricted field is indistinguishable
+// from a restricted route.
+func writeRoleForbidden(w http.ResponseWriter, role string) {
+	writeError(w, http.StatusForbidden, "forbidden",
+		"your role ("+role+") does not have access to this resource")
 }
 
 // requireWorkspaceRole (B-197 increment 3) returns a middleware that

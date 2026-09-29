@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -627,20 +628,6 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var encrypted []byte
-	if hasCredentials {
-		if s.toolCreds == nil {
-			writeError(w, http.StatusInternalServerError, "internal_error",
-				"tool credential encryption is not configured; cannot store credentials")
-			return
-		}
-		encrypted, err = s.toolCreds.Encrypt(body.Credentials)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "failed to encrypt credentials")
-			return
-		}
-	}
-
 	// body.ActionPaths is nil for both an omitted field and an explicit
 	// JSON null (encoding/json's documented behavior for maps) -- either
 	// way that means "leave action_paths unchanged". A present, even
@@ -662,6 +649,64 @@ func (s *Server) UpdateTool(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "internal_error", "failed to encode action_paths")
 				return
 			}
+		}
+	}
+
+	// B-253: non-admins may only change descriptive fields
+	// (data_handling_note). Any changed admin-only field -- or any
+	// credential write -- rejects the whole request before anything is
+	// written; unchanged ones are dropped from the write (rbac_fields.go).
+	// Checked after validation so malformed input still gets its 400.
+	if uc.Role != "admin" {
+		u := toolUpdateFields{
+			Name: body.Name, MCPCommand: body.MCPCommand, MCPArgs: body.MCPArgs, BaseURL: body.BaseURL,
+			HasCredentials: hasCredentials, ActionPathsJSON: actionPathsJSON, Provider: body.Provider,
+			AuditMode: body.AuditMode, DataHandlingDesignation: body.DataHandlingDesignation,
+			RedactionRules: body.RedactionRules,
+		}
+		if s.queries == nil {
+			// No stored row to compare against (unit tests with a fake
+			// store): any admin-only field present counts as a change.
+			if u.Name != nil || u.MCPCommand != nil || u.MCPArgs != nil || u.BaseURL != nil || u.HasCredentials ||
+				u.ActionPathsJSON != nil || u.Provider != nil || u.AuditMode != nil ||
+				u.DataHandlingDesignation != nil || u.RedactionRules != nil {
+				writeRoleForbidden(w, uc.Role)
+				return
+			}
+		} else {
+			cur, err := loadToolAdminFields(r.Context(), s.queries, uc.OrgID, toolID)
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					writeError(w, http.StatusNotFound, "not_found", "tool not found")
+					return
+				}
+				slog.Error("update tool: load for role check failed", "tool_id", toolID, "err", err)
+				writeError(w, http.StatusInternalServerError, "internal_error", "failed to update tool")
+				return
+			}
+			if toolAdminOnlyChange(&u, cur) {
+				writeRoleForbidden(w, uc.Role)
+				return
+			}
+			body.Name, body.MCPCommand, body.MCPArgs, body.BaseURL = u.Name, u.MCPCommand, u.MCPArgs, u.BaseURL
+			actionPathsJSON, body.Provider, body.AuditMode = u.ActionPathsJSON, u.Provider, u.AuditMode
+			body.DataHandlingDesignation, body.RedactionRules = u.DataHandlingDesignation, u.RedactionRules
+		}
+	}
+
+	// Encrypted only after the B-253 role check above, so a non-admin's
+	// credential write is refused before any credential handling.
+	var encrypted []byte
+	if hasCredentials {
+		if s.toolCreds == nil {
+			writeError(w, http.StatusInternalServerError, "internal_error",
+				"tool credential encryption is not configured; cannot store credentials")
+			return
+		}
+		encrypted, err = s.toolCreds.Encrypt(body.Credentials)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to encrypt credentials")
+			return
 		}
 	}
 

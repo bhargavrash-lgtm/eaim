@@ -221,6 +221,26 @@ func (s *Server) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// B-253: non-admins may only contain (suspend/revoke). Any changed
+	// admin-only field rejects the whole request before anything is
+	// written; unchanged ones are dropped from the write (rbac_fields.go).
+	if uc.Role != "admin" {
+		cur, err := s.queries.GetAgent(r.Context(), id, uc.OrgID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "not_found", "agent not found")
+				return
+			}
+			slog.Error("update agent: load for role check failed", "agent_id", id, "err", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to update agent")
+			return
+		}
+		if agentAdminOnlyChange(&req, *cur) {
+			writeRoleForbidden(w, uc.Role)
+			return
+		}
+	}
+
 	p := store.UpdateAgentParams{
 		ID:    id,
 		OrgID: uc.OrgID,

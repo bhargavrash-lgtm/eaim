@@ -4,7 +4,23 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-29, newest) — B-258 decided; B-259 split (B-260 minted); docs only
+## Active decision thread (2026-09-29, newest) — B-253 DONE: RBAC split; next is B-252 C0
+
+**B-253 is done, server only.** "Operators contain; admins expand or destroy."
+- **Admin-only:** key minting, agent create and delete, the endpoint link (set or clear), tool create and delete, node delete. No node create or update route exists.
+- **Admin-only in-handler fields:** reactivation; agent scope, risk_tier, TTL; every tool field except `data_handling_note`. The founder answered mid-build that `action_paths` and `mcp_*` are admin-only.
+- **Approver** reads agents and tools only.
+- Tests 504/0/0; 15 mutations caught; live 42/42 with real tokens for 4 roles; snapshot identical; both reviews completed.
+- Evidence: `B-253_VERIFICATION.md`.
+
+**Open for the founder:**
+- operators still have full policy writes (under the rule, loosening a policy is an expansion);
+- revoked→suspended (fold into B-230);
+- trim the approver tool projection.
+
+**Next:** B-252 C0, which includes UI role gating and Agent Detail Overview-only for approvers. B-258's brief waits on nothing further now that B-253 is closed.
+
+## Active decision thread (2026-09-29) — B-258 decided; B-259 split (B-260 minted); docs only
 
 - **B-258 is approved as recommended:**
   - deny and escalate with a semantic rule fail closed; allow stays skipped;
@@ -2461,6 +2477,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-29 by Claude Code — B-253 RBAC split done (server; 504/0/0; 15 mutations; live 42/42; both reviews completed). Marker cleared.
+
+Prior entry:
 2026-09-29 by Claude Code — B-258 decision recorded (briefed after B-253); B-259 split, B-260 minted. Docs only.
 
 Prior entry:

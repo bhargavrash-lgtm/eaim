@@ -210,7 +210,12 @@ func TestCreateAgent_AdminRole_Succeeds(t *testing.T) {
 	}
 }
 
-func TestCreateAgent_OperatorRole_Succeeds(t *testing.T) {
+// B-253 changed this rule deliberately: this test used to be
+// TestCreateAgent_OperatorRole_Succeeds. Under "operators contain; admins
+// expand or destroy", creating a governed identity is an expansion, so an
+// operator now gets 403 and nothing is created (the admin case is covered
+// by TestCreateAgent_Success above).
+func TestCreateAgent_OperatorRole_Forbidden(t *testing.T) {
 	ms := api.NewMockStore()
 	ts := newTestServer(t, ms)
 
@@ -218,11 +223,11 @@ func TestCreateAgent_OperatorRole_Succeeds(t *testing.T) {
 	resp := ts.do(t, http.MethodPost, "/v1/gateway/agents", token, validAgentPayload())
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusForbidden {
-		t.Fatalf("operator role must be allowed to create agents, got 403")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("operator creating an agent: got %d, want 403 (B-253: agent create is admin-only)", resp.StatusCode)
 	}
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		t.Fatalf("want 200/201 for operator, got %d", resp.StatusCode)
+	if ms.CreateAgentCalls != 0 {
+		t.Errorf("CreateAgent must not be called for an operator, called %d times", ms.CreateAgentCalls)
 	}
 }
 

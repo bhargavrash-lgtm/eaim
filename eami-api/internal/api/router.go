@@ -327,27 +327,42 @@ func (s *Server) Handler() http.Handler {
 			r.Delete("/v1/admin/model-pricing/{model}", s.DeleteModelPricing)
 		})
 
-		// ── Admin + operator: write access ────────────────────────────────────
+		// ── Admin only: identity/credential-expanding and destructive writes ──
+		// B-253, "operators contain; admins expand or destroy": minting an
+		// agent credential, creating or deleting an agent, binding an
+		// endpoint to an identity, creating or deleting a tool (a new
+		// egress target), deleting a gateway node. (No node create/update
+		// route exists: nothing in eami-api or eami-gateway writes
+		// gateway_nodes.) Field-level expansions on routes operators still
+		// use are checked in-handler: UpdateAgent, UpdateTool.
 		r.Group(func(r chi.Router) {
-			r.Use(s.requireRole("admin", "operator"))
-			r.Get("/v1/auth/api-keys", s.ListAPIKeys)
+			r.Use(s.requireRole("admin"))
 			r.Post("/v1/auth/api-keys", s.CreateAPIKey)
-			r.Delete("/v1/auth/api-keys/{keyId}", s.RevokeAPIKey)
 			r.Post("/v1/gateway/agents", s.CreateAgent)
-			r.Patch("/v1/gateway/agents/{agentId}", s.UpdateAgent)
 			r.Delete("/v1/gateway/agents/{agentId}", s.DeleteAgent)
-			r.Put("/v1/gateway/agents/{agentId}/config", s.UpdateAgentConfig)
 			// Endpoint <-> gateway agent identity link (B-164/B-165) --
 			// the only write path for endpoints.gateway_agent_id.
 			r.Patch("/v1/endpoints/{endpointId}/link-agent", s.LinkEndpointAgent)
+			r.Post("/v1/gateway/tools", s.CreateTool)
+			r.Delete("/v1/gateway/tools/{toolId}", s.DeleteTool)
+			r.Delete("/v1/gateway/nodes/{nodeId}", s.DeleteNode)
+		})
+
+		// ── Admin + operator: write access ────────────────────────────────────
+		// Containment (key list/revoke, suspend) and operational writes.
+		// UpdateAgent and UpdateTool enforce admin-only fields in-handler.
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireRole("admin", "operator"))
+			r.Get("/v1/auth/api-keys", s.ListAPIKeys)
+			r.Delete("/v1/auth/api-keys/{keyId}", s.RevokeAPIKey)
+			r.Patch("/v1/gateway/agents/{agentId}", s.UpdateAgent)
+			r.Put("/v1/gateway/agents/{agentId}/config", s.UpdateAgentConfig)
 			r.Post("/v1/gateway/policies", s.CreatePolicy)
 			r.Put("/v1/gateway/policies/reorder", s.ReorderPolicies)
 			r.Post("/v1/gateway/policies/reorder", s.ReorderPolicies)
 			r.Patch("/v1/gateway/policies/{policyId}", s.UpdatePolicy)
 			r.Delete("/v1/gateway/policies/{policyId}", s.DeletePolicy)
-			r.Post("/v1/gateway/tools", s.CreateTool)
 			r.Patch("/v1/gateway/tools/{toolId}", s.UpdateTool)
-			r.Delete("/v1/gateway/tools/{toolId}", s.DeleteTool)
 			r.Post("/v1/gateway/tools/{toolId}/test", s.TestTool)
 			// OpenAPI-spec action discovery (B-075): stateless preview,
 			// writes nothing -- generated actions only ever reach
@@ -361,7 +376,6 @@ func (s *Server) Handler() http.Handler {
 			r.Delete("/v1/gateway/workflows/{workflowId}", s.DeleteWorkflow)
 			// Multi-Hop Workflows Brief 2 (B-059): static per-step params.
 			r.Put("/v1/gateway/workflow-steps/{stepId}/params", s.PutWorkflowStepParams)
-			r.Delete("/v1/gateway/nodes/{nodeId}", s.DeleteNode)
 			// Alert rules (write)
 			r.Post("/v1/alerts/rules", s.CreateAlertRule)
 			r.Put("/v1/alerts/rules/{ruleId}", s.UpdateAlertRule)
@@ -377,14 +391,25 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/v1/alerts/{alertId}/resolve", s.ResolveAlert)
 		})
 
+		// ── Admin + operator + viewer + approver: agent and tool reads ────────
+		// B-253 Q-E: approvers decide approvals about agents and tools, so
+		// they may read those two entities -- list and by id (tools have no
+		// by-id route) -- and nothing else from the broad read group below
+		// (no agent config/connections, endpoints, CMDB, keys, policies...).
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireRole("admin", "operator", "viewer", "approver"))
+			r.Use(s.viewerReadOnly)
+			r.Get("/v1/gateway/agents", s.ListAgents)
+			r.Get("/v1/gateway/agents/{agentId}", s.GetAgent)
+			r.Get("/v1/gateway/tools", s.ListTools)
+		})
+
 		// ── Admin + operator + viewer: read access ────────────────────────────
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireRole("admin", "operator", "viewer"))
 			r.Use(s.viewerReadOnly)
-			r.Get("/v1/gateway/agents", s.ListAgents)
 			r.Get("/v1/cmdb/classifications", s.ListCMDBClassifications)
 			r.Get("/v1/cmdb/assets", s.ListCMDBAssets)
-			r.Get("/v1/gateway/agents/{agentId}", s.GetAgent)
 			r.Get("/v1/gateway/agents/{agentId}/config", s.GetAgentConfig)
 			// Workspaces (B-197 increment 3): names/existence are
 			// organizational metadata, not the scoped data domains B-197
@@ -394,7 +419,6 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/v1/gateway/agents/{agentId}/connections", s.GetAgentConnections)
 			r.Get("/v1/gateway/policies", s.ListPolicies)
 			r.Get("/v1/gateway/policies/{policyId}", s.GetPolicy)
-			r.Get("/v1/gateway/tools", s.ListTools)
 			r.Get("/v1/gateway/workflows", s.ListWorkflows)
 			r.Get("/v1/gateway/workflows/{workflowId}", s.GetWorkflow)
 			r.Get("/v1/gateway/workflow-steps/{stepId}/params", s.GetWorkflowStepParams)

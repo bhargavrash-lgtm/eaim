@@ -1,5 +1,33 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-253 — RBAC split: operators contain, admins expand or destroy — 2026-09-29 (Claude Code)
+
+Server only (UI gating is B-252 C0(c)). The evidence record, with the field classification table and both reviews verbatim, is `B-253_VERIFICATION.md`.
+
+**Files**
+- **`eami-api/internal/api/router.go`:**
+  - new admin-only group: `POST /v1/auth/api-keys`, `POST`/`DELETE /v1/gateway/agents`, `PATCH /v1/endpoints/{id}/link-agent` (set or clear), `POST`/`DELETE /v1/gateway/tools`, `DELETE /v1/gateway/nodes/{id}`;
+  - new approver read group: `GET` agents (list and by id) and the tools list.
+- **New `eami-api/internal/api/rbac_fields.go`:** `agentAdminOnlyChange`, `toolAdminOnlyChange` and `loadToolAdminFields`, with semantic echo comparison and stripping.
+- **`agents.go`:** `UpdateAgent` role check.
+- **`tools.go`:** `UpdateTool` role check; encryption moved after it.
+- **`middleware.go`:** `writeRoleForbidden` (shared 403 body).
+- **`agents_test.go`:** the operator-create test converted to `…_Forbidden`.
+- **New tests:** `rbac_split_pg_test.go` (real Postgres) and `rbac_fields_test.go`.
+
+**Verification**
+- `go test ./...` gives PASS=504, FAIL=0, SKIP=0.
+- **Mutations:** 15, each caught.
+- **Live:** 42/42 with real admin, operator, approver and viewer tokens.
+- **Cleanup:** snapshot identical.
+- **Reviews:** both completed.
+
+**Behaviour changes to know**
+- Operators can no longer create or delete agents or tools, mint keys, link or unlink endpoints, delete nodes, reactivate agents, or edit any tool field except `data_handling_note`.
+- Approvers can now read agents and tools (list and by id) but not agent config, connections, endpoints, CMDB, keys or policies.
+
+**Follow-ups:** `B-253_VERIFICATION.md` §6. Main items: policy-write RBAC (a founder decision), revoked→suspended (B-230), a trimmed approver tool projection, OpenAPI role drift (Architect).
+
 ## B-254 — "Never fires" warnings for policies with a semantic rule — 2026-09-28 (Claude Code)
 
 Horizon 0 hardening (an interim honesty fix; the real fix is B-007). The evidence record, including the deny/escalate/allow and evaluator-error traces and the code review verbatim, is `B-254_VERIFICATION.md`.

@@ -82,3 +82,13 @@ Found by the B-236 reviews. They predate B-236 and sit outside its diff. At foun
 - **"Never fires" uses the same warning pill colour as the `Escalate` ActionBadge.** A row can show two identical amber pills meaning different things. A product call (danger colour, or a distinct icon) for whoever next touches the badges.
 - **`PolicyPanel.tsx`: the semantic-rule `<label>` has no `htmlFor`/`id` pairing** with its textarea. This existed before; B-254 added `aria-describedby` for the note only.
 - **`eami-policy/semantic.go:15`'s comment says the stub "always returns ESCALATE".** Wrong: it returns `(false, nil)`, the rule is skipped, and the evaluator's default applies. Fix the comment with B-007 or B-258.
+
+## 2026-09-29 — B-253 follow-ups (not fixed; out of scope)
+
+- **`api/openapi.yaml` (Architect-EAMI, not edited): no per-route role requirements are documented at all.**
+  - B-253 made key minting, agent create and delete, the endpoint link, tool create and delete, and node delete admin-only.
+  - It added field-level admin-only rules on `PATCH /v1/gateway/agents/{id}` and `PATCH /v1/gateway/tools/{id}`.
+  - It gave `approver` read access to `GET /v1/gateway/agents`, `/agents/{id}` and `/tools`.
+  - The spec should document the required role(s) and the 403 response per route.
+- **`eami-ui/src/pages/gateway/ToolsPage.tsx` edit panel drops `input_schema` from action paths on save** (rows are built as `{action, path, method}`). An admin's save silently strips OpenAPI-discovered input schemas. It is pre-existing data loss. It also makes an operator's no-op REST save look "changed" (403), which C0(c) will hide.
+- **`UpdateAgent` doesn't validate `status`:** only the DB CHECK does, so a bad value gives a 500 echoing the constraint text (B-234 class). It also role-checks before validation, while `UpdateTool` validates first. Minor inconsistency.

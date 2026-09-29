@@ -2966,7 +2966,7 @@ Choices, for the founder:
 
 **Status:** QUEUED. Each step is scoped as its own brief from the plan.
 
-### B-253 — RBAC split: "operators contain; admins expand or destroy" — **QUEUED, 2026-09-28**
+### B-253 — RBAC split: "operators contain; admins expand or destroy" — **DONE, 2026-09-29** (evidence: `B-253_VERIFICATION.md`)
 **Origin:** `IA_CONSOLIDATION_MIGRATION_PLAN.md` Part D, Q2, and its founder decision. Minted at founder direction 2026-09-28. B-253 was confirmed free against BACKLOG.md directly: the counter read B-252, and B-252 to B-257 were unused. A grep found no open item overlapping this scope (see the per-item notes where an adjacent item exists).
 **Decision:**
 - **Stay admin + operator:** suspend and API-key revoke.
@@ -2987,7 +2987,16 @@ Choices, for the founder:
 - viewer unchanged;
 - a mutation test for each group move.
 
-**Status:** QUEUED. **Part A was done 2026-09-28: `RBAC_SPLIT_PART_A.md`** (route inventory, in-handler splits for reactivate and tool credential/`base_url`, reliance, no credential material in reads, proposed groups, test plan, and open questions Q-A to Q-F). The build brief awaits those answers.
+**Status:** DONE 2026-09-29.
+- **Route groups:** admin-only for key minting, agent create and delete, the endpoint link (set or clear), tool create and delete, and node delete. No node create or update route exists.
+- **Approver read group:** agents (list and by id) and the tools list only.
+- **In-handler checks** (`rbac_fields.go`): reactivation, and every evaluation-, drift-, token- or audit-read agent and tool field. Per the founder: `action_paths` and `mcp_command`/`mcp_args` too. Only `data_handling_note` stays operator on tools. A changed restricted field rejects the whole request; echoed values are stripped.
+- **Tests:** 504/0/0, including the real-Postgres matrix and a chi.Walk approver sweep. 15 separate mutations caught.
+- **Live:** 42/42 with real tokens for 4 roles. Snapshot identical.
+- **Reviews:** both completed with no High or Medium in scope.
+- **Follow-ups:** `B-253_VERIFICATION.md` §6. Next: B-252 C0.
+
+Part A was done 2026-09-28: `RBAC_SPLIT_PART_A.md` (route inventory, in-handler splits for reactivate and tool credential/`base_url`, reliance, no credential material in reads, proposed groups, test plan, and open questions Q-A to Q-F). The build brief awaits those answers.
 
 ### B-254 — Policies can carry a "semantic rule" that silently never fires, with no warning — **DONE, 2026-09-28** (evidence: `B-254_VERIFICATION.md`)
 **Origin:** `IA_CONSOLIDATION_INVESTIGATION.md` D3. Minted at founder direction 2026-09-28. B-254 was confirmed free against BACKLOG.md directly: the counter read B-252, and B-252 to B-257 were unused. A grep found no open item overlapping this scope (see the per-item notes where an adjacent item exists).
