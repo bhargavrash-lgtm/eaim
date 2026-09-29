@@ -1,5 +1,26 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## Discovery administration investigation (three-layer model and deep-discovery tiers) — 2026-09-30 (Claude Code)
+
+Investigation only: **no code, no schema, no B-IDs.** The plan is `DISCOVERY_ADMIN_INVESTIGATION.md`.
+
+**Traced facts:**
+- **Installers:** they are static, signed per-platform installers (`eami-agent/installer/*`). Only the collector URL, API key and CA path are injected at install time, and there is **no preset concept**.
+- **Remote config:** it is keyed by **governed agent**. The chain is `agent_configs.agent_id → gateway_agents`, and an endpoint must be manually linked to receive it; unlinked endpoints get 404 and keep their local YAML. Org resolution is single-org (`GetDefaultOrgID`).
+- **`eami-collector`:** it is a passive receiver and relay, a config proxy and the key-management CLI. It never originates traffic toward endpoints.
+- **B-139** is zero-built.
+- **Shadow-agent signals:** `ai_processes` is collected and stored but **shown nowhere**. `scheduled_tasks` and `file_changes` aren't sent. No install timestamp, process start time or owning user is captured.
+- **Onboarding:** there is no clean path to onboard a discovered process as a governed agent. The endpoint link is one agent per endpoint, and there is no process-level identity.
+
+**Flagged:**
+- "B-054" in the brief is actually TASK-054.
+- The brief's active, credentialed "agentless component" differs from B-139's passive network-inspection framing.
+- "Configure" is an Actions-tab row, not a tab.
+- Layer 1 and the deep-discovery tiers have no roadmap item.
+- §7.7's Model Details lives on Tool Detail, so discovered model servers need a home before they are registered.
+
+**Six founder decisions (D1–D6)** are listed in the plan.
+
 ## B-252 C1 — Agent handoff from Assets — 2026-09-30 (Claude Code)
 
 The evidence record, with both reviews verbatim, is `B-252_C1_VERIFICATION.md`. **Deliberate deviation:** the approved "agent_id filter" is implemented as `GET /v1/cmdb/assets?id=`, used with `kind=agent`. The reasoning is in the verification file; the code review called it "sound".

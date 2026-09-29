@@ -4,7 +4,30 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-30, newest) — B-252 C1 done (agent handoff from Assets)
+## Active decision thread (2026-09-30, newest) — Discovery admin investigation delivered; awaiting D1–D6
+
+- **Delivered** `DISCOVERY_ADMIN_INVESTIGATION.md` (investigation only; no code, no B-IDs).
+- **Part 1, the three-layer model:**
+  - Layer 1 (presets and packaging) doesn't exist; installers are static.
+  - Layer 2 remote config is keyed by governed agent (wrong identity) and single-org.
+  - The proposal: `discovery_presets` plus per-preset **enrollment keys**, with endpoints assigned to presets. Signed installers stay unchanged, and deployment bundles are parameters per MDM channel.
+  - The agentless component is a **Discovery Probe** (`eami-probe`, not "Collector"): SSH/WinRM/vCenter/Proxmox and an AI-port sweep in v1, with **probe-sealed credentials** (the API can't decrypt) and allow-listed ranges.
+  - Layer 1 gets its own "Discovery setup" destination. Layer 3 becomes read-only on Endpoint Detail.
+- **Part 2, deep discovery:**
+  - LLM characterisation uses metadata and health APIs only (Ollama, OpenAI-compatible, TGI, Triton/NIM), with no inference by default.
+  - Model Details lives on Tool Detail, so discovered servers need a pre-registration home (D5).
+  - Shadow agents (2a) use only real observational signals. The best one is a PID-joined AI process plus a direct provider connection. "Onboard as Governed Agent" needs new work, completing only on the first real dispatch.
+  - Governed agents (2b): Lineage already is the deep view.
+- **Awaiting the founder:**
+  - **D1:** is the probe B-139 or a new item?
+  - **D2:** roadmap lines for the new work.
+  - **D3:** confirm "B-054" meant TASK-054.
+  - **D4:** the credential model.
+  - **D5:** where a discovered model server lives.
+  - **D6:** whether install and start-time instrumentation is worth adding.
+- **C2** is otherwise next on the IA plan.
+
+## Active decision thread (2026-09-30) — B-252 C1 done (agent handoff from Assets)
 
 - **C1 is built, reviewed, live-verified and pushed.** The record is `B-252_C1_VERIFICATION.md`.
   - Agent Detail now lives at `/assets/agents/:id`; `/gateway/agents/:id` redirects. The Assets agent row opens it.
@@ -2538,6 +2561,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — Discovery administration investigation (three-layer model + deep-discovery tiers) delivered; docs only; awaiting D1–D6. Marker cleared.
+
+Prior entry:
 2026-09-30 by Claude Code — B-252 C1 done: /assets/agents/:id + redirect, Classification tab, cross-links, orphan panels deleted; live 33/33, mutations 4/4, both reviews. Marker cleared.
 
 Prior entry:
