@@ -145,4 +145,22 @@ Each is also asserted to have **written nothing** (a row re-read).
 - **Q-E: what "assets" means for `approver`.** Proposed: CMDB assets and classifications, plus endpoint reads (`/v1/endpoints*`), since Endpoint Detail becomes an asset page in C2, plus agent connections and config. Excluded: `/v1/discover/endpoints` (HTTP-traffic observations, not assets). Confirm.
 - **Q-F: agent `scope`, `risk_tier` and `token_ttl_seconds` edits.** The plan's recommendation kept these operator. Raising `token_ttl_seconds` or widening `scope` arguably *expands*. Recommend: keep operator for now, and revisit with B-255 (agent edit UI), where server-side diffing can make only widening admin-only.
 
+## 7. Founder decisions (2026-09-29)
+
+**The rule:** *operators contain; admins expand or destroy.*
+
+- **Q-A, agent create:** **admin-only.**
+- **Q-B, tool create:** the **whole route** is admin-only.
+- **Q-C, tool `provider`, `audit_mode`, `redaction_rules`:** **admin-only** (in-handler).
+- **Q-D, tool delete and node delete:** **admin-only**, as are node create and node update wherever such routes exist.
+- **Q-E, approver reads:** **agents and tools only** (list and by id). No agent config, no connections, no endpoints, no CMDB, no keys.
+- **Q-F:** **any field that policy evaluation, drift detection, token issuance or audit reads is admin-only**, in-handler.
+- A PATCH mixing allowed and restricted fields is **rejected whole** (no partial write).
+- `TestCreateAgent_OperatorRole_Succeeds` is **updated to the new rule**, not deleted.
+
+**Follow-ons from these decisions:**
+- **B-252 C0:** approvers lose agent config and connections, so Agent Detail must show approvers **Overview only** (hide the Connections and Actions tabs).
+- **B-261** (minted): the approvals response should carry the escalating policy's name, so approvers get context without wider reads.
+- **B-194:** a note was added on the 7-character discovered-key prefix in the endpoint report.
+
 **Side note** (no action): `BACKLOG.md` B-248 item 3 (the invite link documented as expiring after "72 hours" vs the actual 48 h) duplicates the older **B-213**, which is the same doc correction. When B-248 is picked up, that item should defer to B-213.

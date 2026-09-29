@@ -2011,6 +2011,8 @@ B-164 also flagged one adjacent-but-unrelated dormant artifact so it isn't mista
 - [ ] Re-enable `models` for the demo endpoint (and everywhere else, if disabled more broadly in the interim) once fixed, and confirm real model files are still correctly detected post-fix (this scanner does have a real job to do)
 **Dependencies:** none. Discovered alongside B-191.
 
+**Related note (2026-09-29, from B-253 Part A):** the raw endpoint report (`latest_report`, returned by `GET /v1/endpoints/{id}` and rendered in Discover's drawer) includes the **7-character prefix of discovered cloud-client API keys**. That is a prefix, not a usable secret, but it is the same "discovery collects more sensitive material than it needs" class as this item. Decide alongside the scanner fix whether to keep, shorten or drop the prefix. B-253 deliberately does **not** grant approvers endpoint reads.
+
 ### B-195 — Real paste-detection architecture fixes shipped; live browser→host connection failure investigated, **root cause NOT found** — closing out for next session with real leads
 **Found during:** live demo prep (2026-09-19), triggered by a task brief on paste-event ingestion architecture correctness after a live paste produced zero rows.
 
@@ -3120,4 +3122,19 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 **Tests:** create and update with a malformed pattern returns 400 on both route sets; a valid glob still saves; existing policies are unaffected. Mutation-test the validation.
 **Status:** QUEUED.
 
-## Next B-ID: B-261
+### B-261 — Approvals should carry the escalating policy's name (context for approvers without wider reads) — **QUEUED (Low), 2026-09-29**
+**Origin:** B-253 founder decision Q-E. Approvers can read agents and tools only, not policies. Minted at founder direction. B-261 was confirmed free against BACKLOG.md directly: the counter read B-261, and a grep found no open item covering approval context or the policy name.
+
+**Problem:**
+- An approver deciding an escalation sees the agent, tool, action and justification, but not **which policy escalated it**.
+- After B-253 the approver cannot read policies.
+- The approval response has only `policy_id` (`approvals.go` `ApprovalResp`). Worse, **the gateway's escalation insert never sets `policy_id`** (`eami-gateway/internal/approval/router.go` `Submit`; noted in B-237's trace). So even the ID is usually empty.
+
+**Fix:**
+- The gateway records the escalating decision's `PolicyID` on the approval row.
+- The API returns `policy_name` (joined, org-scoped), plus the policy's snapshot name at escalation time if the policy can later be renamed or deleted.
+- Tests: an escalation carries the policy name through to `GET /v1/approvals`; an approver sees it without policy read access.
+
+**Status:** QUEUED.
+
+## Next B-ID: B-262
