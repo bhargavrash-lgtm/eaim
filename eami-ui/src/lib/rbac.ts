@@ -22,6 +22,9 @@ export const can = {
   // Agent Detail's Actions tab: approvers see Overview only (B-253 Q-E);
   // viewers keep the tab with its read-only notice.
   viewAgentActionsTab: (r: Role) => r === 'admin' || r === 'operator' || r === 'viewer',
+  // GET /v1/gateway/agents/{id}/lineage (admin, operator, viewer): audit
+  // reads exclude approvers.
+  viewAgentLineage: (r: Role) => r === 'admin' || r === 'operator' || r === 'viewer',
   // Tools
   createTool: admin, // POST /v1/gateway/tools (incl. OpenAPI discovery in the Add panel)
   editToolFully: admin, // PATCH of any admin-only tool field

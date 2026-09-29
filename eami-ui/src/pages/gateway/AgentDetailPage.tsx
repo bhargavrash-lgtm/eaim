@@ -19,6 +19,7 @@ import { useWorkflow } from '@/hooks/useWorkflows'
 import { useTools } from '@/hooks/useTools'
 import { RelationshipGraph, type SelectedGraphNode } from './RelationshipGraph'
 import { AgentActionsTab } from '@/components/agents/AgentActionsTab'
+import { AgentLineageTab } from '@/components/agents/AgentLineageTab'
 
 // ── Read-only detail panels ──────────────────────────────────────────────────
 // Each wraps the existing SlideOverPanel shell (B-178) -- per this brief's
@@ -139,12 +140,14 @@ function Field({ label, value }: { label: string; value: string }) {
 const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'connections', label: 'Connections' },
+  { id: 'lineage', label: 'Lineage' },
   { id: 'actions', label: 'Actions' },
 ] as const
 type TabId = (typeof TABS)[number]['id']
 const TAB_VISIBLE: Record<TabId, (role: string | undefined) => boolean> = {
   overview: () => true,
   connections: can.viewAgentConnections,
+  lineage: can.viewAgentLineage,
   actions: can.viewAgentActionsTab,
 }
 
@@ -294,6 +297,14 @@ export function AgentDetailPage() {
           </div>
         </div>
         </div>)}
+
+        {/* Lineage (roadmap Horizon 1 "Agent lineage"): mounted only while
+            open, so Agent Detail's own load makes no lineage request. */}
+        {activeTab === 'lineage' && (
+          <div role="tabpanel" id="agent-panel-lineage" aria-labelledby="agent-tab-lineage">
+            <AgentLineageTab agentId={agent.id} />
+          </div>
+        )}
 
         {/* Kept mounted (hidden) so an in-flight suspend/reactivate's result
             or error isn't lost if the user switches tabs mid-request. */}

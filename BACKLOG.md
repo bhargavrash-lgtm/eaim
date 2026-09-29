@@ -3220,6 +3220,8 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 - Confirm in Part A whether building it on existing partitions needs a per-partition `CONCURRENTLY` approach at real volume.
 - Re-run EXPLAIN on the Connections and Lineage queries before and after.
 
+**Related, shipped 2026-09-29:** Agent Lineage (`AGENT_LINEAGE_VERIFICATION.md`). It is the second per-agent reader that needs this index; three of its six queries scan the org's full history. It measured about 16–26 ms median at Dev Org volume. Its security review also suggests a per-route limiter; see NOTES.md.
+
 **Status:** QUEUED (Low). Do not build now.
 
 ## Next B-ID: B-266

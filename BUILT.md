@@ -1,5 +1,43 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## Agent Lineage — the Lineage tab on Agent Detail — 2026-09-29 (Claude Code)
+
+**Roadmap:** Horizon 1, "Agent lineage" (added in `c740c15`). DESIGN_SYSTEM.md §7.7 has a Lineage row. The evidence record, with all three reviews verbatim, is `AGENT_LINEAGE_VERIFICATION.md`.
+
+**Files**
+- `eami-api/internal/store/agent_lineage.sql.go` (new): 6 read queries.
+- `eami-api/internal/api/agent_lineage.go` (new): `GET /v1/gateway/agents/{agentId}/lineage?window=24h|7d|30d`, default 7d.
+- `eami-api/internal/api/router.go`: the route sits in the admin/operator/viewer read group next to `/connections`; approvers get 403.
+- `eami-api/internal/api/agent_lineage_pg_test.go` (new): 3 real-Postgres tests.
+- `eami-ui/src/components/agents/AgentLineageTab.tsx` (new).
+- `eami-ui/src/hooks/useAgents.ts`: `useAgentLineage` and its types.
+- `eami-ui/src/pages/gateway/AgentDetailPage.tsx`: tabs are now Overview, Connections, Lineage, Actions. Lineage mounts only while open.
+- `eami-ui/src/lib/rbac.ts`: `can.viewAgentLineage`.
+
+**Rules**
+- **Scoping:** every query filters on `org_id` and `agent_id`, and every join also matches org. A foreign-org or unknown agent returns 404 before any aggregate runs.
+- **Counting:** each call counts once, by the gateway's first decision. The escalation-resolution clone (`approval_id` set, allowed/denied) is excluded from call counts (`isCall`).
+- **Cost:** FinOps' exact per-row expression, including cache tiers, over `[since, now)`.
+  - **Per agent:** FinOps' definition. Null ("—") if the agent never recorded usage.
+  - **Per tool:** shown only for a current `ai_provider` connector that has usage; otherwise "—".
+  - **NULL `tool_name` usage:** counts in the agent total only.
+  - **Unpriced usage:** counted and shown beside the amount.
+- **Not included:** no data classification (redaction records only a count) and no redaction count, both by founder decision.
+
+**Verified 2026-09-29**
+- **Checks:** `go vet`, the full `go test ./internal/...`, `tsc` and `vite build` all pass.
+- **Real-Postgres tests:** every aggregate for 24h/7d/30d equals both the hand-derived values and independent SQL. Cross-org rows carrying the same `agent_id` never count, and a foreign caller gets 404.
+- **Mutations:** 16 of 16 killed.
+- **Live** (real gateway dispatches plus a real historical agent, cross-checked with psql): 42/42 PASS, with median latency of about 16–26 ms.
+- **Reviews:** code, security and fix-delta re-review. The code review's High (NULL `tool_name` gave a 500) and Medium (escalations double-counted) are both fixed.
+
+**Limitations**
+- Full-history scans without an `agent_id` index. **B-265** is queued.
+- A directly *allowed* call was not exercised live. The Dev Org has none in any window, and a successful dispatch needs an external upstream. The real-Postgres tests cover it.
+- The gateway records dispatch failures as `denied` with no policy, and Lineage shows them that way.
+- The route isn't in `openapi.yaml` (Architect-EAMI); the UI uses the `apiFetch` escape hatch.
+- The 36 fixture audit rows from the live runs stay in the Dev Org's hash chain.
+
 ## B-252 C0 — Endpoint components extracted; UI role gating matches B-253 — 2026-09-29 (Claude Code)
 
 The evidence record is `B-252_C0_VERIFICATION.md`: Part A, the role map, live results, mutations, and both reviews verbatim.

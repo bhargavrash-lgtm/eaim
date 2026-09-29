@@ -84,6 +84,64 @@ export function useAgentConnections(id: string | null) {
   })
 }
 
+// Agent Lineage (Horizon 1 "Agent lineage"): GET /v1/gateway/agents/{id}/
+// lineage, not yet in openapi.yaml -- the same documented apiFetch escape
+// hatch as /connections above. Types mirror eami-api/internal/api/
+// agent_lineage.go's AgentLineageResp exactly. A null cost means "no cost
+// applies" (not an AI-provider connector, or no AI usage ever recorded)
+// and renders as "—", never $0.
+export type LineageWindow = '24h' | '7d' | '30d'
+
+export type AgentLineageSummary = {
+  risk_tier: string
+  owner: string
+  tools_ever_touched: number
+  calls_in_window: number
+  escalations_30d: number
+  denials_30d: number
+  first_seen: string | null
+  last_seen: string | null
+  cost_usd_window: number | null
+  unpriced_calls_window: number
+}
+export type AgentLineageTool = {
+  tool_id: string | null
+  tool_name: string
+  tool_type: string | null
+  calls: number
+  allowed: number
+  escalated: number
+  denied: number
+  calls_total: number
+  last_call_at: string | null
+  cost_usd: number | null
+  unpriced_calls: number
+}
+export type AgentLineagePolicy = { policy_id: string; name: string; action: string; hits: number; last_hit_at: string | null }
+export type AgentLineageWorkflow = { workflow_id: string; name: string; runs: number; last_run_at: string }
+export type AgentLineage = {
+  agent_id: string
+  window: LineageWindow
+  window_start: string
+  generated_at: string
+  summary: AgentLineageSummary
+  tools: AgentLineageTool[]
+  policies: AgentLineagePolicy[]
+  workflows: AgentLineageWorkflow[]
+}
+
+export function useAgentLineage(id: string | null, window: LineageWindow) {
+  return useQuery({
+    queryKey: ['agent-lineage', id, window],
+    enabled: id != null,
+    // Keep the previous window's data on screen while the new one loads,
+    // so the window picker doesn't vanish into a spinner on every change --
+    // but only for the SAME agent, never another agent's numbers.
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[1] === id ? prev : undefined),
+    queryFn: () => apiFetch<AgentLineage>(`/v1/gateway/agents/${id}/lineage?window=${window}`),
+  })
+}
+
 export function useCreateAgent() {
   const qc = useQueryClient()
   return useMutation({

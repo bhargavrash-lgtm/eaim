@@ -100,3 +100,18 @@ Found by the B-236 reviews. They predate B-236 and sit outside its diff. At foun
   - Widen the union so future code can't narrow on a wrong one (code review CR-3, security review SR-3).
 - **`ToolsPage.tsx` `EditToolPanel`: clicking the backdrop closes the panel mid-save**, even though Cancel is disabled. It's the same behaviour C0 fixed in its own `EditToolNotePanel` (CR-1).
 - **The operator note panel is last-write-wins:** a stale panel can overwrite an admin's newer note. Only the note is affected. Add optimistic concurrency if it ever matters (SR-2).
+
+## 2026-09-29 — Agent Lineage review follow-ups (not fixed; out of scope)
+
+- **`store/agent_connections.sql.go` `listAgentPolicyConnections` joins `policies p ON p.id = a.policy_id` with no `p.org_id = a.org_id` match.**
+  - `audit_log.policy_id` has no org-matched FK, so a mis-attributed `policy_id` would surface another org's policy name in `/connections`.
+  - Lineage's equivalent query has the match, pinned by mutation M14.
+  - This is defence in depth; fix it the same way (security review SR-4).
+- **Per-tool cost is keyed by `tool_name`.** A deleted and re-created ai_provider connector with the same name inherits the old usage cost. It stays within one org (SR-5).
+- **`schema/schema.sql`'s `gateway_tools.type` CHECK doesn't list `ai_provider`.** The migrations do, so the reference schema has drifted (SR-6).
+- **There is no general per-route rate limit on authenticated read routes.** Only the audit export has one (`auditExportLimiter`).
+  - Lineage runs 6 queries concurrently per request.
+  - B-265's index is the main fix; a per-org limiter is optional (SR-1/SR-7).
+- **The gateway records a dispatch failure (upstream error, SSRF-guard refusal) as `denied` with no `policy_id`,** the same word as a policy denial (B-121's vocabulary).
+  - Lineage and Audit can't tell them apart except by `policy_id` being NULL.
+  - Separating them needs new audit vocabulary. That is a founder decision, not a UI fix.

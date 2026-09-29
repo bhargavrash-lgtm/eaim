@@ -58,6 +58,8 @@ Scoped, logged, real backlog items — not yet built, no invented urgency, seque
   - No org-wide or Workspace view yet.
 
   At scale, the per-agent reads want an `audit_log (org_id, agent_id, timestamp)` index (**B-265**, queued).
+
+  **Status: SHIPPED 2026-09-29.** The Lineage tab and `GET /v1/gateway/agents/{id}/lineage` are live-verified against real gateway dispatches (`AGENT_LINEAGE_VERIFICATION.md`). B-265 remains queued.
 - **The small, already-disclosed items** — B-213 (doc correction), B-218 (gateway_tools/nodes workspace scoping), the Status field allow-list nit, custom-roles investigation (deferred, correctly, pending real demonstrated need), Groups-for-users bulk-tagging (small, real, not blocked on custom roles per tonight's own analysis)
 
 ---

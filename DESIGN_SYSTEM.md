@@ -346,7 +346,7 @@ nothing here is invented ahead of its actual justification.
 | Overview | Built (B-200) | — |
 | Connections | Built (B-200/B-205) | — |
 | Actions | Built (2026-09-27) | Orphaned Configure/Suspend/Reactivate/Delete controls — see `AGENT_ACTIONS_TAB_VERIFICATION.md` |
-| Lineage | In progress (2026-09-29) | Horizon 1, "Agent lineage: real, per-agent activity from the dispatch path" (`rheoARC_Roadmap_Enterprise_AI_Platform.md`). A summary plus an activity table over the same tool, policy and workflow relationships Connections draws. Connections stays the graph (shape); Lineage is the numbers. Hidden for approvers (audit reads exclude them). |
+| Lineage | Built (2026-09-29, `AGENT_LINEAGE_VERIFICATION.md`) | Horizon 1, "Agent lineage: real, per-agent activity from the dispatch path" (`rheoARC_Roadmap_Enterprise_AI_Platform.md`). A summary plus an activity table over the same tool, policy and workflow relationships Connections draws. Connections stays the graph (shape); Lineage is the numbers. Hidden for approvers (audit reads exclude them). |
 | Orchestration | Future | Horizon 2 item 4 (Build/Orchestration layer) |
 | Autonomy Limits | Future | Horizon 2 item 5 (real autonomy safeguards) |
 | Memory | Future | Horizon 2 item 2 (RAG) |

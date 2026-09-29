@@ -2,9 +2,24 @@
 # Updated by: Claude Code (after every task) AND the PM chat (after every
 # planning decision). Read by both at the start of every session, before
 # anything else.
-ACTIVE AGENT: Code — Agent Lineage (Part A investigation) — started 2026-09-29T10:54:11Z
+ACTIVE AGENT: none
 
-## Active decision thread (2026-09-29, newest) — B-264 minted (tool note size cap); C0(b) folds into C1
+## Active decision thread (2026-09-29, newest) — Agent Lineage shipped (Horizon 1); C1 next
+
+- **Agent Lineage is built, reviewed, live-verified and pushed.** The record is `AGENT_LINEAGE_VERIFICATION.md`.
+  - Roadmap Horizon 1 "Agent lineage" and the DESIGN_SYSTEM §7.7 row were added in `c740c15` and are now marked shipped and built.
+  - It adds a Lineage tab (Overview, Connections, **Lineage**, Actions) and `GET /v1/gateway/agents/{id}/lineage?window=24h|7d|30d`.
+  - Approvers can't see it.
+- **Counting rule:** one call counts once, by the gateway's first decision; escalation-resolution rows are excluded.
+- **Cost rule:** FinOps' formula; per-tool cost only for ai_provider tools that have usage; "—" otherwise.
+- **For you (the founder):**
+  - The gateway records dispatch failures as `denied` with no policy (NOTES.md).
+  - A directly allowed call wasn't exercised live, because it needs an external upstream.
+  - The 36 fixture audit rows stay in the Dev Org's hash chain.
+- **B-265** (audit_log agent index) is queued. No B-ID was minted for Lineage itself.
+- **IA consolidation:** C1 is next. It adds its Classification tab next to Lineage; the only overlap is the `TABS` and `TAB_VISIBLE` lists. The next B-ID is B-266.
+
+## Active decision thread (2026-09-29) — B-264 minted (tool note size cap); C0(b) folds into C1
 
 - **B-264 minted (Low, queued):** a server-side size cap on `data_handling_note`, returning 400 over the cap on both create and update. The UI gets a matching `maxLength`. The exact cap is confirmed in the brief. It comes from the B-252 C0 security review, SR-1. The next B-ID is B-265.
 - **C0(b)**, deleting the orphaned `AgentAssetPanel`/`ToolAssetPanel`, **is part of C1**, not a separate brief.
@@ -2503,6 +2518,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-29 by Claude Code — Agent Lineage shipped: API + tab, real-Postgres tests, 16/16 mutations, live 42/42 with real gateway dispatches, 3 reviews. Marker cleared.
+
+Prior entry:
 2026-09-29 by Claude Code — minted B-264 (tool note size cap, queued). C0(b) folded into C1. Docs only.
 
 Prior entry:

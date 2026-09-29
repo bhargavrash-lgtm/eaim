@@ -417,6 +417,7 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/v1/workspaces", s.ListWorkspaces)
 			r.Get("/v1/workspaces/{workspaceId}", s.GetWorkspace)
 			r.Get("/v1/gateway/agents/{agentId}/connections", s.GetAgentConnections)
+			r.Get("/v1/gateway/agents/{agentId}/lineage", s.GetAgentLineage)
 			r.Get("/v1/gateway/policies", s.ListPolicies)
 			r.Get("/v1/gateway/policies/{policyId}", s.GetPolicy)
 			r.Get("/v1/gateway/workflows", s.ListWorkflows)
