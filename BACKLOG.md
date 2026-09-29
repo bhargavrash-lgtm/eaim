@@ -3146,4 +3146,46 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 
 **Status:** QUEUED.
 
-## Next B-ID: B-262
+### B-262 — Org policy writes become admin-only (same "operators contain; admins expand or destroy" rule) — **QUEUED, 2026-09-29 — decided; brief after B-252 C0**
+**Origin:** B-253 security review M1 (`B-253_VERIFICATION.md` §6). Founder decision 2026-09-29. Minted at founder direction 2026-09-29. B-262 was confirmed free against BACKLOG.md directly: the counter read B-262, and B-262 and B-263 were unused. A grep found no open item overlapping this scope.
+
+**Decision:** `POST /v1/gateway/policies`, `PATCH /v1/gateway/policies/{id}`, `DELETE /v1/gateway/policies/{id}` and `PUT`/`POST /v1/gateway/policies/reorder` (today admin + operator, `router.go`) become **admin-only**. **Do not default the whole surface back open.** Any operator exception must be named and justified the way suspend was.
+
+**Analysis for the brief** (Claude Code, 2026-09-29): the evaluator is first-match (org floor first, then priority) with a default of ALLOW.
+- **Truly containment (monotone tightening)**, the only candidates for an operator exception:
+  - **(a) Create a new `deny` policy.** A matched call can only become "deny", never looser, whatever its priority. The policy analogue of suspend: stop something now.
+  - **(b) Activate an existing draft or disabled `deny` policy.** The same reasoning.
+- **Not containment, so admin-only:**
+  - **Disabling or deleting any deny or escalate policy.** "Disable a policy during an incident" *sounds* like containment, but disabling a deny **loosens**. It is excluded unless the founder names it anyway.
+  - **Creating or enabling an `escalate` policy.** It can outrank a deny and turn "deny" into "approvable".
+  - **Any `allow` create or edit.**
+  - **Any reorder,** which can move an allow above a deny.
+  - **Editing conditions or action on any existing policy,** which can narrow a deny.
+- **Borderline, recommended admin for simplicity:** disabling an `allow` (it tightens under a default of ALLOW, but it's rare in incidents and confusing to reason about).
+- **Recommendation:** operators get (a) and (b) only, if the founder wants any exception at all. Enforce them in-handler (`action=deny`, and for (b) only a status change to `active` on a deny policy with nothing else changed), using B-253's reject-whole plus 403 pattern.
+
+**Scope notes:**
+- **Workspace policy routes** (`/v1/workspaces/{id}/policies`, gated by `requireWorkspaceRole`) can only add restrictions on top of the org floor (floor-first ordering). They are out of this item unless the founder says otherwise.
+- **UI gating** on the Policies page is needed after the server change (B-252 C0(c) pattern).
+- **Semantic-rule policies:** they never fire today (B-254). B-258 makes deny and escalate with a semantic rule fail closed, which keeps (a)/(b) monotone.
+
+**Tests** (same discipline as B-253): operator 403 with nothing written on every restricted policy route and action; admin succeeds; the (a)/(b) exceptions, if granted, pass while every loosening variant (escalate, allow, disable, reorder, condition edits, a mixed request) is refused; a mutation test for each. Both reviews and live verification with real tokens.
+
+**Status:** QUEUED. Do not build now; B-252 C0 goes first.
+
+### B-263 — Trimmed approver tool-list view: name and status only — **QUEUED (Low), 2026-09-29**
+**Origin:** B-253 security review L2. Founder decision 2026-09-29. Minted at founder direction 2026-09-29. B-263 was confirmed free against BACKLOG.md directly: the counter read B-262, and B-262 and B-263 were unused. A grep found no open item overlapping this scope.
+
+**Problem:** B-253 gave `approver` read access to `GET /v1/gateway/tools` (founder Q-E). The response (`toolToResp`) includes `base_url`, `mcp_command` (verbatim, which could hold an inline secret if an admin ever put one there), `action_paths`, `redaction_rules` and data-handling fields. Credentials are never returned.
+
+**Decision:** approvers get a **trimmed projection: name and status only.** No `base_url`, `mcp_command` or redaction settings.
+
+**Fix:**
+- Role-aware response shaping on `GET /v1/gateway/tools`: approver gets `{id, name, status}` (the ID stays so the UI can key rows and link later; confirm when briefing).
+- Other roles are unchanged.
+- The same check applies if a tool by-id route is added later (B-252 C5).
+- Tests: the approver response contains exactly the allowed keys; other roles are unchanged; a mutation test.
+
+**Status:** QUEUED. Do not build now; B-252 C0 goes first.
+
+## Next B-ID: B-264

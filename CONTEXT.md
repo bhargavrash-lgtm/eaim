@@ -4,7 +4,16 @@
 # anything else.
 ACTIVE AGENT: none
 
-## Active decision thread (2026-09-29, newest) — B-253 DONE: RBAC split; next is B-252 C0
+## Active decision thread (2026-09-29, newest) — B-262 and B-263 queued (not built); C0 next
+
+- **B-262: org policy writes (create, update, delete, reorder) become admin-only** under the same rule.
+  - Analysis recorded: under first-match with a default of ALLOW, only **creating a deny** and **enabling a deny** are monotone-tightening, so they are the only candidates for an operator exception.
+  - "Disable during an incident" loosens (disabling a deny) and stays admin.
+  - The founder confirms any exception in the brief.
+- **B-263:** an approver tool-list view with **name and status only**.
+- **Both are queued and not built.** B-252 C0 goes next. The next B-ID is B-264.
+
+## Active decision thread (2026-09-29) — B-253 DONE: RBAC split; next is B-252 C0
 
 **B-253 is done, server only.** "Operators contain; admins expand or destroy."
 - **Admin-only:** key minting, agent create and delete, the endpoint link (set or clear), tool create and delete, node delete. No node create or update route exists.
@@ -2477,6 +2486,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-29 by Claude Code — minted B-262 (policy writes admin-only, with an operator-exception analysis) and B-263 (trimmed approver tool view). Queued, not built. Docs only.
+
+Prior entry:
 2026-09-29 by Claude Code — B-253 RBAC split done (server; 504/0/0; 15 mutations; live 42/42; both reviews completed). Marker cleared.
 
 Prior entry:
