@@ -4,6 +4,19 @@
 # anything else.
 ACTIVE AGENT: none
 
+## Active decision thread (2026-09-30, newest) — B-271/B-272/B-273 minted; B-273 confirmed live (most urgent)
+
+- **B-273: confirmed live.** Packaged Linux agents never read `/etc/eami/agent.yaml`:
+  - `--config` defaults to a relative path and the systemd unit passes no args, so `collector_url=""` and reports go to stdout only;
+  - a real `.deb` built from `nfpm.yaml` was installed under systemd in WSL; the stub collector got 0 requests, and the explicit-`--config` control got `POST /v1/ingest`;
+  - macOS is suspected (same plist mechanism; untested);
+  - Windows is unaffected for connectivity (registry fallback).
+  - **The founder ranks it the most urgent of the three**: Linux Discovery has never actually reported.
+- **B-271:** the default `agent_configs` row silently disables `ai_processes`, `gpu`, `python_envs` and `nodejs_ai` on linked endpoints. Traced in code; live DB check pending (stack down).
+- **B-272:** Linux `network_activity` matching compares IPs to hostnames. It is the companion to the pre-existing B-010 (DNS stub); fix both together. B-010 was not duplicated.
+- `AI_LLM_SERVICE_MAPPING_DESIGN.md` §0 now references the real B-IDs.
+- No code changed. The next B-ID is B-274.
+
 ## Active decision thread (2026-09-30, newest) — Scanner capability audit delivered; AI/LLM Service Mapping design record saved
 
 - **Scanner audit (read-only, code-only; the stack was down):** B-193 and B-194 are still open and are **structurally linked**: the default `C:\Users` model path works around B-193 for `models` and is also what causes B-194.
@@ -2594,6 +2607,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — minted B-271 (linked-endpoint scanner disable), B-272 (Linux network_activity matching, with B-010), B-273 (packaged Linux agent ignores its config — confirmed live via real .deb under systemd; most urgent). Design record §0 updated. Docs only. Marker untouched.
+
+Prior entry:
 2026-09-30 by Claude Code — scanner capability audit (read-only) delivered; saved AI_LLM_SERVICE_MAPPING_DESIGN.md (design record, no code). No B-IDs minted (pending founder). Docs only. Marker untouched (no build).
 
 Prior entry:

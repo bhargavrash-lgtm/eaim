@@ -14,14 +14,18 @@ issues, separate from anything below:
 1. **Live bug, real severity:** linking an endpoint to a governed agent 
    silently disables 4 of 10 scanners (`ai_processes`, `gpu`, 
    `python_envs`, `nodejs_ai`) via the default `agent_configs` row 
-   allowing only 6 names. Flagged for an urgent B-ID — confirm minted.
-2. **Unconfirmed, potentially severe:** Linux/macOS agents may never 
-   read their installed config file at all — possibly running with no 
-   collector URL, printing reports to stdout only. Needs fast, direct 
-   confirmation — flagged, not yet confirmed.
-3. Two more real gaps flagged for B-IDs: `network_activity` fully 
-   non-functional on Linux (stub DNS fallback returns nothing); the 
-   service-config-path question if distinct from item 2.
+   allowing only 6 names. **B-271.**
+2. **Confirmed live 2026-09-30 (Linux); macOS suspected, same 
+   mechanism — the most urgent of the three:** packaged Linux agents 
+   never read their installed config file (`/etc/eami/agent.yaml`) — 
+   they run with no collector URL, printing reports to stdout only. 
+   **B-273** (includes the live `.deb` evidence).
+3. `network_activity` fully non-functional on Linux: **B-272** 
+   (connection matching compares raw IPs to hostnames, so never 
+   matches) together with the pre-existing **B-010** (stub DNS 
+   fallback returns nothing) — to be fixed together. The 
+   service-config-path question was not distinct from item 2; it is 
+   B-273's root cause.
 4. B-193 (SYSTEM-vs-interactive-user blind spot) and B-194 (models 
    over-collection) are both confirmed still open, and confirmed 
    *structurally linked*: the `C:\Users` default path that accidentally 

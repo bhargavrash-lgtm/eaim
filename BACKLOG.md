@@ -96,6 +96,7 @@ _(empty — founder/PM assigns from QUEUED)_
 - [ ] Real hostname correlation on Linux (e.g. via `resolvectl` per-connection query, or `/etc/resolv.conf` + local cache parsing)
 - [ ] Test added
 **Dependencies:** none. Low priority (minor detection-completeness gap).
+**Update 2026-09-30:** see **B-272**. Linux active-connection matching also never matches (it compares raw IPs to hostnames), so this stub isn't a minor gap: with B-272 the whole scanner returns nothing on Linux. Fix both together.
 
 ### B-011 — Remove or re-wire the dead `notification_channels` table
 **Objective:** `schema.sql`'s `notification_channels` table has no Go code referencing it (superseded by `notification_config`). Either drop it via migration or explain why it's still needed.
@@ -3350,4 +3351,86 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 
 **Status:** QUEUED. Do not build until briefed.
 
-## Next B-ID: B-271
+### B-271 — Linking an endpoint silently disables 4 of 10 scanners (default `agent_configs` row lists only 6) — **QUEUED, 2026-09-30 — live bug, high severity**
+**Origin:** scanner capability audit (2026-09-30), recorded in `AI_LLM_SERVICE_MAPPING_DESIGN.md` §0. Minted at founder direction 2026-09-30. B-271–B-273 were confirmed free against BACKLOG.md directly: the counter read B-271 and no B-271+ reference existed anywhere in the repo's docs.
+
+**Problem (traced in code, not yet observed live; the stack was down):**
+- `agent_configs.enabled_scanners` defaults to `ai_apps, models, mcp_servers, cloud_clients, network_activity, browser`. The same list is used in `schema/schema.sql`, `migrations-v2/000001_baseline.up.sql`, `store.AgentConfigDefaults` and the UI's `VALID_SCANNERS` in `AgentConfigPanel.tsx`.
+- The agent treats an empty list as "all scanners" (`DetectionConfig.IsEnabled`). A non-empty list is an allow-list.
+- So once an admin links an endpoint to a governed agent (B-164/B-165), its next config pull turns off **`ai_processes`, `gpu`, `python_envs` and `nodejs_ai`**, with no warning anywhere.
+- The UI can't re-enable them (only 6 checkboxes), and the API can't restore "all": empty lists are rejected, and the agent ignores empty values anyway.
+- The server doesn't validate scanner names either.
+
+**Why it matters now:** `ai_processes` is half of the shadow-agent signal (`DISCOVERY_ADMIN_INVESTIGATION.md` §174, build order item 3). Every linked endpoint, including the demo endpoint, has been silently dropping it.
+
+**Acceptance criteria:**
+- [ ] Confirm live with psql on the real dev DB: which linked endpoints' latest reports have these four fields null.
+- [ ] Decide the fix: default to all 10 names, and/or have the agent accept an explicit "all" value. Coordinate with B-269, since presets replace this row; a stop-gap fix may still be warranted before B-269 ships.
+- [ ] Server-side validation of scanner names against the real 10.
+- [ ] Bring the UI's scanner list in line with the real 10.
+- [ ] A real-Postgres test pinning the default, plus live verification that a linked endpoint reports all enabled scanners.
+
+**Dependencies:** overlaps B-269, which replaces `agent_configs`. Keep the B-194 demo-endpoint mitigation (`models` removed) in mind when changing defaults.
+
+### B-272 — `network_activity` on Linux never matches anything: connections are compared as raw IPs against hostnames — **QUEUED, 2026-09-30**
+**Origin:** scanner capability audit (2026-09-30), recorded in `AI_LLM_SERVICE_MAPPING_DESIGN.md` §0. Minted at founder direction 2026-09-30. Free-check as B-271.
+
+**Relationship to B-010 (read this first):** B-010 already covers the Linux DNS-fallback stub (`linuxDNSCache` always returns `nil`). B-272 is the **other half, and it is not in B-010**:
+- `parseProcNetTCP` stores `RemoteHost` as a decoded IP string, with no reverse lookup.
+- `MatchesKnownAIHost` compares that IP against a list of hostnames, so it can never match.
+- So `active_connections` is always empty on Linux. The code then falls back to B-010's stub, which also returns nothing.
+
+Together, **the scanner returns nothing on Linux, ever**. B-010's "low priority, minor completeness gap" framing understated this. The two should be fixed in one brief.
+
+**Related (Windows, not in scope; noted so it isn't lost):**
+- Windows matching depends on reverse-DNS results for CDN-fronted API IPs, which probably rarely match (inference, not verified).
+- Windows is IPv4-only.
+- The host list is 7 hard-coded names.
+
+`AI_LLM_SERVICE_MAPPING_DESIGN.md` §4 and §6 make fixing `network_activity` a prerequisite for the service-mapping epic.
+
+**Acceptance criteria:**
+- [ ] Real hostname correlation on Linux (a DNS source for IP→name, or an IP-range approach), fixed together with B-010.
+- [ ] A test, plus live verification on a real Linux host making a real call to a known AI API.
+
+**Dependencies:** B-010, to be fixed together.
+
+### B-273 — Packaged Linux agent never reads its installed config: no collector URL, reports go to stdout only — **CONFIRMED LIVE 2026-09-30 (Linux); macOS suspected (same mechanism, not tested) — most urgent of B-271–B-273**
+**Origin:** scanner capability audit (2026-09-30). Minted at founder direction 2026-09-30 as "confirmed-suspected", then **confirmed live the same session**. Free-check as B-271.
+
+**Root cause:**
+- `cmd/agent/main.go` defaults `--config` to the **relative** path `eami-agent.yaml`. That default is unchanged since the initial commit (`7d7709c`).
+- `installer/linux/eami-agent.service` runs `ExecStart=/usr/bin/eami-agent` with no `--config`, so the working directory is `/`.
+- `postinstall.sh` writes `/etc/eami/agent.yaml`, which nothing ever reads.
+- `config.Load` treats a missing file as fine, so the agent silently runs on built-in defaults: empty collector URL, which means stdout mode.
+- macOS: `io.eami.agent.plist` has the same no-args `ProgramArguments`, and `installer/macos/postinstall` writes the same `/etc/eami/agent.yaml`. Same mechanism; not live-tested, since no Mac is available.
+- Windows is **not** affected for collector connectivity: the MSI also passes no `--config`, but the collector URL, key and CA come from the HKLM registry fallback (ADR-014). Windows agents also never read a YAML file, so their detection settings are always the built-in defaults.
+
+**Live evidence (2026-09-30, WSL Ubuntu, systemd as PID 1):**
+- Built `eami-agent_1.0.0~b273test_amd64.deb` from the repo's own `installer/linux/nfpm.yaml` (nfpm v2.41.1, linux/amd64 static build of HEAD).
+- Installed it with `EAMI_COLLECTOR_URL=http://127.0.0.1:18888`, with a stub HTTP collector logging every request.
+- `/etc/eami/agent.yaml` was written correctly (url set). The service was `active` as `User=root`, with no WorkingDirectory set.
+- The journal showed `msg="eami-agent starting (interactive)" ... collector_url=""`, then the full JSON report dumped to stdout (the journal).
+- **The stub received zero requests** in 45 s, across the immediate first scan.
+- Positive control: the same installed binary run with `--config /etc/eami/agent.yaml` logged `collector_url=http://127.0.0.1:18888`, and the stub received `POST /v1/ingest` with the configured `X-API-Key`.
+- The test package was purged afterwards and the WSL environment left clean.
+
+**Impact:**
+- Every Linux endpoint installed from the `.deb`/`.rpm` has never reported to a collector. The same is likely true of macOS `.pkg` installs.
+- `BUILT.md` has no record of a packaged Linux install ever being live-verified, so this was never caught.
+- The only Linux/macOS agents that would have reported are ones run by hand with `--config` or from a directory that holds `eami-agent.yaml`.
+
+**Acceptance criteria:**
+- [ ] The fix: pass `--config /etc/eami/agent.yaml` in the systemd unit and the launchd plist, and/or give the agent a platform default path. Decide whether the missing-file case should be loud when running as a service.
+- [ ] Live-verify with a real `.deb` install reaching a real collector. Also test `.rpm` if feasible, and macOS on real hardware when available.
+- [ ] Check the upgrade path: existing installs get the corrected unit or plist on package upgrade.
+- [ ] Decide whether an agent with no collector URL, running as a service, should stay silent or log an error.
+
+**Related, found during this test (local build hazard, not the product bug):**
+- A Windows checkout gives `installer/linux/preremove.sh`, `eami-agent.service` and `nfpm.yaml` CRLF line endings. `.gitattributes` pins `eol=lf` only for `postinstall.sh`.
+- A `.deb` built from a Windows working tree has a `prerm` that fails with "No such file or directory" (the CRLF shebang), which blocks uninstall.
+- Irrelevant to Linux CI builds. Worth an `eol=lf` rule for all of `installer/linux/*` and `installer/macos/*` when this is fixed.
+
+**Dependencies:** none. Independent of B-269; presets can't reach an agent that can't reach the collector.
+
+## Next B-ID: B-274
