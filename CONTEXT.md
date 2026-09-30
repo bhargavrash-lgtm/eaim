@@ -3,6 +3,10 @@
 # planning decision). Read by both at the start of every session, before
 # anything else.
 ACTIVE AGENT: none
+STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing index and order for the whole AI ITAM program. It carries the same standing weight as `MULTI_AGENT_PROTOCOL.md`.
+- Before building anything in the program, read it and confirm that the next unchecked item matches what you're about to build.
+- When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
+- The file is maintained directly by the agent and is never re-pasted from chat.
 
 ## Active decision thread (2026-09-30, newest) — B-273 reopened for RPM, fixed, re-closed; B-274–B-279 minted
 
