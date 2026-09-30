@@ -7,7 +7,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/eami-agent
+# --config is required (B-273): the agent's default config path is relative
+# to its working directory, which is / under systemd, so without it the
+# agent never reads the /etc/eami/agent.yaml postinstall.sh writes.
+ExecStart=/usr/bin/eami-agent --config /etc/eami/agent.yaml
 Restart=on-failure
 RestartSec=10
 # Cap restart attempts: if the service crashes 5 times in 5 minutes, stop trying

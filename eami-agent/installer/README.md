@@ -155,7 +155,9 @@ Output: `eami-agent/installer/macos/dist/eami-agent-1.0.0-darwin-{amd64,arm64}.p
 ### Silent install
 
 ```bash
-# Basic install (config uses placeholder values — edit /etc/eami/agent.yaml after)
+# Basic install: an existing /etc/eami/agent.yaml is kept; on a fresh install
+# the URL and key are written empty (no reports) -- set them, then
+# sudo launchctl kickstart -k system/io.eami.agent (B-273)
 sudo installer -pkg eami-agent-1.0.0-darwin-amd64.pkg -target /
 
 # Install with config injected at install time
@@ -222,7 +224,7 @@ sudo bash eami-agent/installer/macos/uninstall.sh -k
 |---|---|
 | Installs binary | `/usr/bin/eami-agent` |
 | Installs service unit | `/lib/systemd/system/eami-agent.service` |
-| Writes config | `/etc/eami/agent.yaml` (from env vars at install time) |
+| Writes config | `/etc/eami/agent.yaml` (mode 600), read by the service via `--config` (B-273). Rewritten only when **both** `EAMI_COLLECTOR_URL` and `EAMI_COLLECTOR_API_KEY` are supplied; otherwise an existing file is kept unchanged, and on a fresh install both are written empty (no reports until set, then `sudo systemctl restart eami-agent`). A rewrite regenerates the whole file (hand edits are lost) but keeps an already-installed `/etc/eami/collector-ca.pem`. |
 | Enables service | `systemctl enable --now eami-agent` (runs on next boot + starts immediately) |
 | Uninstall | `dpkg -r eami-agent` or `rpm -e eami-agent` — stops service, removes binary + unit |
 

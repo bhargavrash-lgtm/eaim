@@ -1,5 +1,59 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-273 — Packaged Linux/macOS agent now reads its installed config — 2026-09-30 (Claude Code)
+
+The evidence record is `B-273_VERIFICATION.md`. **Roadmap:** a Horizon 1 known-gap closure. The bug has no numbered roadmap item; it was prioritised by the founder as the most urgent of B-271–B-273.
+
+**The defect:**
+- `--config` defaults to the relative `eami-agent.yaml`, and the systemd unit and launchd plist passed no args (working directory `/`).
+- So the `/etc/eami/agent.yaml` that `postinstall` writes was never read. The agent ran with an empty collector URL and only printed its reports to stdout.
+- **Packaged Linux (and, by the same mechanism, macOS) agents have never reported to a collector** since the initial commit.
+- Windows is unaffected: the registry fallback supplies the collector values.
+
+**Files:**
+- `eami-agent/installer/linux/eami-agent.service`: `ExecStart=/usr/bin/eami-agent --config /etc/eami/agent.yaml`.
+- `eami-agent/installer/macos/io.eami.agent.plist`: `ProgramArguments` gains `--config /etc/eami/agent.yaml`.
+- `eami-agent/installer/linux/postinstall.sh` and `eami-agent/installer/macos/postinstall`:
+  - the `localhost:8888` / placeholder-key fallback is removed;
+  - `agent.yaml` is rewritten only when **both** URL and key are supplied;
+  - a fresh install without them writes **both** empty (no-send mode, stderr warning);
+  - an existing config is otherwise kept;
+  - the write is atomic (`mktemp` under umask 077, `chmod 600`, `mv`);
+  - a rewrite keeps an installed `/etc/eami/collector-ca.pem`;
+  - macOS pre-creates `/var/log/eami-agent.log` as 0600.
+- `eami-agent/installer/README.md`: the Linux config row and the macOS basic-install note.
+- `.gitattributes`: `eol=lf` for `eami-agent/installer/linux/*` and `macos/*`. A Windows-built `.deb` had a CRLF `prerm` that blocked uninstall.
+
+**Why the postinstall change is in scope:**
+- Both the code and security reviews rated the old fallback HIGH, *because of* this fix.
+- Once the file is actually read, the root agent would post reports to, and take remote scan config from, an unprivileged local port.
+- Every upgrade run without the values would also clobber a working config.
+
+**Tests and verification:**
+- No Go code changed. `go test ./internal/config/... ./internal/collector/...` pass, and `bash -n` passes on both scripts.
+- **Live:** a real `.deb` built from the repo's `nfpm.yaml`, installed under systemd (WSL Ubuntu), against the real dev collector, API and Postgres.
+- Pre-fix package: `collector_url=""`, **0** endpoint rows.
+- In-place upgrade to the fix: the collector logged `report buffered` and Postgres gained a report (`os=linux`).
+- Final run, five install scenarios:
+  - fresh with no values, and fresh URL-only: both written empty, no-send;
+  - existing URL-only, and existing with no values: kept;
+  - existing with both: written, reporting.
+  - Exactly 2 reports arrived, from the two scenarios that should report.
+- Test keys were minted and revoked each run (3, all revoked). One unlinked `Bhargavtej` endpoint (5 reports) is left in the dev DB, like the earlier `live-verify-agent-*` fixtures.
+
+**Reviews:**
+- **Code:** the fix is correct; deb and macOS upgrade paths are fine.
+- **Security:** the diff is safe and the `/etc/eami` trust chain is sound. Its HIGH finding (the localhost fallback) is fixed here.
+- **Focused re-review of the postinstall delta:** its introduced issues were fixed and re-verified (partial fresh supply, umask on an existing file, world-readable macOS log), plus the CA-path drop.
+
+**Limitations:**
+- **`.rpm` upgrades leave the service stopped and disabled.** This is pre-existing: the old `%preun` runs after the new `%post`, and `preremove.sh` ignores `$1`. Existing RPM installs won't be running the fix after upgrade.
+- macOS isn't live-verified, and its Jamf and env-var value delivery to a pkg `postinstall` is doubtful (pre-existing).
+- The native-messaging host on Linux/macOS still can't read a config (it runs as the user, and the file is root 0600).
+- All of these, and seven more, are proposed follow-ups 1–10 in the evidence file. **Not minted; B-IDs are pending founder confirmation.**
+
+**Also confirmed live this session:** B-271. On the real linked endpoint `gpus` appears in only 10 of 3,486 reports, each a first scan after a restart before the remote config applies. Recorded under B-271 in `BACKLOG.md`.
+
 ## Discovery administration investigation (three-layer model and deep-discovery tiers) — 2026-09-30 (Claude Code)
 
 Investigation only: **no code, no schema, no B-IDs.** The plan is `DISCOVERY_ADMIN_INVESTIGATION.md`.

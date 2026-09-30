@@ -4,6 +4,28 @@
 # anything else.
 ACTIVE AGENT: none
 
+## Active decision thread (2026-09-30, newest) — B-273 DONE; B-271 live-confirmed
+
+- **B-273 is built, reviewed, live-verified and pushed.** The record is `B-273_VERIFICATION.md`.
+  - The systemd unit and launchd plist pass `--config /etc/eami/agent.yaml`.
+  - Postinstall no longer falls back to `localhost:8888` or a placeholder key. It rewrites only when both values are supplied, keeps an existing config, and writes atomically at 0600.
+  - `.gitattributes` gives the installer scripts LF.
+  - Live: a real `.deb` against the real stack. Pre-fix: 0 reports. In-place upgrade: reports reached Postgres. Five install scenarios passed.
+- **In scope by review:** the postinstall change. Both reviews rated the old fallback HIGH once the file was actually read.
+- **B-271 confirmed live:** `gpus` appears in only 10 of 3,486 reports on the linked endpoint, each a first scan after a restart.
+- **For the founder — proposed follow-ups, not minted** (B-273 evidence §Follow-ups):
+  1. rpm upgrade leaves the service stopped (HIGH);
+  2. the Linux/macOS native-messaging host can't read its config;
+  3. `docs/quickstart.md` is wrong;
+  4. remote config is unbounded (scan paths, interval);
+  5. command-line and MCP-arg secrets are sent;
+  6. the API key is forwarded on redirects;
+  7. a missing config is silent;
+  8. macOS Jamf/env values probably never reach the pkg postinstall;
+  9. unescaped YAML values;
+  10. a rewrite drops hand edits.
+- macOS and rpm are not live-verified. The next B-ID is B-274.
+
 ## Active decision thread (2026-09-30, newest) — B-271/B-272/B-273 minted; B-273 confirmed live (most urgent)
 
 - **B-273: confirmed live.** Packaged Linux agents never read `/etc/eami/agent.yaml`:
@@ -2607,6 +2629,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — B-273 DONE (packaged Linux/macOS agent reads its config; postinstall localhost fallback removed; LF installer scripts); live-verified with a real .deb against the real stack; B-271 live-confirmed; 10 follow-ups proposed, not minted. Marker cleared.
+
+Prior entry:
 2026-09-30 by Claude Code — minted B-271 (linked-endpoint scanner disable), B-272 (Linux network_activity matching, with B-010), B-273 (packaged Linux agent ignores its config — confirmed live via real .deb under systemd; most urgent). Design record §0 updated. Docs only. Marker untouched.
 
 Prior entry:

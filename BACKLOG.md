@@ -3364,13 +3364,19 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 **Why it matters now:** `ai_processes` is half of the shadow-agent signal (`DISCOVERY_ADMIN_INVESTIGATION.md` §174, build order item 3). Every linked endpoint, including the demo endpoint, has been silently dropping it.
 
 **Acceptance criteria:**
-- [ ] Confirm live with psql on the real dev DB: which linked endpoints' latest reports have these four fields null.
+- [x] Confirm live with psql on the real dev DB: which linked endpoints' latest reports have these four fields null (done 2026-09-30, see below).
 - [ ] Decide the fix: default to all 10 names, and/or have the agent accept an explicit "all" value. Coordinate with B-269, since presets replace this row; a stop-gap fix may still be warranted before B-269 ships.
 - [ ] Server-side validation of scanner names against the real 10.
 - [ ] Bring the UI's scanner list in line with the real 10.
 - [ ] A real-Postgres test pinning the default, plus live verification that a linked endpoint reports all enabled scanners.
 
 **Dependencies:** overlaps B-269, which replaces `agent_configs`. Keep the B-194 demo-endpoint mitigation (`models` removed) in mind when changing defaults.
+
+**Live-confirmed 2026-09-30 (read-only psql, real dev DB), closing the first acceptance box:**
+- The real linked endpoint `Bhargav_tej` has `enabled_scanners = {ai_apps,mcp_servers,cloud_clients,network_activity,browser}`.
+- `gpus` is present in only **10 of 3,486** reports. Each is an isolated first-scan-after-restart running on built-in defaults and is followed by `null`. At 2026-09-19 01:01:58, for example, `gpus` is set and `local_models` null, and the next report is the reverse.
+- The scanner works; the config suppresses it.
+- `null` is ambiguous for the other three fields (an empty result also marshals as `null`). Full query results are in `B-273_VERIFICATION.md`.
 
 ### B-272 — `network_activity` on Linux never matches anything: connections are compared as raw IPs against hostnames — **QUEUED, 2026-09-30**
 **Origin:** scanner capability audit (2026-09-30), recorded in `AI_LLM_SERVICE_MAPPING_DESIGN.md` §0. Minted at founder direction 2026-09-30. Free-check as B-271.
@@ -3395,7 +3401,7 @@ Together, **the scanner returns nothing on Linux, ever**. B-010's "low priority,
 
 **Dependencies:** B-010, to be fixed together.
 
-### B-273 — Packaged Linux agent never reads its installed config: no collector URL, reports go to stdout only — **CONFIRMED LIVE 2026-09-30 (Linux); macOS suspected (same mechanism, not tested) — most urgent of B-271–B-273**
+### B-273 — Packaged Linux agent never reads its installed config: no collector URL, reports go to stdout only — **DONE, 2026-09-30** (evidence: `B-273_VERIFICATION.md`)
 **Origin:** scanner capability audit (2026-09-30). Minted at founder direction 2026-09-30 as "confirmed-suspected", then **confirmed live the same session**. Free-check as B-271.
 
 **Root cause:**
@@ -3421,10 +3427,10 @@ Together, **the scanner returns nothing on Linux, ever**. B-010's "low priority,
 - The only Linux/macOS agents that would have reported are ones run by hand with `--config` or from a directory that holds `eami-agent.yaml`.
 
 **Acceptance criteria:**
-- [ ] The fix: pass `--config /etc/eami/agent.yaml` in the systemd unit and the launchd plist, and/or give the agent a platform default path. Decide whether the missing-file case should be loud when running as a service.
-- [ ] Live-verify with a real `.deb` install reaching a real collector. Also test `.rpm` if feasible, and macOS on real hardware when available.
-- [ ] Check the upgrade path: existing installs get the corrected unit or plist on package upgrade.
-- [ ] Decide whether an agent with no collector URL, running as a service, should stay silent or log an error.
+- [x] The fix: pass `--config /etc/eami/agent.yaml` in the systemd unit and the launchd plist (founder choice: explicit flag in both, macOS fixed without separate hardware confirmation). The missing-file-loud question is still open: follow-up 7 in the evidence file.
+- [x] Live-verify with a real `.deb` install reaching a real collector (done: pre-fix install → 0 reports; in-place upgrade → reports in Postgres). `.rpm` and macOS are **not** live-verified (no rpm host or Mac); see follow-ups 1 and 8.
+- [x] Check the upgrade path: deb verified live; macOS confirmed by review (unload then load). **rpm upgrades don't pick it up**, because of a pre-existing scriptlet-order bug (follow-up 1).
+- [ ] Decide whether an agent with no collector URL, running as a service, should stay silent or log an error. **Open**, as follow-up 7.
 
 **Related, found during this test (local build hazard, not the product bug):**
 - A Windows checkout gives `installer/linux/preremove.sh`, `eami-agent.service` and `nfpm.yaml` CRLF line endings. `.gitattributes` pins `eol=lf` only for `postinstall.sh`.
@@ -3432,5 +3438,20 @@ Together, **the scanner returns nothing on Linux, ever**. B-010's "low priority,
 - Irrelevant to Linux CI builds. Worth an `eol=lf` rule for all of `installer/linux/*` and `installer/macos/*` when this is fixed.
 
 **Dependencies:** none. Independent of B-269; presets can't reach an agent that can't reach the collector.
+
+**Resolution (2026-09-30):**
+- **Service definitions:** `eami-agent.service` and `io.eami.agent.plist` pass `--config /etc/eami/agent.yaml`.
+- **`.gitattributes`:** `eol=lf` for `eami-agent/installer/linux/*` and `eami-agent/installer/macos/*`.
+- **Postinstall (both platforms), in scope because both reviews rated it HIGH and the fix causes it.** The old fallback wrote `http://localhost:8888` plus a placeholder key and clobbered the config on every upgrade; once the file was actually read, the root agent could be pointed at a port any user can bind. Now:
+  - no default values;
+  - a rewrite happens only when both values are supplied;
+  - a fresh install with missing values writes both empty (no-send mode);
+  - an existing config is otherwise kept;
+  - the write is atomic (0600 temp file, then `mv`);
+  - an installed CA is kept;
+  - on macOS, `/var/log/eami-agent.log` is pre-created as 0600.
+- **Live:** real `.deb` under systemd, against the real collector and Postgres, in three runs (the last covers five install scenarios). The details are in the evidence file.
+- **Reviews:** code, security, and a focused re-review of the postinstall delta.
+- **Follow-ups (proposed, not minted; B-IDs pending founder):** `B-273_VERIFICATION.md` "Follow-ups" 1–10. The most important is the **rpm upgrade leaving the service stopped and disabled** (HIGH).
 
 ## Next B-ID: B-274

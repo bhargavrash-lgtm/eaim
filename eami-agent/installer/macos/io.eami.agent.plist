@@ -16,10 +16,14 @@
     <key>Label</key>
     <string>io.eami.agent</string>
 
-    <!-- Binary entrypoint -->
+    <!-- Binary entrypoint. The config-path flag is required (B-273): the agent's default
+         config path is relative to its working directory, which is / under
+         launchd, so without it the agent never reads /etc/eami/agent.yaml. -->
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/bin/eami-agent</string>
+        <string>--config</string>
+        <string>/etc/eami/agent.yaml</string>
     </array>
 
     <!-- Start automatically when the plist is loaded (boot / launchctl load) -->

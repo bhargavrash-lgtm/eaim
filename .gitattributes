@@ -39,3 +39,13 @@ docker/caddy/docker-entrypoint.sh text eol=lf
 # still covers.
 eami-agent/installer/linux/postinstall.sh text eol=lf
 eami-agent/installer/macos/postinstall text eol=lf
+
+# Same class of fix, B-273: every file nfpm or macOS pkgbuild packages from
+# these two directories ships to a real Linux/macOS endpoint. A Windows
+# checkout gave preremove.sh a CRLF shebang, and a .deb built from that tree
+# had a prerm that failed with "No such file or directory", blocking
+# uninstall (found live, B-273). Covers the whole directories so a newly
+# added script can't regress; postinstall.sh and postinstall above are now
+# also covered here.
+eami-agent/installer/linux/* text eol=lf
+eami-agent/installer/macos/* text eol=lf

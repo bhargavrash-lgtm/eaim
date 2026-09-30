@@ -45,8 +45,8 @@
 
 set -e
 
-COLLECTOR_URL="${EAMI_COLLECTOR_URL:-http://localhost:8888}"
-COLLECTOR_API_KEY="${EAMI_COLLECTOR_API_KEY:-REPLACE_WITH_YOUR_API_KEY}"
+COLLECTOR_URL="${EAMI_COLLECTOR_URL:-}"
+COLLECTOR_API_KEY="${EAMI_COLLECTOR_API_KEY:-}"
 COLLECTOR_CA_CERT_PATH="${EAMI_COLLECTOR_CA_CERT_PATH:-}"
 
 # ── Write agent config ────────────────────────────────────────────────────────
@@ -96,7 +96,41 @@ if [ -n "$COLLECTOR_CA_CERT_PATH" ]; then
     fi
 fi
 
-cat > /etc/eami/agent.yaml <<EOF
+# B-273: the service now really reads this file, so (a) an upgrade or
+# reinstall run without collector values must not replace a working config,
+# and (b) a missing URL must never default to a local port that any
+# unprivileged user could listen on. Rewrite only when both values are
+# supplied, or when no config exists yet -- then write BOTH empty (a partial
+# URL-only value would make the agent post with no key every cycle): the
+# agent stays in no-send mode until an admin sets them.
+if [ -n "$COLLECTOR_URL" ] && [ -n "$COLLECTOR_API_KEY" ]; then
+    WRITE_CONFIG=1
+elif [ -f /etc/eami/agent.yaml ]; then
+    WRITE_CONFIG=0
+    echo "eami-agent: collector URL and API key not both supplied -- keeping the existing /etc/eami/agent.yaml unchanged" >&2
+    if [ -n "$CA_CERT_YAML_PATH" ]; then
+        echo "eami-agent: NOTE -- the CA cert was copied to $CA_CERT_YAML_PATH, but agent.yaml was not rewritten; set collector.ca_cert_path there if it isn't already" >&2
+    fi
+else
+    WRITE_CONFIG=1
+    COLLECTOR_URL=""
+    COLLECTOR_API_KEY=""
+    echo "eami-agent: WARNING -- collector URL and API key not both supplied; writing /etc/eami/agent.yaml with both empty. The agent will not report until both are set there (then: sudo systemctl restart eami-agent)" >&2
+fi
+
+# A rewrite without a CA this run keeps a CA already installed by an earlier
+# run, instead of silently dropping it and breaking TLS to a self-signed
+# collector.
+if [ -z "$CA_CERT_YAML_PATH" ] && [ -f /etc/eami/collector-ca.pem ]; then
+    CA_CERT_YAML_PATH="/etc/eami/collector-ca.pem"
+fi
+
+if [ "$WRITE_CONFIG" = 1 ]; then
+# The file holds the API key: write a fresh temp file under umask 077 in the
+# same directory, then mv it into place. It is never readable by others (an
+# existing file's looser mode isn't inherited) and never left truncated.
+TMP_CONFIG="$(umask 077; mktemp /etc/eami/.agent.yaml.XXXXXX)"
+cat > "$TMP_CONFIG" <<EOF
 agent:
   id: "$(hostname)"
   interval_secs: 300
@@ -112,9 +146,10 @@ detection:
   model_file_scan_paths: []
   model_file_size_mb: 100
 EOF
-
-chmod 600 /etc/eami/agent.yaml
+chmod 600 "$TMP_CONFIG"
+mv -f "$TMP_CONFIG" /etc/eami/agent.yaml
 echo "eami-agent: config written to /etc/eami/agent.yaml"
+fi
 
 # ── Register the native-messaging host (paste-detection groundwork) ─────────
 # No registry step on Linux (that's Windows-only, see
