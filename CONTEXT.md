@@ -8,7 +8,27 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-09-30, newest) — DESIGN_SYSTEM.md §7.7 replaced, §7.8 added
+## Active decision thread (2026-09-30, newest) — B-252 C2 brief: Part A done, paused behind item 4
+
+- **Part A of the "Admin rename + Endpoint Detail + Discover retirement" brief is reported.** No code was written. The marker was set, then released while the brief waits.
+- **Founder decisions:**
+  1. **Item 4 (the honest-state gap) goes first**, as its own small brief. It fixes the "None detected" null ambiguity before Endpoint Detail inherits it.
+  2. **A minimal C3 is folded into this brief**: Assets' endpoint rows get OS, last seen, and the AI app / local model / MCP / GPU counts. Discover stays live until this brief ships, and is retired only once parity is confirmed live.
+  3. **Redirects:** `/settings` → `/admin` (keeping `?tab=`) and `/discover` → Assets filtered to endpoints.
+  4. **Agent Detail's endpoint node** opens Endpoint Detail. `EndpointDrawer` is deleted once unused.
+  5. **Discovery Hub and CMDB tabs** are the first real implementation of §7.8's EmptyState pattern. §7.8's "exist" becomes "planned" in this brief's docs commit.
+  6. **Approvers** get an honest "not available for your role" state on Endpoint Detail. No page-level version exists yet (only inline read-only notes), so it is new, and the plan says so.
+- **Part A facts:**
+  - Discover's drawer shows 5 summary fields, the link control and 8 sections, but not `ai_processes` or browser extensions.
+  - Settings is one route with 6 `?tab=` tabs, and two deep links to `?tab=model-pricing`.
+  - A licence-off 403 has no UI pending component (the drawer mislabels it).
+  - `AssetClassificationForm` is the shared piece.
+  - An endpoint's CMDB id equals `endpoints.id`.
+  - None of the §7.8 placeholder pages exist in code.
+- **Recorded** under item 4 in `AI_ITAM_EPIC_MASTER_SEQUENCE.md` and on B-252.
+- **Next:** the item 4 brief (from the founder).
+
+## Active decision thread (2026-09-30) — DESIGN_SYSTEM.md §7.7 replaced, §7.8 added
 
 - **§7.7 is replaced in full**, per the founder's brief:
   - Agent Detail's Lineage, Classification and Actions tabs are marked built.
@@ -2734,6 +2754,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — B-252 C2 brief Part A reported; founder decisions recorded (item 4 first, minimal C3 folded in, redirects, drawer retirement, §7.8 wording, approver state). No code. Marker released.
+
+Prior entry:
 2026-09-30 by Claude Code — DESIGN_SYSTEM.md: replaced §7.7 and added §7.8 (Admin rename, Discovery Hub and CMDB tabs, placeholder nav) per the founder's brief. Docs only.
 
 Prior entry:

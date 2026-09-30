@@ -48,6 +48,12 @@ anything.
       external context. Does not block item 4.
 - [ ] 4. Honest-state gap — "0" renders identically for "reported, found
       nothing" vs. "never reported."
+      **Then, immediately after item 4 (founder, 2026-09-30):** the B-252
+      Admin rename + Endpoint Detail brief, with a minimal C3 folded in
+      (Assets' endpoint rows gain OS, last seen and the per-domain counts).
+      Discover stays live until that brief ships, and is retired only once
+      C3's parity is confirmed live. Decisions are recorded in `CONTEXT.md`
+      and B-252.
 - [ ] 5. Windows endpoint governed-agent link trace.
 
 ---

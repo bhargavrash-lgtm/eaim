@@ -2970,6 +2970,20 @@ Choices, for the founder:
 
 **Status:** QUEUED. Each step is scoped as its own brief from the plan.
 
+**C2/C3/C4 brief: Part A done, founder decisions (2026-09-30).** The brief is "Admin rename + Endpoint Detail + Discover retirement".
+- **Order:** master-sequence item 4 (the honest-state gap) goes first, as its own small brief. This brief follows immediately after.
+- **Minimal C3 folded in:** Assets' endpoint rows get OS, last seen and the per-domain counts. Discover stays live until this brief ships, and is retired only once C3's parity is confirmed live.
+- **Redirects:** `/settings` → `/admin` (keeping `?tab=`) and `/discover` → Assets filtered to endpoints.
+- **Agent Detail's endpoint node** opens Endpoint Detail. `EndpointDrawer` is deleted once unused.
+- **Discovery Hub and CMDB tabs** are the first real implementation of the `DESIGN_SYSTEM.md` §7.8 EmptyState pattern. §7.8's "exist" becomes "planned" in this brief's docs commit.
+- **Approvers** get an honest "not available for your role" state on Endpoint Detail. No page-level version of that state exists yet, so it is new (`EmptyState` plus a role message, matching the Actions-tab note's wording).
+- **Part A facts:**
+  - licence-off returns 403 `module_not_licensed` server-side, and there is no UI pending component yet (the drawer mislabels it as "No report data");
+  - the shared classification piece is `AssetClassificationForm`;
+  - an endpoint's CMDB id equals `endpoints.id`;
+  - the only links to `/discover` are the nav entry and the route.
+
+
 ### B-253 — RBAC split: "operators contain; admins expand or destroy" — **DONE, 2026-09-29** (evidence: `B-253_VERIFICATION.md`)
 **Origin:** `IA_CONSOLIDATION_MIGRATION_PLAN.md` Part D, Q2, and its founder decision. Minted at founder direction 2026-09-28. B-253 was confirmed free against BACKLOG.md directly: the counter read B-252, and B-252 to B-257 were unused. A grep found no open item overlapping this scope (see the per-item notes where an adjacent item exists).
 **Decision:**
