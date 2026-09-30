@@ -8,7 +8,17 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-09-30, newest) — B-269 split: definition now, group assignment after item 6
+## Active decision thread (2026-09-30, newest) — DESIGN_SYSTEM.md §7.7 replaced, §7.8 added
+
+- **§7.7 is replaced in full**, per the founder's brief:
+  - Agent Detail's Lineage, Classification and Actions tabs are marked built.
+  - Endpoint Detail's route is confirmed as `/assets/endpoints/:id`, with taxonomy reuse for Classification (no duplicate).
+  - **New navigation structure:** Settings is renamed **Admin**, gaining a **Discovery Hub** tab (Agent-Based | Agentless: preset definition, packaging, agentless scan rules) and a **CMDB** tab (grouping-rule configuration only). "Manage classifications" stays on Assets.
+- **§7.8 is new** (it didn't exist before): 5 inert placeholder sidebar entries (Guardrails, Automations, Models, Observability, Chat), plus the list of items deliberately without a top-level entry.
+- **Dropped from the old §7.7:** the 2026-09-27 tab-bar verification note and the per-tab verification-file links. They remain in git history and in the verification records.
+- **Design doc only.** The UI still says "Settings"; the rename and the new tabs get built when briefed.
+
+## Active decision thread (2026-09-30) — B-269 split: definition now, group assignment after item 6
 
 - **Founder:** master-sequence item 8 (B-269) is split.
   - Preset **definition** (name, version, scanner content, package generation) has no dependency on item 6 and can be designed and built now.
@@ -2724,6 +2734,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — DESIGN_SYSTEM.md: replaced §7.7 and added §7.8 (Admin rename, Discovery Hub and CMDB tabs, placeholder nav) per the founder's brief. Docs only.
+
+Prior entry:
 2026-09-30 by Claude Code — recorded the B-269 split (definition now; group assignment waits on item 6) on master-sequence item 8 and in B-269. Docs only.
 
 Prior entry:

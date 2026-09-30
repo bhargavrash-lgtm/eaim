@@ -340,35 +340,43 @@ This section exists so future features land in a pre-planned slot, not bolted on
 awkwardly or forgotten. Every future tab below is traced to a real roadmap item —
 nothing here is invented ahead of its actual justification.
 
+**Navigation structure (confirmed):** Settings is renamed **Admin**. Admin gains
+two new tabs: **Discovery Hub** (sub-tabs Agent-Based | Agentless — preset
+definition, packaging, and agentless scan-rule configuration) and **CMDB**
+(grouping-*rule* configuration only — the Dynamic Asset Grouping epic's
+static/dynamic/hybrid mechanism and its out-of-the-box defaults). CMDB here is
+NOT a second home for taxonomy management — "Manage classifications" (real,
+already-shipped taxonomy CRUD — categories and types) stays exactly where it
+already lives, on the Assets page, unchanged.
+
 **Agent Detail:**
 | Tab | Status | Roadmap source |
 |---|---|---|
 | Overview | Built (B-200) | — |
 | Connections | Built (B-200/B-205) | — |
-| Actions | Built (2026-09-27) | Orphaned Configure/Suspend/Reactivate/Delete controls — see `AGENT_ACTIONS_TAB_VERIFICATION.md` |
-| Lineage | Built (2026-09-29, `AGENT_LINEAGE_VERIFICATION.md`) |
-| Classification | Built (2026-09-30, B-252 C1) | Moved from Assets' classification panel (`B-252_C1_VERIFICATION.md`) | Horizon 1, "Agent lineage: real, per-agent activity from the dispatch path" (`rheoARC_Roadmap_Enterprise_AI_Platform.md`). A summary plus an activity table over the same tool, policy and workflow relationships Connections draws. Connections stays the graph (shape); Lineage is the numbers. Hidden for approvers (audit reads exclude them). |
+| Lineage | Built | Horizon 1, Agent lineage section |
+| Classification | Built (C1) | B-196 |
+| Actions | Built | Orphaned list-page controls |
 | Orchestration | Future | Horizon 2 item 4 (Build/Orchestration layer) |
 | Autonomy Limits | Future | Horizon 2 item 5 (real autonomy safeguards) |
 | Memory | Future | Horizon 2 item 2 (RAG) |
 | Model | Future | Horizon 2 items 1 & 8 (model hosting, training/evaluation) |
 
-> **Verification note (Claude Code, 2026-09-27).** When this section was added, "Built" for Overview/Connections meant the *content* existed, not the tab: Agent Detail had no tab bar. The Actions-tab brief (same day) introduced it. Overview, Connections and Actions are now real tabs, with the active tab in `?tab=` (SettingsPage's pattern) and the WAI-ARIA tab roles.
-
-**Endpoint Detail:**
+**Endpoint Detail — confirmed route `/assets/endpoints/:id`, reached by clicking
+an endpoint row in Assets:**
 | Tab | Status | Roadmap source |
 |---|---|---|
-| Overview | Planned next | Consolidates Discover's real content |
+| Overview | Planned next | Absorbs Discover's real content (AI apps, models, MCP servers) — Discover retires as a standalone page entirely |
 | Connections | Planned next | Already-logged asset-perspective relationship graph extension |
 | Agent Link | Planned next | Currently trapped inside Discover |
-| Classification | Planned next | Currently in Assets, moves here |
+| Classification | Planned next | Per-asset classification assignment — reuses the same taxonomy "Manage classifications" defines on Assets, does not duplicate it |
 | Spend | Future | Confirmed real gap — endpoint-level FinOps, not yet workspace-scoped |
 
 **Tool Detail:**
 | Tab | Status | Roadmap source |
 |---|---|---|
 | Overview / Credentials | Planned next | Built from the existing add/edit form; no detail page exists yet |
-| Classification | Planned next | Currently in Assets, moves here |
+| Classification | Planned next | Same taxonomy-reuse pattern as Endpoint Detail |
 | Model Details | Future | Horizon 2 item 1 — a self-hosted model is architecturally a `gateway_tools` row (`type: ai_provider`) |
 | Usage Analytics | Future, not yet confirmed | May be redundant with what Connections already shows — a real decision for later, not assumed now |
 
@@ -376,6 +384,37 @@ nothing here is invented ahead of its actual justification.
 no urgent consolidation needed. Once the Build/Orchestration layer exists, it will
 likely want this same tab language rather than a new pattern; noted as a future
 consideration, not a current decision.
+
+### 7.8 Planned Top-Level Navigation — Physical Roadmap Placeholders
+
+To keep the roadmap physically visible in the running product (so a future
+capability is never silently forgotten), 5 real sidebar entries exist as inert
+placeholder pages ahead of their actual build:
+
+| Nav item | Roadmap source | Placeholder status |
+|---|---|---|
+| Guardrails | Horizon 2 item 3 | Placeholder |
+| Automations | Horizon 2 item 4 (Build/Orchestration layer) | Placeholder |
+| Models | Horizon 2 items 1 & 8 (hosting + training, as tabs) | Placeholder |
+| Observability | Horizon 1 (B-135/B-136) | Placeholder |
+| Chat | Horizon 2 item 7 | Placeholder — will become a mode switch (like Workspace mode), not a plain page, once built |
+
+A placeholder page reuses the existing EmptyState component exactly as built —
+real AppTopBar, real page shell, one centered EmptyState with a title and a plain
+description of what's coming and which Horizon it belongs to. No new pattern,
+no mockup detail, no fabricated preview of unbuilt functionality.
+
+**Deliberately NOT given a top-level entry** (recorded here so nothing looks
+forgotten just because it isn't in the sidebar): SSO/IdP, Groups bulk-tagging,
+and custom roles (all real Settings/Admin tabs); the secured public API and
+connector registry (live inside existing flows); onboarding templates (a Dashboard
+enhancement); step-up authentication (a contextual modal, has no page by
+definition); autonomy-safeguard trip states (folds into Alerts); multi-agent
+coordination and the unified multi-provider API (extend existing mechanisms,
+not new destinations); scale/retention/benchmarking and compliance readiness
+(operational/process work, not pages). Discovery Hub and CMDB are explicitly
+Admin tabs, not top-level sidebar entries, per §7.7's confirmed navigation
+structure.
 
 ---
 
