@@ -4,6 +4,16 @@
 # anything else.
 ACTIVE AGENT: none
 
+## Active decision thread (2026-09-30, newest) — Scanner capability audit delivered; AI/LLM Service Mapping design record saved
+
+- **Scanner audit (read-only, code-only; the stack was down):** B-193 and B-194 are still open and are **structurally linked**: the default `C:\Users` model path works around B-193 for `models` and is also what causes B-194.
+  - Linking an endpoint silently disables `ai_processes`, `gpu`, `python_envs` and `nodejs_ai`, because the default `agent_configs` row lists only 6 scanners.
+  - Unconfirmed: the service definitions pass no `--config`, so Linux/macOS agents may never read `/etc/eami/agent.yaml`.
+  - `network_activity` returns nothing on Linux.
+  - Remote config is held in memory only, and `max_report_size_bytes` is ignored by the agent.
+- **Saved `AI_LLM_SERVICE_MAPPING_DESIGN.md`** at founder direction. It is a design record, not a build brief. It proposes a new epic (four-tier service mapping), which starts only after B-267 and doesn't reorder the approved sequence.
+- **No B-IDs minted.** The record asks for B-IDs for the scanner-disable bug, the config-path question and Linux `network_activity`; they are **awaiting founder confirmation**. The next B-ID is B-271.
+
 ## Active decision thread (2026-09-30, newest) — B-269/B-270 minted; model characterisation sequenced
 
 - **B-269 (Discovery presets and enrollment)** and **B-270 (read-only effective-config view on Endpoint Detail, with C2)** are minted and queued.
@@ -2584,6 +2594,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — scanner capability audit (read-only) delivered; saved AI_LLM_SERVICE_MAPPING_DESIGN.md (design record, no code). No B-IDs minted (pending founder). Docs only. Marker untouched (no build).
+
+Prior entry:
 2026-09-30 by Claude Code — minted B-269 (presets) and B-270 (Endpoint Detail effective-config view); sequenced localhost LLM characterisation as build item 4 (before B-267). Docs only. Marker cleared.
 
 Prior entry:
