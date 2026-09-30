@@ -8,7 +8,15 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-09-30, newest) — B-272 DEFERRED; next active item is 4 (honest-state gap)
+## Active decision thread (2026-09-30, newest) — B-269 split: definition now, group assignment after item 6
+
+- **Founder:** master-sequence item 8 (B-269) is split.
+  - Preset **definition** (name, version, scanner content, package generation) has no dependency on item 6 and can be designed and built now.
+  - Preset **assignment** via Groups waits on item 6's schema resolution. Don't build group-based assignment before item 6 closes.
+- Recorded on the item and in B-269's backlog entry.
+- **The next active item is still 4** (the honest-state gap).
+
+## Active decision thread (2026-09-30) — B-272 DEFERRED; next active item is 4 (honest-state gap)
 
 - **Founder:** master-sequence item 3 (B-272, with B-010) is **DEFERRED**, since there is no active Linux customer deployment yet. It must be closed before Linux is presented as customer-ready in any external context.
 - **New rule in the master sequence:** a DEFERRED item doesn't block the item below it, but must be resolved before its deferred condition changes.
@@ -2716,6 +2724,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — recorded the B-269 split (definition now; group assignment waits on item 6) on master-sequence item 8 and in B-269. Docs only.
+
+Prior entry:
 2026-09-30 by Claude Code — deferred master-sequence item 3 (B-272) per founder and added the DEFERRED rule; the next active item is 4. Docs only.
 
 Prior entry:

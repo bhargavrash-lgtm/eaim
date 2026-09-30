@@ -69,6 +69,11 @@ anything.
 
 - [ ] 8. **B-269** — Discovery presets, group-based assignment,
       multi-group precedence resolved before build.
+      Splitting: preset DEFINITION (name, version, scanner content,
+      package generation) can be designed and built now - it has no
+      dependency on item 6. Preset ASSIGNMENT to a fleet via Groups still
+      waits on item 6's schema resolution. Do not build group-based
+      assignment before item 6 closes.
 - [ ] 9. **B-270** — Endpoint Detail read-only effective-config view.
 - [ ] 10. Shadow-agent surfacing + "Onboard as Governed Agent" flow.
 - [ ] 11. Model characterization (Ollama extension).

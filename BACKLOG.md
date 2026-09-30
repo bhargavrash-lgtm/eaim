@@ -3335,6 +3335,10 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 
 **Dependencies:** none blocking. It feeds B-270 and B-267.
 
+**Split (founder, 2026-09-30; `AI_ITAM_EPIC_MASTER_SEQUENCE.md` item 8):**
+- Preset **definition** (name, version, scanner content, package generation) can be designed and built now. It has no dependency on master-sequence item 6.
+- Preset **assignment** to a fleet via Groups waits on item 6's schema resolution (`DYNAMIC_ASSET_GROUPING_EPIC.md` §2). Don't build group-based assignment before item 6 closes.
+
 **Status:** QUEUED. Do not build until briefed.
 
 ### B-270 — Read-only effective-config view on Endpoint Detail (Layer 3) — **QUEUED, 2026-09-30 — build order item 2 (with B-252 C2)**
