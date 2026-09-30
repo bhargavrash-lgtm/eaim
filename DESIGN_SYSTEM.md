@@ -352,11 +352,11 @@ already lives, on the Assets page, unchanged.
 **Agent Detail:**
 | Tab | Status | Roadmap source |
 |---|---|---|
-| Overview | Built (B-200) | — |
-| Connections | Built (B-200/B-205) | — |
-| Lineage | Built | Horizon 1, Agent lineage section |
-| Classification | Built (C1) | B-196 |
-| Actions | Built | Orphaned list-page controls |
+| Overview | Built (B-200) — verified: `BACKLOG.md` B-200 entry (no standalone file); made a real tab per `AGENT_ACTIONS_TAB_VERIFICATION.md` | — |
+| Connections | Built (B-200/B-205) — verified: `BACKLOG.md` B-200 and B-205 entries (no standalone files) | — |
+| Lineage | Built — verified: `AGENT_LINEAGE_VERIFICATION.md` | Horizon 1, Agent lineage section |
+| Classification | Built (C1) — verified: `B-252_C1_VERIFICATION.md` | B-196 |
+| Actions | Built — verified: `AGENT_ACTIONS_TAB_VERIFICATION.md` | Orphaned list-page controls |
 | Orchestration | Future | Horizon 2 item 4 (Build/Orchestration layer) |
 | Autonomy Limits | Future | Horizon 2 item 5 (real autonomy safeguards) |
 | Memory | Future | Horizon 2 item 2 (RAG) |
