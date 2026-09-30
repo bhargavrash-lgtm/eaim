@@ -96,7 +96,7 @@ _(empty — founder/PM assigns from QUEUED)_
 - [ ] Real hostname correlation on Linux (e.g. via `resolvectl` per-connection query, or `/etc/resolv.conf` + local cache parsing)
 - [ ] Test added
 **Dependencies:** none. Low priority (minor detection-completeness gap).
-**Update 2026-09-30:** see **B-272**. Linux active-connection matching also never matches (it compares raw IPs to hostnames), so this stub isn't a minor gap: with B-272 the whole scanner returns nothing on Linux. Fix both together.
+**Update 2026-09-30:** see **B-272** (DEFERRED with it, 2026-09-30, until before Linux is presented as customer-ready). Linux active-connection matching also never matches (it compares raw IPs to hostnames), so this stub isn't a minor gap: with B-272 the whole scanner returns nothing on Linux. Fix both together.
 
 ### B-011 — Remove or re-wire the dead `notification_channels` table
 **Objective:** `schema.sql`'s `notification_channels` table has no Go code referencing it (superseded by `notification_config`). Either drop it via migration or explain why it's still needed.
@@ -3402,7 +3402,7 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
   - the `b271-admin@fixture.local` fixture user is left in the Dev Org, because 4 lifecycle events reference it (founder call).
 
 
-### B-272 — `network_activity` on Linux never matches anything: connections are compared as raw IPs against hostnames — **QUEUED, 2026-09-30**
+### B-272 — `network_activity` on Linux never matches anything: connections are compared as raw IPs against hostnames — **DEFERRED, 2026-09-30** (founder: no active Linux customer deployment yet; must close before Linux is presented as customer-ready in any external context. Master-sequence item 3; doesn't block item 4.)
 **Origin:** scanner capability audit (2026-09-30), recorded in `AI_LLM_SERVICE_MAPPING_DESIGN.md` §0. Minted at founder direction 2026-09-30. Free-check as B-271.
 
 **Relationship to B-010 (read this first):** B-010 already covers the Linux DNS-fallback stub (`linuxDNSCache` always returns `nil`). B-272 is the **other half, and it is not in B-010**:
@@ -3644,6 +3644,6 @@ Choose in the brief.
 - `DISCOVERY_ADMIN_INVESTIGATION.md`;
 - `DYNAMIC_ASSET_GROUPING_EPIC.md` (added 2026-09-30; master-sequence item 6 resolves its §2 schema decision before B-269).
 
-**Status:** items 1 (B-273, `6d64aaa`) and 2 (B-271) are done. Item 3 (B-272) is next.
+**Status:** items 1 (B-273, `6d64aaa`) and 2 (B-271, `b138ff7`) are done. Item 3 (B-272) is DEFERRED (no Linux customer yet). Item 4 (the honest-state gap) is next.
 
 ## Next B-ID: B-281

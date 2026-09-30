@@ -8,7 +8,13 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-09-30, newest) — DYNAMIC_ASSET_GROUPING_EPIC.md committed
+## Active decision thread (2026-09-30, newest) — B-272 DEFERRED; next active item is 4 (honest-state gap)
+
+- **Founder:** master-sequence item 3 (B-272, with B-010) is **DEFERRED**, since there is no active Linux customer deployment yet. It must be closed before Linux is presented as customer-ready in any external context.
+- **New rule in the master sequence:** a DEFERRED item doesn't block the item below it, but must be resolved before its deferred condition changes.
+- **Next active item: 4**, the honest-state gap ("0" renders the same for "reported, found nothing" and "never reported").
+
+## Active decision thread (2026-09-30) — DYNAMIC_ASSET_GROUPING_EPIC.md committed
 
 - **`DYNAMIC_ASSET_GROUPING_EPIC.md`** was saved verbatim at founder direction; the only addition is a B-280 cross-reference.
   - It is a design record, not a build brief.
@@ -2710,6 +2716,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — deferred master-sequence item 3 (B-272) per founder and added the DEFERRED rule; the next active item is 4. Docs only.
+
+Prior entry:
 2026-09-30 by Claude Code — committed DYNAMIC_ASSET_GROUPING_EPIC.md (verbatim plus a B-280 cross-ref); cross-referenced from master-sequence item 6 and B-280. Docs only.
 
 Prior entry:

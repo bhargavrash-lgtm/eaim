@@ -10,6 +10,9 @@ above it is `[x]`. When an item completes, change its own checkbox to
 completion commit — not a separate housekeeping step. No new item gets
 added to this file without being placed in the correct phase, matching
 its real dependency.
+An item marked DEFERRED does not block the item below it, but must be
+resolved before the deferred condition changes (e.g., before Linux is
+claimed customer-ready).
 
 Related detailed design records, referenced by name, never pasted
 inline: `AI_LLM_SERVICE_MAPPING_DESIGN.md`,
@@ -40,6 +43,9 @@ anything.
       scanners. Done 2026-09-30 — `b138ff7` (migration 000025,
       live-verified; `B-271_VERIFICATION.md`).
 - [ ] 3. **B-272** — `network_activity` non-functional on Linux.
+      **DEFERRED** (2026-09-30): no active Linux customer deployment yet -
+      revisit and close before Linux is presented as customer-ready in any
+      external context. Does not block item 4.
 - [ ] 4. Honest-state gap — "0" renders identically for "reported, found
       nothing" vs. "never reported."
 - [ ] 5. Windows endpoint governed-agent link trace.
