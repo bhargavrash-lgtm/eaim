@@ -8,7 +8,23 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-09-30, newest) — Item 4 DONE (honest scanner state); next is the B-252 Admin/Endpoint Detail brief
+## Active decision thread (2026-09-30, newest) — B-281–B-285 minted (item 4 follow-ups); Endpoint Detail link-control decision
+
+- **Minted at founder direction:**
+
+  | B-ID | Item | Severity |
+  |---|---|---|
+  | **B-281** | One hung scanner stops an endpoint from ever reporting again. Needs a per-scanner timeout. | High, same failure class as B-273 |
+  | **B-282** | The Agent version column is blank for every endpoint | Low |
+  | **B-283** | The systemd unit's `StartLimitIntervalSec` is in the wrong section, so it's ignored | Low; installer correctness |
+  | **B-284** | Endpoint freshness trusts the agent's clock | Medium, security-adjacent |
+  | **B-285** | Scanner crashes aren't logged. **Built together with B-281** (same `runScan` path), own ID kept. | Low–Medium |
+
+- The `openapi.yaml` gap stays with Architect-EAMI; no B-ID. The next B-ID is B-286.
+- **Endpoint Detail (founder):** **show** the agent-link control on a no-report endpoint. Recorded on the master-sequence handoff note and on B-252.
+- No code changed.
+
+## Active decision thread (2026-09-30) — Item 4 DONE (honest scanner state); next is the B-252 Admin/Endpoint Detail brief
 
 - **Master-sequence item 4 is built, reviewed, live-verified and pushed.** The record is `ITEM4_HONEST_STATE_VERIFICATION.md`.
   - The agent reports `scanner_status` (ok / disabled / error, including the scan deadline).
@@ -2773,6 +2789,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — minted B-281–B-285 (item 4 follow-ups; B-285 is built with B-281); recorded the Endpoint Detail decision to show the link control on a no-report endpoint. Docs only.
+
+Prior entry:
 2026-09-30 by Claude Code — master-sequence item 4 DONE (honest scanner state: agent scanner_status, API has_report/scanner_status via LATERAL, UI states); fixed a pre-existing org-wide 500 on paste-created endpoints; live 41/41 twice; code review applied. Marker cleared.
 
 Prior entry:

@@ -60,7 +60,9 @@ anything.
       report) and `has_report` into Endpoint Detail's design from the start:
       Never reported / Disabled / Scan failed / real count / Not known.
       It must not rebuild the "None detected" / bare-"0" ambiguity on the
-      new page.
+      new page. **Also (founder, 2026-09-30):** show the agent-link control on
+      an endpoint with no scan report. Don't hide it as the current drawer
+      does; that's where manual linking is most useful.
 - [ ] 5. Windows endpoint governed-agent link trace.
 
 ---

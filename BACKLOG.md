@@ -2982,6 +2982,7 @@ Choices, for the founder:
   - the shared classification piece is `AssetClassificationForm`;
   - an endpoint's CMDB id equals `endpoints.id`;
   - the only links to `/discover` are the nav entry and the route.
+- **Endpoint Detail decision (founder, 2026-09-30):** **show** the agent-link control on an endpoint with no scan report. Don't hide it as the current drawer does. A report-less endpoint (for example one created by a paste event) is exactly where manual linking is most useful.
 
 
 ### B-253 — RBAC split: "operators contain; admins expand or destroy" — **DONE, 2026-09-29** (evidence: `B-253_VERIFICATION.md`)
@@ -3664,4 +3665,92 @@ Choose in the brief.
 
 **Status:** items 1 (B-273, `6d64aaa`), 2 (B-271, `b138ff7`) and 4 (the honest-state gap, `ITEM4_HONEST_STATE_VERIFICATION.md`) are done. Item 3 (B-272) is DEFERRED (no Linux customer yet). Next: the B-252 Admin rename + Endpoint Detail brief, which carries item 4's `scanner_status`/`has_report` into Endpoint Detail.
 
-## Next B-ID: B-281
+### B-281 — One hung scanner stops an endpoint from ever reporting again — **QUEUED, 2026-09-30 (High)**
+**Origin:** master-sequence item 4's code review and live run (2026-09-30; `ITEM4_HONEST_STATE_VERIFICATION.md` "Found during"). Minted at founder direction 2026-09-30. B-281–B-285 were confirmed free against BACKLOG.md directly: the counter read B-281, nothing referenced B-281 or higher, and a grep for hung-scanner/timeout, `StartLimitIntervalSec`, clock skew, blank agent version and panic logging found no overlapping open item.
+
+**Problem (code-level; from the item-4 code review):**
+- `payload.Build` gives the whole batch a 30 s context, then `wg.Wait()`s for **every** scanner goroutine.
+- `models`, `ai_apps`, `mcp_servers` and `cloud_clients` never consult `ctx`: no `ctx.Err()` check, no `CommandContext`.
+- So if one of them blocks (a hung network filesystem under a model path, a stalled registry or WMI call, a huge directory walk), `wg.Wait()` never returns. The scan loop stops, and **no report is ever sent again**, silently.
+- It's the same failure class as B-273: an endpoint that looks installed and running but never reports. Founder: treat with real severity.
+
+**Fix (to be confirmed in the brief):**
+- A **per-scanner** timeout, not just the batch deadline.
+- `Build` waits at most the deadline, records any scanner still running as `error` (item 4's `scanner_status`), sends the report anyway, and never blocks on stragglers.
+- Decide how to stop a leaked goroutine from piling up across cycles: skip re-running a scanner whose previous run hasn't returned, and report it as `error`.
+
+**Acceptance criteria:**
+- [ ] A unit test with a scanner that blocks forever: `Build` returns within the deadline, the report is sent, and that scanner is `error`.
+- [ ] No goroutine pile-up across repeated cycles (test).
+- [ ] Live: a real agent with a deliberately blocking scan path still reports every cycle.
+
+**Dependencies:** item 4's `scanner_status` (done, `2fa8b0a`). **Built together with B-285**, which touches the same `runScan` path.
+
+### B-282 — Agent version column is blank for every endpoint — **QUEUED, 2026-09-30 (Low)**
+**Origin:** master-sequence item 4's code review and live run (2026-09-30; `ITEM4_HONEST_STATE_VERIFICATION.md` "Found during"). Minted at founder direction 2026-09-30. B-281–B-285 were confirmed free against BACKLOG.md directly: the counter read B-281, nothing referenced B-281 or higher, and a grep for hung-scanner/timeout, `StartLimitIntervalSec`, clock skew, blank agent version and panic logging found no overlapping open item.
+
+**Problem:**
+- Discover's Agent version column is empty for every endpoint, the real Windows agent included.
+- The stored `agent_version` is `''`, and the UI's `ep.agent_version ?? '—'` only catches null.
+- Paste-created endpoints are NULL, and read as `''` since item 4's `COALESCE`.
+
+**Root cause to confirm in the brief:** whether the agent sends a version at all (`Report.AgentVersion` looks unset in `payload.Build`), or ingest drops it.
+
+**Acceptance criteria:**
+- [ ] The real version is stored and shown.
+- [ ] An unknown version renders an honest "—" rather than blank.
+- [ ] Live-verify on a real agent.
+
+**Dependencies:** none. Relevant to B-252's Endpoint Detail Overview.
+
+### B-283 — `eami-agent.service` puts `StartLimitIntervalSec` in `[Service]` (systemd ignores it) — **QUEUED, 2026-09-30 (Low)**
+**Origin:** master-sequence item 4's code review and live run (2026-09-30; `ITEM4_HONEST_STATE_VERIFICATION.md` "Found during"). Minted at founder direction 2026-09-30. B-281–B-285 were confirmed free against BACKLOG.md directly: the counter read B-281, nothing referenced B-281 or higher, and a grep for hung-scanner/timeout, `StartLimitIntervalSec`, clock skew, blank agent version and panic logging found no overlapping open item.
+
+**Problem:**
+- `installer/linux/eami-agent.service` sets `StartLimitIntervalSec=300` and `StartLimitBurst=5` under `[Service]`.
+- systemd reads them only under `[Unit]`, and logs "Unknown key 'StartLimitIntervalSec' in section [Service], ignoring" (seen live, 2026-09-30).
+- So the intended "stop after 5 crashes in 5 minutes" limit isn't in force. The service restarts every 10 s indefinitely; seen live during item 4, where a bad drop-in produced 40+ restarts.
+- Same installer-correctness class as B-273 and its follow-ups.
+
+**Acceptance criteria:**
+- [ ] Move both keys to `[Unit]`, with no systemd warning.
+- [ ] Decide whether an indefinite restart is actually preferred for an endpoint agent. If so, drop the keys and say so rather than leave dead config.
+- [ ] Live-verify with a real `.deb` (and `.rpm`) install.
+
+**Dependencies:** none. Keep the B-273 `.gitattributes` LF rule (the file is under `installer/linux/*`).
+
+### B-284 — Endpoint freshness trusts the agent's own clock (`collected_at`) — **QUEUED, 2026-09-30 (Medium, security-adjacent)**
+**Origin:** master-sequence item 4's code review and live run (2026-09-30; `ITEM4_HONEST_STATE_VERIFICATION.md` "Found during"). Minted at founder direction 2026-09-30. B-281–B-285 were confirmed free against BACKLOG.md directly: the counter read B-281, nothing referenced B-281 or higher, and a grep for hung-scanner/timeout, `StartLimitIntervalSec`, clock skew, blank agent version and panic logging found no overlapping open item.
+
+**Problem:**
+- `endpoint_reports.collected_at` is taken from the agent's own report (`rep.CollectedAt`, falling back to receive time only when absent).
+- The "latest report" everywhere (item 4's `LATERAL` pick, `gpu_count`, `latest_report`, `scanner_status`, and the child-table rebuild order) orders by `collected_at`.
+- A clock that is skewed, deliberately or by accident, can therefore make an **older scan count as the latest**, or a future-dated report stay "latest" forever and mask every later real scan.
+- **Security-adjacent:** anyone trusting a report as current freshness data can be misled. A compromised agent could pin a benign-looking report as permanently latest.
+- `endpoints.last_seen` is server time (`NOW()`), but it's also bumped by paste events, so it isn't a scan-freshness signal either (item 4, Part A).
+
+**Acceptance criteria:**
+- [ ] Order "latest" by server `received_at`, or bound `collected_at` against it (reject or clamp future dates and large skew).
+- [ ] Surface a real "last scan received" time (server-side) distinct from `last_seen`.
+- [ ] Tests with a skewed and a future-dated report.
+- [ ] Decide whether a large skew should raise an alert.
+
+**Dependencies:** item 4's latest-report pick (`latestReportJoinSQL`). Relevant to B-270 and Endpoint Detail.
+
+### B-285 — Scanner crashes are recorded as "error" but never logged — **QUEUED, 2026-09-30 (Low–Medium)**
+**Origin:** master-sequence item 4's code review and live run (2026-09-30; `ITEM4_HONEST_STATE_VERIFICATION.md` "Found during"). Minted at founder direction 2026-09-30. B-281–B-285 were confirmed free against BACKLOG.md directly: the counter read B-281, nothing referenced B-281 or higher, and a grep for hung-scanner/timeout, `StartLimitIntervalSec`, clock skew, blank agent version and panic logging found no overlapping open item.
+
+**Problem:**
+- `payload.runScan` recovers a scanner panic with `recover()` and discards the value. The report says `error` (item 4), but nothing on the endpoint logs which scanner panicked, or why.
+- Scanner error returns aren't logged either.
+- An operator seeing "Scan failed" has no local evidence to diagnose it.
+
+**Fix:** log the scanner name plus the panic value and stack (or the error) through the agent's logger. Consider a short, sanitised reason in the report (no paths or secrets; ties to B-279).
+
+**Acceptance criteria:**
+- [ ] A panic and an error each produce one log line naming the scanner.
+- [ ] Tests.
+
+**Dependencies / sequencing:** **built together with B-281.** Same function (`runScan`), same brief. Kept as its own ID for tracking (founder, 2026-09-30).
+
+## Next B-ID: B-286
