@@ -47,7 +47,7 @@ anything.
       revisit and close before Linux is presented as customer-ready in any
       external context. Does not block item 4.
 - [x] 4. Honest-state gap — "0" renders identically for "reported, found
-      nothing" vs. "never reported." Done 2026-09-30 — HASH_PLACEHOLDER
+      nothing" vs. "never reported." Done 2026-09-30 — `2fa8b0a`
       (`scanner_status` + `has_report`; `ITEM4_HONEST_STATE_VERIFICATION.md`).
       **Then, immediately after item 4 (founder, 2026-09-30):** the B-252
       Admin rename + Endpoint Detail brief, with a minimal C3 folded in
