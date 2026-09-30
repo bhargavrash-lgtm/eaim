@@ -7,6 +7,8 @@ import type { components } from '@/api/schema'
 import { ChevronDown, ChevronRight, X } from 'lucide-react'
 import { LinkedAgentControl } from './LinkedAgentControl'
 import { formatBytes, formatRelativeTime } from './format'
+import { CategoryStateLabel } from './CategoryStateLabel'
+import { STATE_DESCRIPTION, STATE_LABEL, categoryState, type CategoryState, type EndpointWithScannerStatus } from './scannerState'
 
 // Moved from pages/discover/DiscoverPage.tsx (B-252 C0), behaviour unchanged.
 
@@ -22,8 +24,10 @@ type NetworkConnection = components['schemas']['NetworkConnection']
 
 // ── Collapsible section ──────────────────────────────────────────────────────
 
-function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
-  const [open, setOpen] = useState(count > 0)
+// Item 4: the badge and body show the category's honest state. The list (and
+// a genuine "None detected") only render when the scanner actually ran.
+function Section({ title, state, children }: { title: string; state: CategoryState; children: React.ReactNode }) {
+  const [open, setOpen] = useState(state.kind === 'count' && state.count > 0)
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">
       <button
@@ -33,10 +37,16 @@ function Section({ title, count, children }: { title: string; count: number; chi
         <span className="flex items-center gap-2">
           {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           {title}
-          <span className="rounded-full bg-gray-200 px-1.5 py-0.5 text-2xs font-bold text-gray-600">{count}</span>
+          {state.kind === 'count'
+            ? <span className="rounded-full bg-gray-200 px-1.5 py-0.5 text-2xs font-bold text-gray-600">{state.count}</span>
+            : <CategoryStateLabel state={state} />}
         </span>
       </button>
-      {open && <div className="px-4 py-3 text-sm text-gray-700 bg-white">{children}</div>}
+      {open && (
+        <div className="px-4 py-3 text-sm text-gray-700 bg-white">
+          {state.kind === 'count' ? children : <p className="text-gray-400">{STATE_DESCRIPTION[state.kind]}</p>}
+        </div>
+      )}
     </div>
   )
 }
@@ -48,7 +58,8 @@ function Section({ title, count, children }: { title: string; count: number; chi
 // directly (fetches its own data via endpointId, no dependency on
 // DiscoverPage's own local state) rather than duplicating it.
 export function EndpointDrawer({ endpointId, onClose }: { endpointId: string; onClose: () => void }) {
-  const { data: endpoint, isLoading } = useEndpoint(endpointId)
+  const { data, isLoading } = useEndpoint(endpointId)
+  const endpoint = data as EndpointWithScannerStatus | undefined
   const report: EndpointReport | undefined = endpoint?.latest_report
 
   return (
@@ -60,6 +71,10 @@ export function EndpointDrawer({ endpointId, onClose }: { endpointId: string; on
 
         {isLoading ? (
           <div className="flex flex-1 items-center justify-center overflow-y-auto py-16"><LoadingSpinner /></div>
+        ) : endpoint && endpoint.has_report === false ? (
+          <div className="flex flex-1 items-center justify-center overflow-y-auto py-16">
+            <EmptyState title={STATE_LABEL.never} description={STATE_DESCRIPTION.never} />
+          </div>
         ) : !endpoint || !report ? (
           <div className="flex flex-1 items-center justify-center overflow-y-auto py-16">
             <EmptyState title="No report data available" />
@@ -91,7 +106,7 @@ export function EndpointDrawer({ endpointId, onClose }: { endpointId: string; on
             <LinkedAgentControl key={endpoint.id} endpoint={endpoint} />
 
             {/* MCP Servers — now MCPServer[] directly */}
-            <Section title="MCP Servers" count={report.mcp_servers?.length ?? 0}>
+            <Section title="MCP Servers" state={categoryState(endpoint, 'mcp_servers', report.mcp_servers?.length ?? 0)}>
               {(report.mcp_servers ?? []).length === 0
                 ? <p className="text-gray-400">None detected</p>
                 : (
@@ -109,7 +124,7 @@ export function EndpointDrawer({ endpointId, onClose }: { endpointId: string; on
             </Section>
 
             {/* AI Apps */}
-            <Section title="AI Apps" count={report.ai_apps?.length ?? 0}>
+            <Section title="AI Apps" state={categoryState(endpoint, 'ai_apps', report.ai_apps?.length ?? 0)}>
               {(report.ai_apps ?? []).length === 0
                 ? <p className="text-gray-400">None detected</p>
                 : (
@@ -125,7 +140,7 @@ export function EndpointDrawer({ endpointId, onClose }: { endpointId: string; on
             </Section>
 
             {/* Local Models */}
-            <Section title="Local Models" count={report.local_models?.length ?? 0}>
+            <Section title="Local Models" state={categoryState(endpoint, 'local_models', report.local_models?.length ?? 0)}>
               {(report.local_models ?? []).length === 0
                 ? <p className="text-gray-400">None detected</p>
                 : (
@@ -143,7 +158,7 @@ export function EndpointDrawer({ endpointId, onClose }: { endpointId: string; on
             </Section>
 
             {/* Cloud Clients */}
-            <Section title="Cloud Clients" count={report.cloud_clients?.length ?? 0}>
+            <Section title="Cloud Clients" state={categoryState(endpoint, 'cloud_clients', report.cloud_clients?.length ?? 0)}>
               {(report.cloud_clients ?? []).length === 0
                 ? <p className="text-gray-400">None detected</p>
                 : (
@@ -162,7 +177,7 @@ export function EndpointDrawer({ endpointId, onClose }: { endpointId: string; on
             </Section>
 
             {/* GPU — vram_bytes (not vram_mb) */}
-            <Section title="GPUs" count={report.gpus?.length ?? 0}>
+            <Section title="GPUs" state={categoryState(endpoint, 'gpus', report.gpus?.length ?? 0)}>
               {(report.gpus ?? []).length === 0
                 ? <p className="text-gray-400">None detected</p>
                 : (
@@ -180,7 +195,7 @@ export function EndpointDrawer({ endpointId, onClose }: { endpointId: string; on
             </Section>
 
             {/* Network Activity */}
-            <Section title="Network Activity" count={(report.network_activity as any)?.active_connections?.length ?? 0}>
+            <Section title="Network Activity" state={categoryState(endpoint, 'network_activity', (report.network_activity as any)?.active_connections?.length ?? 0)}>
               {((report.network_activity as any)?.active_connections ?? []).length === 0
                 ? <p className="text-gray-400">None detected</p>
                 : (
@@ -196,7 +211,7 @@ export function EndpointDrawer({ endpointId, onClose }: { endpointId: string; on
             </Section>
 
             {/* Python Envs — new schema: path, type, ai_packages: string[], detected_at */}
-            <Section title="Python Environments" count={report.python_envs?.length ?? 0}>
+            <Section title="Python Environments" state={categoryState(endpoint, 'python_envs', report.python_envs?.length ?? 0)}>
               {(report.python_envs ?? []).length === 0
                 ? <p className="text-gray-400">None detected</p>
                 : (
@@ -221,7 +236,7 @@ export function EndpointDrawer({ endpointId, onClose }: { endpointId: string; on
             </Section>
 
             {/* Node Projects — replaces nodejs_ai */}
-            <Section title="Node.js AI Projects" count={report.node_projects?.length ?? 0}>
+            <Section title="Node.js AI Projects" state={categoryState(endpoint, 'node_projects', report.node_projects?.length ?? 0)}>
               {(report.node_projects ?? []).length === 0
                 ? <p className="text-gray-400">None detected</p>
                 : (

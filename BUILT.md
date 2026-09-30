@@ -1,5 +1,43 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## Master-sequence item 4 — honest scanner state (never reported / disabled / scan failed / found nothing / not known) — 2026-09-30 (Claude Code)
+
+The evidence record is `ITEM4_HONEST_STATE_VERIFICATION.md`. This is `AI_ITAM_EPIC_MASTER_SEQUENCE.md` item 4 (epic B-280). It has no B-ID.
+
+**Files:**
+- `eami-agent/internal/payload/builder.go`: the report gains `scanner_status` (per scanner `ok` / `disabled` / `error`) via `runScan`. `error` covers an error, a panic, or the scan deadline having passed. Tests are in `builder_test.go`.
+- `eami-api/internal/store/endpoints.sql.go`:
+  - list, detail and link read-back gain `has_report` and `scanner_status`, through one shared `LEFT JOIN LATERAL` latest-report pick (`latestReportJoinSQL`, ties broken by id), which also feeds `gpu_count` and `latest_report`;
+  - `COALESCE(e.agent_version, '')` fixes a pre-existing **org-wide 500** on `GET /v1/endpoints` whenever a paste event had created an endpoint (NULL `agent_version`).
+- `eami-api/internal/api/discover.go`: the response fields. The stale "frozen" comments are reworded.
+- `eami-ui/src/components/endpoints/scannerState.ts` (new), `CategoryStateLabel.tsx` (new), `pages/discover/DiscoverPage.tsx`, `components/endpoints/EndpointDrawer.tsx`: each category shows Never reported / Disabled / Scan failed / the real count / Not known. A bare "0" appears only when the scanner actually ran. Fields are typed locally (founder D2).
+
+**No schema migration:** the field rides in the raw JSONB report, since the collector and the API pass the report through untouched.
+
+**Tests:**
+- agent: 3 new;
+- real Postgres: `endpoint_scanner_status_pg_test.go` (never / legacy / latest-wins / downgraded / tie, on list and detail);
+- full agent and API suites pass;
+- 4/4 mutations caught;
+- `tsc` and `vite build` pass.
+
+**Live:** Playwright UI vs psql, **41/41**, on the first build and again after the review fixes.
+- A real paste-only endpoint shows Never reported.
+- A real WSL `.deb` agent whose local config disables `models`/`gpu` shows Disabled and real 0s. It was upgraded in place 1.1.0 → 1.1.1 with its config kept.
+- The real Windows MSI agent shows Not known, and real counts where items exist.
+- "Scan failed" couldn't be produced by any real mechanism on Linux, since its scanners swallow errors; two systemd attempts were reverted. It's covered by unit and API tests, plus one clearly labelled synthetic report through the real collector, deleted afterwards.
+
+**Reviews:** code review. M1 (the deadline recorded as `ok`) and L2 (mixed rows on a tie) were fixed and re-verified; L3 and L4 fixed. No security review was required (no new data exposure: scanner names and statuses only).
+
+**Limitations and follow-ups (proposed, not minted):**
+- a hung scanner blocks `Build` forever;
+- the Agent version column is blank (`''` isn't caught by `??`);
+- the systemd unit's `StartLimitIntervalSec` is in the wrong section;
+- a paste-only endpoint can't be linked from the drawer;
+- `collected_at` clock skew;
+- `runScan` swallows panics silently;
+- `openapi.yaml` drift (Architect-EAMI).
+
 ## B-271 — Linking an endpoint no longer silently disables 4 of 10 scanners — 2026-09-30 (Claude Code)
 
 The evidence record is `B-271_VERIFICATION.md`. This is item 2 of `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (epic B-280).

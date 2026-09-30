@@ -3662,6 +3662,6 @@ Choose in the brief.
 - `DISCOVERY_ADMIN_INVESTIGATION.md`;
 - `DYNAMIC_ASSET_GROUPING_EPIC.md` (added 2026-09-30; master-sequence item 6 resolves its §2 schema decision before B-269).
 
-**Status:** items 1 (B-273, `6d64aaa`) and 2 (B-271, `b138ff7`) are done. Item 3 (B-272) is DEFERRED (no Linux customer yet). Item 4 (the honest-state gap) is next.
+**Status:** items 1 (B-273, `6d64aaa`), 2 (B-271, `b138ff7`) and 4 (the honest-state gap, `ITEM4_HONEST_STATE_VERIFICATION.md`) are done. Item 3 (B-272) is DEFERRED (no Linux customer yet). Next: the B-252 Admin rename + Endpoint Detail brief, which carries item 4's `scanner_status`/`has_report` into Endpoint Detail.
 
 ## Next B-ID: B-281

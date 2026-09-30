@@ -8,10 +8,11 @@ import type { Column } from '@/components/common/DataTable'
 import { useEndpoints } from '@/hooks/useEndpoints'
 import { EndpointDrawer } from '@/components/endpoints/EndpointDrawer'
 import { formatRelativeTime } from '@/components/endpoints/format'
-import type { components } from '@/api/schema'
+import { CategoryStateLabel } from '@/components/endpoints/CategoryStateLabel'
+import { categoryState, type EndpointWithScannerStatus } from '@/components/endpoints/scannerState'
 import { Monitor, Search } from 'lucide-react'
 
-type Endpoint = components['schemas']['Endpoint']
+type Endpoint = EndpointWithScannerStatus
 
 function requestErrorMessage(error: unknown): string {
   return error && typeof error === 'object' && 'message' in error && typeof error.message === 'string'
@@ -67,10 +68,12 @@ export function DiscoverPage() {
     { key: 'hostname', header: 'Hostname', render: (ep) => <span className="font-medium text-gray-900">{ep.hostname}</span> },
     { key: 'os', header: 'OS', render: (ep) => <span className="text-gray-500 capitalize">{ep.os ?? '—'}</span> },
     { key: 'agent_version', header: 'Agent version', render: (ep) => <span className="text-gray-500">{ep.agent_version ?? '—'}</span> },
-    { key: 'ai_app_count', header: 'AI apps', render: (ep) => <span className="text-gray-600">{ep.ai_app_count ?? 0}</span> },
-    { key: 'local_model_count', header: 'Local models', render: (ep) => <span className="text-gray-600">{ep.local_model_count ?? 0}</span> },
-    { key: 'mcp_server_count', header: 'MCPs', render: (ep) => <span className="text-gray-600">{ep.mcp_server_count ?? 0}</span> },
-    { key: 'gpu_count', header: 'GPUs', render: (ep) => <span className="text-gray-600">{ep.gpu_count ?? 0}</span> },
+    // Item 4: each count shows its honest state (never reported, disabled,
+    // scan failed, not known) instead of a bare 0 when the scanner didn't run.
+    { key: 'ai_app_count', header: 'AI apps', render: (ep) => <CategoryStateLabel countClassName="text-gray-600" state={categoryState(ep, 'ai_apps', ep.ai_app_count ?? 0)} /> },
+    { key: 'local_model_count', header: 'Local models', render: (ep) => <CategoryStateLabel countClassName="text-gray-600" state={categoryState(ep, 'local_models', ep.local_model_count ?? 0)} /> },
+    { key: 'mcp_server_count', header: 'MCPs', render: (ep) => <CategoryStateLabel countClassName="text-gray-600" state={categoryState(ep, 'mcp_servers', ep.mcp_server_count ?? 0)} /> },
+    { key: 'gpu_count', header: 'GPUs', render: (ep) => <CategoryStateLabel countClassName="text-gray-600" state={categoryState(ep, 'gpus', ep.gpu_count ?? 0)} /> },
     { key: 'last_seen', header: 'Last seen', render: (ep) => <span className="text-gray-400">{formatRelativeTime(ep.last_seen)}</span> },
   ]
 

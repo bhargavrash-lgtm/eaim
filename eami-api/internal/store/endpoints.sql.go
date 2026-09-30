@@ -232,6 +232,15 @@ type AgentEndpoint struct {
 	// display; the FK is the only real, load-bearing link.
 	GatewayAgentID   *uuid.UUID
 	GatewayAgentName *string
+	// HasReport is false for an endpoint that exists without any scan
+	// report (a paste event can create the row, see
+	// ResolvePasteSourceEndpoint) -- the honest "never reported" signal.
+	// last_seen is not: paste events bump it too.
+	HasReport bool
+	// ScannerStatus is the latest report's scanner_status object (per
+	// scanner: ok / disabled / error), raw; nil when there is no report or
+	// the report predates the field (an older agent) -- "not known".
+	ScannerStatus json.RawMessage
 }
 
 // AgentEndpointWithReport extends AgentEndpoint with the latest report blob.
@@ -413,23 +422,35 @@ type ListAgentEndpointsParams struct {
 // pages through. $2 is the likeEscaper-escaped search (empty = no filter).
 const agentEndpointSearchSQL = `($2::text = '' OR e.hostname ILIKE '%' || $2 || '%' ESCAPE E'\\')`
 
+// latestReportJoinSQL picks each endpoint's ONE latest report (ties on
+// collected_at broken by id), so gpu_count, has_report, scanner_status and
+// latest_report always come from the same row and the report is read once.
+// A latest report exists exactly when any report does, so has_report is
+// lr.report IS NOT NULL. Uses idx_reports_endpoint (endpoint_id, collected_at DESC).
+const latestReportJoinSQL = `LEFT JOIN LATERAL (
+	SELECT er.report FROM endpoint_reports er
+	WHERE er.endpoint_id = e.id
+	ORDER BY er.collected_at DESC, er.id DESC
+	LIMIT 1
+) lr ON true`
+
+// agent_version is COALESCEd because a paste event creates an endpoints row
+// without it (ResolvePasteSourceEndpoint); scanning that NULL into a string
+// used to fail the whole list with a 500 (found by master-sequence item 4).
 const listAgentEndpointsSQL = `
 SELECT
-	e.id, e.org_id, e.agent_id, e.hostname, e.agent_version, e.os_info,
+	e.id, e.org_id, e.agent_id, e.hostname, COALESCE(e.agent_version, ''), e.os_info,
 	e.last_seen, e.first_seen, e.risk_score,
 	(SELECT COUNT(*) FROM endpoint_ai_apps    WHERE endpoint_id = e.id) AS ai_app_count,
 	(SELECT COUNT(*) FROM endpoint_model_files WHERE endpoint_id = e.id) AS model_count,
 	(SELECT COUNT(*) FROM endpoint_mcp_servers WHERE endpoint_id = e.id) AS mcp_count,
-	COALESCE(
-		(SELECT jsonb_array_length(NULLIF(er.report->'gpus', 'null'::jsonb))
-		 FROM endpoint_reports er
-		 WHERE er.endpoint_id = e.id
-		 ORDER BY er.collected_at DESC LIMIT 1),
-		0
-	) AS gpu_count,
-	e.gateway_agent_id, ga.name
+	COALESCE(jsonb_array_length(NULLIF(lr.report->'gpus', 'null'::jsonb)), 0) AS gpu_count,
+	e.gateway_agent_id, ga.name,
+	lr.report IS NOT NULL AS has_report,
+	lr.report->'scanner_status' AS scanner_status
 FROM endpoints e
 LEFT JOIN gateway_agents ga ON ga.id = e.gateway_agent_id
+` + latestReportJoinSQL + `
 WHERE e.org_id = $1 AND ` + agentEndpointSearchSQL + `
 ORDER BY e.last_seen DESC, e.id
 LIMIT $3 OFFSET $4`
@@ -465,21 +486,18 @@ func (q *Queries) CountAgentEndpoints(ctx context.Context, orgID uuid.UUID, sear
 
 const getAgentEndpointSQL = `
 SELECT
-	e.id, e.org_id, e.agent_id, e.hostname, e.agent_version, e.os_info,
+	e.id, e.org_id, e.agent_id, e.hostname, COALESCE(e.agent_version, ''), e.os_info,
 	e.last_seen, e.first_seen, e.risk_score,
 	(SELECT COUNT(*) FROM endpoint_ai_apps    WHERE endpoint_id = e.id) AS ai_app_count,
 	(SELECT COUNT(*) FROM endpoint_model_files WHERE endpoint_id = e.id) AS model_count,
 	(SELECT COUNT(*) FROM endpoint_mcp_servers WHERE endpoint_id = e.id) AS mcp_count,
-	COALESCE(
-		(SELECT jsonb_array_length(NULLIF(er.report->'gpus', 'null'::jsonb))
-		 FROM endpoint_reports er
-		 WHERE er.endpoint_id = e.id
-		 ORDER BY er.collected_at DESC LIMIT 1),
-		0
-	) AS gpu_count,
-	e.gateway_agent_id, ga.name
+	COALESCE(jsonb_array_length(NULLIF(lr.report->'gpus', 'null'::jsonb)), 0) AS gpu_count,
+	e.gateway_agent_id, ga.name,
+	lr.report IS NOT NULL AS has_report,
+	lr.report->'scanner_status' AS scanner_status
 FROM endpoints e
 LEFT JOIN gateway_agents ga ON ga.id = e.gateway_agent_id
+` + latestReportJoinSQL + `
 WHERE e.id = $1 AND e.org_id = $2`
 
 // GetAgentEndpoint returns a single agent endpoint by ID.
@@ -494,6 +512,7 @@ func (q *Queries) GetAgentEndpoint(ctx context.Context, id, orgID uuid.UUID) (*A
 		&e.LastSeen, &e.FirstSeen, &e.RiskScore,
 		&e.AIAppCount, &e.ModelCount, &e.MCPCount, &e.GPUCount,
 		&gatewayAgentID, &gatewayAgentName,
+		&e.HasReport, &e.ScannerStatus,
 	); err != nil {
 		return nil, err
 	}
@@ -505,25 +524,19 @@ func (q *Queries) GetAgentEndpoint(ctx context.Context, id, orgID uuid.UUID) (*A
 
 const getAgentEndpointWithReportSQL = `
 SELECT
-	e.id, e.org_id, e.agent_id, e.hostname, e.agent_version, e.os_info,
+	e.id, e.org_id, e.agent_id, e.hostname, COALESCE(e.agent_version, ''), e.os_info,
 	e.last_seen, e.first_seen, e.risk_score,
 	(SELECT COUNT(*) FROM endpoint_ai_apps    WHERE endpoint_id = e.id) AS ai_app_count,
 	(SELECT COUNT(*) FROM endpoint_model_files WHERE endpoint_id = e.id) AS model_count,
 	(SELECT COUNT(*) FROM endpoint_mcp_servers WHERE endpoint_id = e.id) AS mcp_count,
-	COALESCE(
-		(SELECT jsonb_array_length(NULLIF(er.report->'gpus', 'null'::jsonb))
-		 FROM endpoint_reports er
-		 WHERE er.endpoint_id = e.id
-		 ORDER BY er.collected_at DESC LIMIT 1),
-		0
-	) AS gpu_count,
+	COALESCE(jsonb_array_length(NULLIF(lr.report->'gpus', 'null'::jsonb)), 0) AS gpu_count,
 	e.gateway_agent_id, ga.name,
-	(SELECT er.report
-	 FROM endpoint_reports er
-	 WHERE er.endpoint_id = e.id
-	 ORDER BY er.collected_at DESC LIMIT 1) AS latest_report
+	lr.report IS NOT NULL AS has_report,
+	lr.report->'scanner_status' AS scanner_status,
+	lr.report AS latest_report
 FROM endpoints e
 LEFT JOIN gateway_agents ga ON ga.id = e.gateway_agent_id
+` + latestReportJoinSQL + `
 WHERE e.id = $1 AND e.org_id = $2`
 
 // GetAgentEndpointWithReport returns an endpoint including its latest report blob.
@@ -538,6 +551,7 @@ func (q *Queries) GetAgentEndpointWithReport(ctx context.Context, id, orgID uuid
 		&e.LastSeen, &e.FirstSeen, &e.RiskScore,
 		&e.AIAppCount, &e.ModelCount, &e.MCPCount, &e.GPUCount,
 		&gatewayAgentID, &gatewayAgentName,
+		&e.HasReport, &e.ScannerStatus,
 		&e.LatestReport,
 	); err != nil {
 		return nil, err
@@ -557,6 +571,7 @@ func scanAgentEndpointRows(rows pgx.Rows) (AgentEndpoint, error) {
 		&e.LastSeen, &e.FirstSeen, &e.RiskScore,
 		&e.AIAppCount, &e.ModelCount, &e.MCPCount, &e.GPUCount,
 		&gatewayAgentID, &gatewayAgentName,
+		&e.HasReport, &e.ScannerStatus,
 	); err != nil {
 		return e, err
 	}

@@ -46,14 +46,21 @@ anything.
       **DEFERRED** (2026-09-30): no active Linux customer deployment yet -
       revisit and close before Linux is presented as customer-ready in any
       external context. Does not block item 4.
-- [ ] 4. Honest-state gap — "0" renders identically for "reported, found
-      nothing" vs. "never reported."
+- [x] 4. Honest-state gap — "0" renders identically for "reported, found
+      nothing" vs. "never reported." Done 2026-09-30 — HASH_PLACEHOLDER
+      (`scanner_status` + `has_report`; `ITEM4_HONEST_STATE_VERIFICATION.md`).
       **Then, immediately after item 4 (founder, 2026-09-30):** the B-252
       Admin rename + Endpoint Detail brief, with a minimal C3 folded in
       (Assets' endpoint rows gain OS, last seen and the per-domain counts).
       Discover stays live until that brief ships, and is retired only once
       C3's parity is confirmed live. Decisions are recorded in `CONTEXT.md`
       and B-252.
+      **Handoff requirement (founder, 2026-09-30):** that brief must carry
+      item 4's `scanner_status` (per-scanner ok / disabled / error in each
+      report) and `has_report` into Endpoint Detail's design from the start:
+      Never reported / Disabled / Scan failed / real count / Not known.
+      It must not rebuild the "None detected" / bare-"0" ambiguity on the
+      new page.
 - [ ] 5. Windows endpoint governed-agent link trace.
 
 ---

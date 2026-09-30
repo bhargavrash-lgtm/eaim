@@ -41,11 +41,20 @@ type agentEndpointListItem struct {
 	GatewayAgentName *string `json:"gateway_agent_name,omitempty"`
 	// WorkspaceID/WorkspaceName (B-196 increment 1): same merge-not-extend
 	// pattern as agents.go's workspaceInfoByAgentID -- store.AgentEndpoint
-	// is frozen and has no WorkspaceID field, so this is populated by a
-	// separate query in ListAgentEndpoints, merged in here. Nil means this
+	// has no WorkspaceID field (it was kept narrow; it is not frozen), so this
+	// is populated by a separate query in ListAgentEndpoints, merged in here. Nil means this
 	// endpoint has no real workspace assignment yet.
 	WorkspaceID   *string `json:"workspace_id,omitempty"`
 	WorkspaceName *string `json:"workspace_name,omitempty"`
+	// HasReport / ScannerStatus (master-sequence item 4): tell "never
+	// reported", "disabled", "scan failed" and "found nothing" apart.
+	// has_report is false when the endpoint has no scan report at all (a
+	// paste event can create it). scanner_status is the latest report's
+	// per-scanner object -- "ok" | "disabled" | "error" -- or null when there
+	// is no report or it came from an agent older than the field ("not
+	// known"; never inferred from a null category).
+	HasReport     bool            `json:"has_report"`
+	ScannerStatus json.RawMessage `json:"scanner_status"`
 }
 
 // agentEndpointDetail is the shape returned by GET /v1/endpoints/{endpointId}.
@@ -161,8 +170,8 @@ func (s *Server) GetAgentEndpoint(w http.ResponseWriter, r *http.Request) {
 // workspaceInfoByEndpointID returns real workspace_id/workspace_name for
 // every endpoints row in this org that has one, keyed by endpoint ID -- same
 // merge-not-extend pattern as agents.go's workspaceInfoByAgentID and
-// policies.go's ListPolicies (B-214); store.AgentEndpoint is frozen and has
-// no WorkspaceID field to select directly.
+// policies.go's ListPolicies (B-214); store.AgentEndpoint has no WorkspaceID
+// field to select directly (it was kept narrow; it is not frozen).
 func (s *Server) workspaceInfoByEndpointID(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]workspaceInfo, error) {
 	rows, err := s.queries.DB().Query(ctx, `
 		SELECT e.id, e.workspace_id, w.name
@@ -228,6 +237,8 @@ func toAgentEndpointItem(e store.AgentEndpoint) agentEndpointListItem {
 		LocalModelCount: e.ModelCount,
 		MCPServerCount:  e.MCPCount,
 		GPUCount:        e.GPUCount,
+		HasReport:       e.HasReport,
+		ScannerStatus:   e.ScannerStatus,
 	}
 
 	// Decode OS from the os_info JSONB column.

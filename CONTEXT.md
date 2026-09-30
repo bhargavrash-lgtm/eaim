@@ -8,7 +8,26 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-09-30, newest) — B-252 C2 brief: Part A done, paused behind item 4
+## Active decision thread (2026-09-30, newest) — Item 4 DONE (honest scanner state); next is the B-252 Admin/Endpoint Detail brief
+
+- **Master-sequence item 4 is built, reviewed, live-verified and pushed.** The record is `ITEM4_HONEST_STATE_VERIFICATION.md`.
+  - The agent reports `scanner_status` (ok / disabled / error, including the scan deadline).
+  - The API returns `has_report` and `scanner_status` from one `LATERAL` latest-report pick.
+  - Discover and the drawer show Never reported / Disabled / Scan failed / the real count / Not known.
+- **Pre-existing org-wide 500 fixed:** a paste-created endpoint's NULL `agent_version` broke `GET /v1/endpoints`.
+- **Live:** Playwright vs psql, 41/41, twice. "Scan failed" has no real Linux mechanism (scanners swallow errors); it's covered by tests plus one labelled synthetic report, deleted afterwards.
+- **Kept as a fixture:** the real `item4-paste-only` endpoint (Never reported), for Endpoint Detail.
+- **Handoff (recorded on item 4 in the master sequence):** the Admin rename + Endpoint Detail brief must use `scanner_status`/`has_report` from the start.
+  - Note from this item: a paste-only endpoint has no link control in the drawer. Endpoint Detail should decide that deliberately.
+- **Proposed follow-ups, not minted:**
+  - a hung scanner blocks `Build`;
+  - the Agent version column is blank;
+  - the unit's `StartLimitIntervalSec` is in the wrong section;
+  - clock skew;
+  - `runScan` panics aren't logged;
+  - `openapi.yaml` drift (Architect-EAMI).
+
+## Active decision thread (2026-09-30) — B-252 C2 brief: Part A done, paused behind item 4
 
 - **Part A of the "Admin rename + Endpoint Detail + Discover retirement" brief is reported.** No code was written. The marker was set, then released while the brief waits.
 - **Founder decisions:**
@@ -2754,6 +2773,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — master-sequence item 4 DONE (honest scanner state: agent scanner_status, API has_report/scanner_status via LATERAL, UI states); fixed a pre-existing org-wide 500 on paste-created endpoints; live 41/41 twice; code review applied. Marker cleared.
+
+Prior entry:
 2026-09-30 by Claude Code — B-252 C2 brief Part A reported; founder decisions recorded (item 4 first, minimal C3 folded in, redirects, drawer retirement, §7.8 wording, approver state). No code. Marker released.
 
 Prior entry:
