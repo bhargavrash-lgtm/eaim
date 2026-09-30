@@ -3401,7 +3401,7 @@ Together, **the scanner returns nothing on Linux, ever**. B-010's "low priority,
 
 **Dependencies:** B-010, to be fixed together.
 
-### B-273 — Packaged Linux agent never reads its installed config: no collector URL, reports go to stdout only — **DONE, 2026-09-30** (evidence: `B-273_VERIFICATION.md`)
+### B-273 — Packaged Linux agent never reads its installed config: no collector URL, reports go to stdout only — **DONE, 2026-09-30** (reopened the same day for RPM upgrades and re-closed after RPM live verification; evidence: `B-273_VERIFICATION.md`)
 **Origin:** scanner capability audit (2026-09-30). Minted at founder direction 2026-09-30 as "confirmed-suspected", then **confirmed live the same session**. Free-check as B-271.
 
 **Root cause:**
@@ -3428,8 +3428,8 @@ Together, **the scanner returns nothing on Linux, ever**. B-010's "low priority,
 
 **Acceptance criteria:**
 - [x] The fix: pass `--config /etc/eami/agent.yaml` in the systemd unit and the launchd plist (founder choice: explicit flag in both, macOS fixed without separate hardware confirmation). The missing-file-loud question is still open: follow-up 7 in the evidence file.
-- [x] Live-verify with a real `.deb` install reaching a real collector (done: pre-fix install → 0 reports; in-place upgrade → reports in Postgres). `.rpm` and macOS are **not** live-verified (no rpm host or Mac); see follow-ups 1 and 8.
-- [x] Check the upgrade path: deb verified live; macOS confirmed by review (unload then load). **rpm upgrades don't pick it up**, because of a pre-existing scriptlet-order bug (follow-up 1).
+- [x] Live-verify with a real `.deb` install reaching a real collector (done: pre-fix install → 0 reports; in-place upgrade → reports in Postgres). `.rpm` is also live-verified, on AlmaLinux 9 with systemd (see the RPM addendum). macOS is **not** live-verified (no hardware; B-274, B-014).
+- [x] Check the upgrade path: deb verified live; macOS confirmed by review (unload then load). rpm was **reopened**: every `rpm -U` was confirmed live to end stopped and disabled. It is now fixed with an upgrade-aware `preremove.sh` plus an rpm `%posttrans`, and live-verified (see the RPM addendum below).
 - [ ] Decide whether an agent with no collector URL, running as a service, should stay silent or log an error. **Open**, as follow-up 7.
 
 **Related, found during this test (local build hazard, not the product bug):**
@@ -3452,6 +3452,137 @@ Together, **the scanner returns nothing on Linux, ever**. B-010's "low priority,
   - on macOS, `/var/log/eami-agent.log` is pre-created as 0600.
 - **Live:** real `.deb` under systemd, against the real collector and Postgres, in three runs (the last covers five install scenarios). The details are in the evidence file.
 - **Reviews:** code, security, and a focused re-review of the postinstall delta.
-- **Follow-ups (proposed, not minted; B-IDs pending founder):** `B-273_VERIFICATION.md` "Follow-ups" 1–10. The most important is the **rpm upgrade leaving the service stopped and disabled** (HIGH).
+- **Follow-ups:** the rpm upgrade was **not** a follow-up; it was a B-273 gap, fixed below (founder call). The rest were minted as **B-274–B-279**; the mapping is in `B-273_VERIFICATION.md`.
 
-## Next B-ID: B-274
+**RPM addendum (2026-09-30, B-273 reopened, then re-closed):**
+- **Confirmed live** on a systemd-booted AlmaLinux 9.8 container (rpm 4.16.1.3) against the real collector and Postgres. rpm runs the OLD package's `%preun` after the new `%post`, and every shipped `preremove.sh` stopped and disabled the service and deleted the native-messaging registration. So **every `rpm -U` ended stopped and disabled**, including from the first B-273 build (`fa4a221`). Fresh RPM installs were fine.
+- **Fix:**
+  - `preremove.sh` exits early when rpm passes `$1` ≥ 1 (upgrade). dpkg's word arguments and rpm erase (`0`) keep the full cleanup.
+  - A new rpm-only `%posttrans` (`installer/linux/posttrans.sh`, via `rpm.scripts.posttrans` in `nfpm.yaml`) re-creates the nmhost launcher and manifests, runs `enable`, and restarts when `/run/systemd/system` exists (a failed restart warns). This is the only scriptlet that runs after an old package's `%preun`, so it repairs upgrades *from* versions already deployed.
+- **Live results (all against the real collector):**
+  - pre-fix 1.0.0 → new: enabled, active, reporting;
+  - `fa4a221`-era 1.0.3 → new: repaired;
+  - new → new: the new `%preun` no-ops;
+  - reboot: still enabled;
+  - erase: full cleanup;
+  - fresh install: works (sends two reports about a second apart);
+  - with the systemd guard, re-tested: pre-fix → 1.0.7, 1.0.7 → 1.0.8, erase and fresh all pass; in a **no-systemd** container `%posttrans` completes, enables the unit and skips the restart (rpm exits 0).
+  - Deb regression: pre-fix → new → new → purge all correct.
+- **Reviews:** code plus security. No blocking issues. Its MEDIUM (unguarded `systemctl` in `%posttrans`) was fixed and re-tested.
+- **Known, not changed:**
+  - In a no-systemd environment, **`%post` (`postinstall.sh`) still fails** ("System has not been booted with systemd"). This is pre-existing, and `%posttrans` now enables the unit anyway.
+  - A downgrade to a pre-fix rpm keeps the newer binary running until the next restart.
+  - Upgrades re-enable and restart a service an admin deliberately stopped, consistent with `postinstall.sh`'s existing `enable --now`.
+  - The pre-existing `${perm: -2:1}` bashism in `postinstall.sh` has no impact, since rpm's `/bin/sh` is bash on every RHEL/SUSE-family distro.
+
+### B-274 — macOS: collector values probably never reach the pkg `postinstall` (Jamf `$4`–`$6`, `sudo VAR=… installer`) — **QUEUED, 2026-09-30 — unverified, needs Mac hardware**
+**Origin:** B-273's reviews and live verification (2026-09-30; `B-273_VERIFICATION.md` "Follow-ups"). Minted at founder direction 2026-09-30. B-274–B-279 were confirmed free against BACKLOG.md directly: the counter read B-274, nothing referenced B-274 or higher, and a heading grep for native messaging, paste, macOS, Jamf, redirect, remote config, quickstart, installer and command-line found no overlapping open item. Related items are cross-referenced below.
+
+**Problem (from code review, not live-verified):**
+- `installer/macos/postinstall` reads the collector URL, key and CA path from Jamf Script Parameters `$4`/`$5`/`$6`, then env vars.
+- **Jamf parameters are passed to Jamf *Scripts* payloads, not to a package's embedded postinstall.** A flat pkg's postinstall gets `$1` pkg path, `$2` install location and `$3` target volume.
+- `sudo VAR=x installer -pkg …` generally doesn't pass the environment through to pkg scripts, because they run under `installd`/`system_installd`.
+- **Likely effect:** every macOS install takes the "no values" branch. Since B-273 that is safe (config kept, or written empty, so no-send), but **no macOS agent would ever get a collector URL** unless an admin edits `/etc/eami/agent.yaml` by hand. The README's Jamf, env-var and Mosyle/Kandji flows would be wrong.
+
+**Acceptance criteria:**
+- [ ] Live-test on real macOS: a pkg install via `installer -pkg` with env vars, and via a Jamf policy with parameters. Record what the postinstall actually receives.
+- [ ] If confirmed, pick a supported delivery mechanism, for example:
+  - a Jamf *Script* payload that writes `/etc/eami/agent.yaml` (or a config profile or plist) before the pkg;
+  - a pre-staged config file the pkg reads.
+- [ ] Update `installer/README.md`, then verify an agent reports to a real collector.
+
+**Dependencies:** B-014 (macOS hardware verification), which can share the same test session. B-273 (done) made the file actually read.
+
+### B-275 — Paste relay (native-messaging host) on Linux/macOS can never read its collector config — **QUEUED, 2026-09-30**
+**Origin:** B-273's reviews and live verification (2026-09-30; `B-273_VERIFICATION.md` "Follow-ups"). Minted at founder direction 2026-09-30. B-274–B-279 were confirmed free against BACKLOG.md directly: the counter read B-274, nothing referenced B-274 or higher, and a heading grep for native messaging, paste, macOS, Jamf, redirect, remote config, quickstart, installer and command-line found no overlapping open item. Related items are cross-referenced below.
+
+**Problem (code-level; found by the B-273 code review):**
+- The browser launches `eami-agent-nmhost` **as the user, with no arguments** (the manifest schema has no `args`).
+- `main.go` loads the relative `eami-agent.yaml` from the browser's working directory, finds nothing, and ends up with an empty collector URL.
+- With an empty URL, `collector/sender.go` silently drops the paste events.
+- Even with a platform default path, `/etc/eami/agent.yaml` is **root 0600** (it holds the API key), so the user can't read it.
+- Windows is unaffected: it uses the HKLM registry fallback.
+- `eami-browser-extension/MANUAL_TESTING.md:109-113` wrongly says the nmhost reads `/etc/eami/agent.yaml` on Linux/macOS.
+- Net effect: **paste detection has never worked on Linux or macOS**.
+
+**Design constraint:** any fix must **not** make the collector API key world-readable. Candidate designs:
+- relay through the root agent over local IPC (a Unix socket with peer-credential checks);
+- a separate per-host key with narrower scope.
+Choose in the brief.
+
+**Acceptance criteria:**
+- [ ] A design decision on the options above.
+- [ ] Live verification on Linux: a real browser and extension, then a paste reaches `paste_events`.
+- [ ] Correct `MANUAL_TESTING.md`.
+
+**Dependencies:** B-195 (the Windows paste-relay investigation, same feature). The nmlauncher parent-process check applies.
+
+### B-276 — Agent forwards `X-API-Key` on HTTP redirects, including cross-host and HTTPS→HTTP — **QUEUED, 2026-09-30 (Low–Medium)**
+**Origin:** B-273's reviews and live verification (2026-09-30; `B-273_VERIFICATION.md` "Follow-ups"). Minted at founder direction 2026-09-30. B-274–B-279 were confirmed free against BACKLOG.md directly: the counter read B-274, nothing referenced B-274 or higher, and a heading grep for native messaging, paste, macOS, Jamf, redirect, remote config, quickstart, installer and command-line found no overlapping open item. Related items are cross-referenced below.
+
+**Problem (code-level; from the B-273 security review):**
+- `eami-agent/internal/collector/sender.go` sets `X-API-Key` on both ingest and config requests (lines ~112 and ~149), and its `http.Client` has no `CheckRedirect`.
+- Go strips only `Authorization`/`Cookie`-class headers on cross-domain redirects, **not custom headers**.
+- So a redirect from the collector, or from a proxy or captive portal in front of it, forwards the per-agent key to another host or to plain `http://`.
+- This is newly reachable on Linux/macOS now that B-273 makes those agents actually send.
+
+**Acceptance criteria:**
+- [ ] `CheckRedirect` refuses redirects, or refuses them unless same-host and same scheme.
+- [ ] A unit test with an `httptest` server that redirects cross-host, asserting the key is never sent.
+- [ ] Check the native-messaging sender path too.
+
+**Dependencies:** none.
+
+### B-277 — Remote agent config is unbounded: scan paths steer a root filesystem walk, no interval floor, no response size cap — **QUEUED, 2026-09-30 (Medium)**
+**Origin:** B-273's reviews and live verification (2026-09-30; `B-273_VERIFICATION.md` "Follow-ups"). Minted at founder direction 2026-09-30. B-274–B-279 were confirmed free against BACKLOG.md directly: the counter read B-274, nothing referenced B-274 or higher, and a heading grep for native messaging, paste, macOS, Jamf, redirect, remote config, quickstart, installer and command-line found no overlapping open item. Related items are cross-referenced below.
+
+**Problem (code-level; from the B-273 security review):** `FetchConfig` (`eami-agent/internal/collector/sender.go:139-183`) applies whatever the collector returns.
+- **`model_scan_paths`** has no restriction. `["/"]` makes the root agent walk the whole filesystem, including NFS mounts. With no extension filter on extra paths (B-194), it reports every file of 100 MB or more with its full path, name, size and mtime (metadata only).
+- **`scan_interval_seconds`** only needs to be above 0 on the agent. The API validates 60–86400, but the agent trusts whatever it receives, so a compromised or impersonated collector can set 1 s.
+- **The response body** is decoded with no size cap.
+- Windows already had all of this. B-273 makes it newly reachable on Linux/macOS.
+- Worst case: a compromised collector, or a mis-set collector URL; B-273's postinstall fix removed the easiest one, the `localhost:8888` fallback.
+
+**Acceptance criteria:**
+- [ ] The agent clamps the interval to 60–86400, matching the API.
+- [ ] Cap the config response with an `io.LimitReader`.
+- [ ] Restrict remote `model_scan_paths`, for example to an allowlist of roots set in local config, or with remote paths needing a local opt-in, and add a depth limit. Coordinate with B-269, since presets carry these fields, and with B-194, the extension filter.
+- [ ] Unit tests for each bound.
+
+**Dependencies:** B-269 (the preset schema) and B-194 (the models scanner over-collection).
+
+### B-278 — Installer and config hygiene (grouped, lower severity): wrong quickstart, silent missing config, unescaped YAML values, rewrite drops hand edits — **QUEUED, 2026-09-30 (Low)**
+**Origin:** B-273's reviews and live verification (2026-09-30; `B-273_VERIFICATION.md` "Follow-ups"). Minted at founder direction 2026-09-30. B-274–B-279 were confirmed free against BACKLOG.md directly: the counter read B-274, nothing referenced B-274 or higher, and a heading grep for native messaging, paste, macOS, Jamf, redirect, remote config, quickstart, installer and command-line found no overlapping open item. Related items are cross-referenced below.
+
+**Grouped findings (code-level):**
+1. **`docs/quickstart.md` contradicts the installers.**
+   - macOS writes `/etc/eami-agent.yaml` (wrong path) and loads `com.eami.agent.plist` (the label is `io.eami.agent`).
+   - Linux uses `EAMI_API_KEY` (postinstall reads `EAMI_COLLECTOR_API_KEY`) and runs a redundant `systemctl enable --now`.
+   - Since B-273, following it gives an agent that sends nothing.
+2. **A missing config file is silent** under systemd/launchd: `config.Load` accepts it and the agent sits in no-send mode. Should a service-mode agent with no config or no URL log an error each cycle? This is B-273's own open question.
+3. **Unescaped YAML values.** Postinstall places the URL and key inside double-quoted YAML without escaping. A `"` or `\` breaks the file, and the agent then restart-loops on `KnownFields(true)`. Not injectable: expansion is single-pass and the source is a root admin. Reject those characters, or use single-quoted YAML.
+4. **A rewrite drops hand edits.** Supplying both values regenerates the whole `agent.yaml`, losing `enabled_scanners`, `interval_secs`, `log_level` and `model_file_scan_paths` edits. Documented in `installer/README.md` by B-273; the behaviour is unchanged. Consider merging.
+
+**Acceptance criteria:** fix or explicitly accept each of 1–4. Item 1 is a doc fix to verify against a real install.
+
+**Dependencies:** B-274 (macOS delivery) for the macOS quickstart text.
+
+### B-279 — Report data minimisation: full process command lines and MCP server args sent unredacted — **QUEUED, 2026-09-30 (Medium, privacy)**
+**Origin:** B-273's reviews and live verification (2026-09-30; `B-273_VERIFICATION.md` "Follow-ups"). Minted at founder direction 2026-09-30. B-274–B-279 were confirmed free against BACKLOG.md directly: the counter read B-274, nothing referenced B-274 or higher, and a heading grep for native messaging, paste, macOS, Jamf, redirect, remote config, quickstart, installer and command-line found no overlapping open item. Related items are cross-referenced below.
+
+**Problem (code-level; from the B-273 security review):**
+- `ai_processes` sends **every user's full command line** for matched processes: `scanner_linux.go:30-36` (`/proc/<pid>/cmdline`) and `scanner_darwin.go:35-42` (`ps` args).
+- The matching is broad ("cursor", "jan", "llama", "jupyter", "openai" in Python command lines). Secrets are routinely passed there, e.g. `jupyter --NotebookApp.token=…`, `vllm serve --api-key …`, `litellm --master_key …`, `--hf-token hf_…`.
+- `mcp_servers` sends each server's `args` verbatim (`mcp_servers/scanner.go:61-68`), and canonical MCP configs embed credentials, e.g. `server-postgres postgresql://user:pass@host/db`.
+- Windows `ai_processes` captures no command line, so this is Linux/macOS, **newly transmitted since B-273**.
+- Same data-minimisation class as B-194 (personal filenames) and its 7-char key-prefix note.
+
+**Acceptance criteria:**
+- [ ] Redact secret-shaped args before sending: `--*key*`, `--*token*`, `--*secret*`, `--*password*` with their values, URL userinfo, and known token prefixes.
+- [ ] Decide whether command lines should be sent at all by default, as a preset setting under B-269.
+- [ ] Unit tests with real-shaped secret examples.
+- [ ] A data-minimisation review alongside B-194.
+
+**Dependencies:** B-194 (same class) and B-269 (presets could carry a collect-command-lines toggle).
+
+## Next B-ID: B-280

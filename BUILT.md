@@ -47,10 +47,26 @@ The evidence record is `B-273_VERIFICATION.md`. **Roadmap:** a Horizon 1 known-g
 - **Focused re-review of the postinstall delta:** its introduced issues were fixed and re-verified (partial fresh supply, umask on an existing file, world-readable macOS log), plus the CA-path drop.
 
 **Limitations:**
-- **`.rpm` upgrades leave the service stopped and disabled.** This is pre-existing: the old `%preun` runs after the new `%post`, and `preremove.sh` ignores `$1`. Existing RPM installs won't be running the fix after upgrade.
+- ~~`.rpm` upgrades leave the service stopped and disabled~~: fixed the same day; see the RPM addendum.
 - macOS isn't live-verified, and its Jamf and env-var value delivery to a pkg `postinstall` is doubtful (pre-existing).
 - The native-messaging host on Linux/macOS still can't read a config (it runs as the user, and the file is root 0600).
-- All of these, and seven more, are proposed follow-ups 1–10 in the evidence file. **Not minted; B-IDs are pending founder confirmation.**
+- These and the others are now minted as B-274–B-279.
+
+**RPM addendum (B-273 reopened, then re-closed the same day):**
+- The rpm-upgrade finding was code-level, so it was live-tested. **Confirmed:** rpm runs the OLD package's `%preun` after the new `%post`, and every shipped `preremove.sh` stopped and disabled the service and deleted the native-messaging registration. So **every `rpm -U` ended stopped and disabled**, including from the first B-273 build (`fa4a221`). Fresh RPM installs were fine.
+- **Fix:**
+  - `installer/linux/preremove.sh` exits early on rpm upgrade (`$1` ≥ 1).
+  - A new `installer/linux/posttrans.sh` (rpm `%posttrans`, wired in `nfpm.yaml`) re-registers native messaging, runs `enable`, and restarts under a `/run/systemd/system` guard (a failed restart warns).
+- **Live, on a systemd AlmaLinux 9 container against the real collector and Postgres:**
+  - pre-fix → new, and 1.0.3 → new: repaired, reporting;
+  - new → new: `%preun` no-ops;
+  - reboot, erase and fresh install all pass;
+  - in a no-systemd container, `%posttrans` completes and enables the unit.
+  - Deb regression passes.
+- **Review:** no blocking issues. Its MEDIUM (the unguarded `systemctl`) is fixed and re-tested.
+- **Known, pre-existing:** `%post` still fails without systemd.
+
+**The other follow-ups are minted as B-274–B-279;** the mapping is in the evidence file.
 
 **Also confirmed live this session:** B-271. On the real linked endpoint `gpus` appears in only 10 of 3,486 reports, each a first scan after a restart before the remote config applies. Recorded under B-271 in `BACKLOG.md`.
 

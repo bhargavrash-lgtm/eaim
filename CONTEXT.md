@@ -4,6 +4,34 @@
 # anything else.
 ACTIVE AGENT: none
 
+## Active decision thread (2026-09-30, newest) — B-273 reopened for RPM, fixed, re-closed; B-274–B-279 minted
+
+- **The rpm upgrade gap was confirmed live** (AlmaLinux 9 with systemd, real collector). Every `rpm -U` ended stopped and disabled with native messaging unregistered, because the old `%preun` runs after the new `%post`. That included upgrades from the first B-273 build.
+  - Founder call: this is **B-273 reopened, not a new B-ID**.
+- **Fixed:**
+  - an upgrade-aware `preremove.sh`;
+  - a new rpm `%posttrans` (`posttrans.sh`) that re-registers, enables, and restarts under a systemd guard.
+- **Live-verified:**
+  - pre-fix → new and 1.0.3 → new are repaired;
+  - new → new, reboot, erase and fresh install pass;
+  - no-systemd `%posttrans` is OK;
+  - deb regression passes.
+  - The review's MEDIUM (the unguarded `systemctl`) is fixed and re-tested.
+  - Pre-existing and recorded: `%post` fails without systemd.
+- **Minted B-274–B-279:**
+
+  | B-ID | Item |
+  |---|---|
+  | B-274 | macOS value delivery |
+  | B-275 | Paste relay on Linux/macOS |
+  | B-276 | Key on redirects |
+  | B-277 | Remote config unbounded |
+  | B-278 | Grouped installer and config hygiene |
+  | B-279 | Command-line and MCP-arg secrets |
+
+  The next B-ID is B-280.
+- **`AI_ITAM_EPIC_MASTER_SEQUENCE.md` doesn't exist yet** (pending the founder's relay). Nothing is marked there. Mark B-273 in it only after the founder confirms it has landed.
+
 ## Active decision thread (2026-09-30, newest) — B-273 DONE; B-271 live-confirmed
 
 - **B-273 is built, reviewed, live-verified and pushed.** The record is `B-273_VERIFICATION.md`.
@@ -2629,6 +2657,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — B-273 reopened for RPM upgrades (confirmed live), fixed (upgrade-aware preremove + rpm %posttrans with a systemd guard), and re-closed after live RPM + deb verification; minted B-274–B-279. AI_ITAM_EPIC_MASTER_SEQUENCE.md not yet in the repo, so nothing is marked there. Marker cleared.
+
+Prior entry:
 2026-09-30 by Claude Code — B-273 DONE (packaged Linux/macOS agent reads its config; postinstall localhost fallback removed; LF installer scripts); live-verified with a real .deb against the real stack; B-271 live-confirmed; 10 follow-ups proposed, not minted. Marker cleared.
 
 Prior entry:

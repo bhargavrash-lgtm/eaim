@@ -11,6 +11,21 @@
 
 set -e
 
+# rpm passes %preun the number of package instances left after this
+# operation: 0 means erase, 1 or more means upgrade. On an rpm upgrade this
+# is the OLD package's script, and it runs AFTER the new package's %post, so
+# stopping, disabling and unregistering here would undo the new install
+# (found live, B-273). Do nothing on an rpm upgrade; the new package's
+# %posttrans (posttrans.sh) restarts the service. dpkg passes "upgrade" and
+# runs prerm BEFORE the new postinst, which restarts everything, so the deb
+# upgrade path keeps the full stop below.
+case "${1:-}" in
+  [1-9]*)
+    echo "eami-agent: rpm upgrade -- leaving the service and native-messaging registration in place"
+    exit 0
+    ;;
+esac
+
 echo "eami-agent: stopping service before removal..."
 
 # Stop the running service (ignore errors if it is already stopped)

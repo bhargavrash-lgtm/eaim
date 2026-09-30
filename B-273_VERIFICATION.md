@@ -96,7 +96,71 @@ The real collector logged exactly **2** `report buffered agent=Bhargavtej` lines
   - the macOS log file would be created world-readable.
   The re-review also found a pre-existing CA-path drop on rewrite, fixed here as well (the same block). Its remaining pre-existing findings are the follow-ups below.
 
-## Follow-ups (proposed, not minted: B-IDs need founder confirmation)
+## RPM addendum: B-273 reopened, fixed and re-verified (2026-09-30)
+
+**Founder question:** was the rpm-upgrade finding confirmed live? At that point it was code-level only (the reviewer's inference from rpm's scriptlet order), so it was tested.
+
+**Environment:**
+- `almalinux/9-init`: AlmaLinux 9.8, rpm 4.16.1.3, systemd as PID 1 (`--privileged --cgroupns=host`), hostname `b273-rpm`.
+- The real collector at `host.docker.internal:8888`, forwarding to the API and Postgres.
+- A dedicated key for `b273-rpm`, minted and revoked for each run.
+- RPMs built with nfpm v2.41.1 from `installer/linux/nfpm.yaml`: "pre-fix" uses the files from `fa4a221^`, and "1.0.3" is the first B-273 build.
+
+**Confirmed (before the rpm fix):**
+
+| Case | End state |
+|---|---|
+| R1: fresh pre-fix 1.0.0 | enabled/active but `collector_url=""` (**B-273 itself, reproduced on rpm**) |
+| R2: `rpm -U` 1.0.0 → 1.0.3 | new `%post` "enabled and started", then the old `%preun` "stopped and disabled"; **`disabled`/`inactive`, nmhost and manifests MISSING** |
+| R3: fresh 1.0.3 | enabled/active, reporting (a real `report buffered`) |
+| R4: `rpm -U` 1.0.3 → 1.0.4 | **`disabled`/`inactive`, nmhost MISSING** (so even the fixed builds broke on upgrade) |
+
+**Fix:** an upgrade-aware `preremove.sh` (`[1-9]*` → exit 0) plus an rpm-only `%posttrans` (`posttrans.sh`) that re-registers native messaging, runs `enable`, and runs `daemon-reload` plus `restart` only when `/run/systemd/system` exists (a failed restart warns).
+
+**Verified (the fixed builds 1.0.5/1.0.6, then 1.0.7/1.0.8 with the systemd guard):**
+
+| Case | Result |
+|---|---|
+| T1/G1: `rpm -U` pre-fix 1.0.0 → new | the old `%preun` still stops and disables, then `%posttrans` repairs it: **enabled/active**, `--config` argv, nmhost present, reporting |
+| T2: `rpm -U` 1.0.3 (`fa4a221`) → 1.0.5, no values | repaired; config kept; reporting |
+| T3/G2: `rpm -U` new → new, no values | the new `%preun` logs "rpm upgrade -- leaving ... in place"; enabled/active; reporting |
+| T3b: container reboot | enabled/active; reporting |
+| T4/G3: `rpm -e` | full cleanup (unit, binary, nmhost, manifests) |
+| T5/G4: fresh install | enabled/active; two reports about a second apart (`%post` start, then the `%posttrans` restart) |
+| G5: fresh install with **no systemd** (plain `almalinux:9`, PID 1 is not systemd) | `%posttrans` completes: "service enabled (systemd not running here, so not started)", enable symlink created, rpm exits 0. `%post` still fails (**pre-existing**, `postinstall.sh`'s `systemctl daemon-reload`) |
+| Deb regression (WSL Ubuntu): pre-fix 1.0.0 → 1.0.5 → 1.0.6 (no values) → purge | all correct; the deb `prerm` keeps its full stop (dpkg runs it before the new `postinst`) |
+
+- Postgres holds 12 reports for `b273-rpm`, one endpoint (unlinked, `os=linux`, left in place like the other fixtures).
+- All test keys are revoked, the containers removed, and the scratch key files deleted.
+
+**Review (code plus security):**
+- No blocking issues.
+- The `$1` test is correct for every rpm and dpkg argument.
+- The new code is POSIX-sh-safe.
+- The manifest duplication is byte-faithful.
+- No security issues.
+- MEDIUM (unguarded `systemctl` under `set -e` in `%posttrans`): **fixed and re-tested** (G1–G5).
+- LOW, accepted and documented:
+  - a downgrade to a pre-fix rpm keeps the newer binary running until a restart;
+  - upgrades re-enable and restart a deliberately stopped service (consistent with `postinstall.sh`);
+  - a masked unit aborts, as `postinstall.sh` already does;
+  - the pre-existing `${perm: -2:1}` bashism (no impact on RHEL/SUSE-family `/bin/sh`).
+
+## Follow-ups, now minted as B-274–B-279 (founder direction, 2026-09-30)
+
+- Follow-up 1 (rpm upgrade) was **not** minted: it was a B-273 gap, fixed above.
+- The rest map as follows:
+
+| Follow-up | B-ID |
+|---|---|
+| 8 (macOS value delivery) | B-274 |
+| 2 (paste relay on Linux/macOS) | B-275 |
+| 6 (key forwarded on redirects) | B-276 |
+| 4 (remote config unbounded) | B-277 |
+| 3, 7, 9, 10 (quickstart, silent missing config, YAML escaping, rewrite drops hand edits) | B-278 (grouped) |
+| 5 (command-line and MCP-arg secrets) | B-279 (kept separate from B-278: same privacy class as B-194, rated MEDIUM) |
+
+### Original follow-up list (numbering referenced above)
 
 1. **HIGH: rpm upgrade leaves the service stopped and disabled.**
    - rpm runs the old `%preun` after the new `%post`, and `preremove.sh` doesn't check `$1`. It also deletes the nmhost launcher and manifests.

@@ -31,6 +31,10 @@ license: Proprietary
 rpm:
   summary: "EAMI AI asset discovery endpoint agent"
   group: "System/Monitoring"
+  scripts:
+    # Runs after the old package's %preun on `rpm -U`, which would otherwise
+    # leave the service stopped and disabled (B-273). See posttrans.sh.
+    posttrans: ./posttrans.sh
 
 contents:
   # Agent binary
