@@ -4,6 +4,10 @@
 scanner-capability audit and real, current Device42 documentation. 
 Nothing here has been sent to Code as a build instruction.
 
+**Program:** part of the AI ITAM epic, **B-280**. Its place in the build
+order is item 16 of `AI_ITAM_EPIC_MASTER_SEQUENCE.md`, the standing
+index.
+
 ---
 
 ## 0. Urgent findings from the scanner audit — must not get lost

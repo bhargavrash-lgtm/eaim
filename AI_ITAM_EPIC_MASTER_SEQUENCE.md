@@ -14,6 +14,10 @@ its real dependency.
 Related detailed design records, referenced by name, never pasted
 inline: `AI_LLM_SERVICE_MAPPING_DESIGN.md`,
 `DYNAMIC_ASSET_GROUPING_EPIC.md`, `DISCOVERY_ADMIN_INVESTIGATION.md`.
+(`DYNAMIC_ASSET_GROUPING_EPIC.md` is not in the repo yet as of
+2026-09-30.)
+
+**Epic B-ID:** **B-280** — the AI ITAM program as a whole (`BACKLOG.md`).
 
 ---
 
@@ -31,11 +35,12 @@ anything.
 
 ## Phase 1 — Live bugs (in progress, no dependency on anything below)
 
-- [ ] 1. **B-273** — packaged Linux/macOS agents never read their config
-      file. *In progress — corrected retry pending after the `rm -rf`
-      safety denial.*
+- [x] 1. **B-273** — packaged Linux/macOS agents never read their config
+      file. Done 2026-09-30 — `6d64aaa` (first fix `fa4a221`; reopened for
+      RPM upgrades, re-closed in `6d64aaa`).
 - [ ] 2. **B-271** — linking an endpoint silently disables 4 of 10
-      scanners. Confirmed in code; not yet confirmed live.
+      scanners. Confirmed in code and **confirmed live** 2026-09-30
+      (recorded in `fa4a221`); **not yet fixed**.
 - [ ] 3. **B-272** — `network_activity` non-functional on Linux.
 - [ ] 4. Honest-state gap — "0" renders identically for "reported, found
       nothing" vs. "never reported."

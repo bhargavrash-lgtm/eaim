@@ -8,7 +8,16 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-09-30, newest) — B-273 reopened for RPM, fixed, re-closed; B-274–B-279 minted
+## Active decision thread (2026-09-30, newest) — AI ITAM master sequence committed; B-280 epic minted; next is item 2 (B-271)
+
+- **`AI_ITAM_EPIC_MASTER_SEQUENCE.md`** was committed verbatim (`2e45967`) and is now the program's standing index (see the header above). It is agent-maintained and never re-pasted.
+- **Item 1 (B-273) is ticked** with `6d64aaa`.
+- **Item 2 (B-271) is deliberately *not* ticked**, despite the founder's request: B-271 was confirmed live (recorded in `fa4a221`) but **is not fixed**. The item text now says so.
+- **B-280 is minted** as the program epic and cross-referenced in the index and in `AI_LLM_SERVICE_MAPPING_DESIGN.md`.
+- **`DYNAMIC_ASSET_GROUPING_EPIC.md` doesn't exist in the repo**, so it can't be cross-referenced yet. It is flagged to the founder.
+- The next B-ID is B-281. **Next build: item 2, B-271**, once briefed.
+
+## Active decision thread (2026-09-30) — B-273 reopened for RPM, fixed, re-closed; B-274–B-279 minted
 
 - **The rpm upgrade gap was confirmed live** (AlmaLinux 9 with systemd, real collector). Every `rpm -U` ended stopped and disabled with native messaging unregistered, because the old `%preun` runs after the new `%post`. That included upgrades from the first B-273 build.
   - Founder call: this is **B-273 reopened, not a new B-ID**.
@@ -2661,6 +2670,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — committed AI_ITAM_EPIC_MASTER_SEQUENCE.md (verbatim, 2e45967) as the standing index; minted B-280 (program epic); ticked item 1 (B-273, 6d64aaa); item 2 (B-271) left unticked, since it is confirmed live but not fixed. Marker untouched (docs only).
+
+Prior entry:
 2026-09-30 by Claude Code — B-273 reopened for RPM upgrades (confirmed live), fixed (upgrade-aware preremove + rpm %posttrans with a systemd guard), and re-closed after live RPM + deb verification; minted B-274–B-279. AI_ITAM_EPIC_MASTER_SEQUENCE.md not yet in the repo, so nothing is marked there. Marker cleared.
 
 Prior entry:

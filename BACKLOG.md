@@ -3585,4 +3585,25 @@ Choose in the brief.
 
 **Dependencies:** B-194 (same class) and B-269 (presets could carry a collect-command-lines toggle).
 
-## Next B-ID: B-280
+### B-280 — EPIC: AI ITAM program (discovery, discovery administration, asset grouping, API convention, service mapping) — **IN PROGRESS, 2026-09-30**
+**Origin:** founder direction, 2026-09-30, alongside `AI_ITAM_EPIC_MASTER_SEQUENCE.md`.
+- B-280 was confirmed free against BACKLOG.md directly: the counter read B-280, and B-280 was referenced nowhere.
+- No existing epic covers the program as a whole. The nearest are all narrower: B-196 (CMDB), B-139 (agentless discovery), B-252 (IA consolidation) and B-137 (third-party public API, whose scope this epic expands).
+
+**Scope and order:** the standing index is **`AI_ITAM_EPIC_MASTER_SEQUENCE.md`** (repo root). Its phases and 16 items are the build order and are not repeated here. It covers:
+- live bugs: B-273, B-271, B-272 and two unnumbered;
+- foundational decisions: dynamic asset grouping on B-207's Groups, and the API convention locked before Phase 2;
+- discovery administration: B-269, B-270, shadow-agent onboarding, model characterisation, B-267;
+- Agent tab pieces: Configure placement, B-255;
+- CI-reconciliation identity keys, then AI/LLM service mapping.
+
+**Standing rule (from the index):** every new data type the epic produces gets a general, filterable, versioned API endpoint, following `GET /v1/cmdb/assets`'s filter and pagination shape. This expands B-137.
+
+**Design records:**
+- `AI_LLM_SERVICE_MAPPING_DESIGN.md`;
+- `DISCOVERY_ADMIN_INVESTIGATION.md`;
+- `DYNAMIC_ASSET_GROUPING_EPIC.md` (**not in the repo yet** as of 2026-09-30; referenced by the index).
+
+**Status:** item 1 (B-273) is done (`6d64aaa`). Item 2 (B-271) is next.
+
+## Next B-ID: B-281
