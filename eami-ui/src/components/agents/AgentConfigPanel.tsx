@@ -12,7 +12,13 @@ import type { Agent } from '@/hooks/useAgents'
 
 // ── Validation schema ─────────────────────────────────────────────────────────
 
-const VALID_SCANNERS = ['ai_apps', 'models', 'mcp_servers', 'cloud_clients', 'network_activity', 'browser'] as const
+// Every scanner the agent gates on. Must match the API's store.AllScanners:
+// the form drops any stored name missing from this list, so an incomplete
+// list here silently strips scanners on the next save (B-271).
+const VALID_SCANNERS = [
+  'ai_apps', 'models', 'mcp_servers', 'cloud_clients', 'network_activity', 'browser',
+  'ai_processes', 'gpu', 'python_envs', 'nodejs_ai',
+] as const
 
 const configSchema = z.object({
   scan_interval_seconds: z

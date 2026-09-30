@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -715,6 +716,16 @@ func (s *Server) UpdateAgentConfig(w http.ResponseWriter, r *http.Request) {
 	if len(req.EnabledScanners) == 0 && req.EnabledScanners != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "enabled_scanners must have at least 1 entry")
 		return
+	}
+	// B-271: the agent matches scanner names exactly, so an unknown or
+	// differently-cased name was never tolerated -- it silently disabled
+	// that scanner. Reject it instead.
+	for _, name := range req.EnabledScanners {
+		if !store.IsKnownScanner(name) {
+			writeError(w, http.StatusBadRequest, "bad_request",
+				fmt.Sprintf("enabled_scanners: unknown scanner %q; valid: %s", name, strings.Join(store.AllScanners, ", ")))
+			return
+		}
 	}
 
 	if s.queries != nil {

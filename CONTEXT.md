@@ -8,7 +8,22 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-09-30, newest) — AI ITAM master sequence committed; B-280 epic minted; next is item 2 (B-271)
+## Active decision thread (2026-09-30, newest) — B-271 DONE (item 2); next is item 3 (B-272)
+
+- **B-271 is fixed, reviewed, live-verified and pushed.** The record is `B-271_VERIFICATION.md`.
+  - Migration `000025` makes all 10 scanners the default and backfills existing rows (the demo row keeps `models` off).
+  - The API returns 400 on unknown scanner names, and the UI lists all 10.
+- **Live:**
+  - fixtures went from `null` to populated on a real packaged agent, both on the backfilled link and on a fresh link;
+  - the real Windows endpoint's `gpus` went from 0/72 to 7/8.
+- **Reviews:** both clean in scope. Two LOW findings fixed (empty-array guard, test cleanup).
+- **Security MEDIUM (privacy volume)** is recorded on B-279: sequence B-279 alongside or next, add `endpoint_reports` retention, and fix the pre-first-fetch full scan.
+- **For the founder:**
+  - the `b271-admin@fixture.local` fixture user is left in the Dev Org, because 4 lifecycle events (the test agents' create/delete) reference it. Delete it with them, or keep it?
+  - the doubled-backslash Windows scan-path default is logged on B-277.
+- **Master sequence:** item 2 is ticked. **Next: item 3, B-272** (with B-010). The next B-ID is B-281.
+
+## Active decision thread (2026-09-30) — AI ITAM master sequence committed; B-280 epic minted; next is item 2 (B-271)
 
 - **`AI_ITAM_EPIC_MASTER_SEQUENCE.md`** was committed verbatim (`2e45967`) and is now the program's standing index (see the header above). It is agent-maintained and never re-pasted.
 - **Item 1 (B-273) is ticked** with `6d64aaa`.
@@ -2670,6 +2685,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — B-271 DONE (migration 000025: all-10 default plus backfill; API 400 on unknown names; UI list of 10); live-verified with a real packaged agent and fixtures, plus the Windows endpoint's gpus; both reviews; master sequence item 2 ticked. Marker cleared.
+
+Prior entry:
 2026-09-30 by Claude Code — committed AI_ITAM_EPIC_MASTER_SEQUENCE.md (verbatim, 2e45967) as the standing index; minted B-280 (program epic); ticked item 1 (B-273, 6d64aaa); item 2 (B-271) left unticked, since it is confirmed live but not fixed. Marker untouched (docs only).
 
 Prior entry:

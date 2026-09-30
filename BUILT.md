@@ -1,5 +1,42 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-271 — Linking an endpoint no longer silently disables 4 of 10 scanners — 2026-09-30 (Claude Code)
+
+The evidence record is `B-271_VERIFICATION.md`. This is item 2 of `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (epic B-280).
+
+**The defect:**
+- `agent_configs.enabled_scanners` defaulted to 6 of the agent's 10 scanners, and the agent treats a non-empty list as an allow-list.
+- So every governed agent's trigger-created row turned off `ai_processes`, `gpu`, `python_envs` and `nodejs_ai` on any endpoint linked to it.
+- The UI's `VALID_SCANNERS` had the same 6 and dropped any other stored name on load, so any save stripped the other 4.
+
+**Files:**
+- `schema/migrations-v2/000025_agent_configs_all_scanners.up.sql`/`.down.sql`:
+  - the default is all 10;
+  - the backfill appends the missing 4 to every non-empty row, keeping other choices (the demo row keeps `models` off; founder D1/D2);
+  - the down migration reverts the default only.
+- `eami-api/internal/store/agent_configs.sql.go`: `AllScanners`, `IsKnownScanner`; `AgentConfigDefaults` copies the list.
+- `eami-api/internal/api/agents.go`: `UpdateAgentConfig` returns 400 on an unknown name (exact, case-sensitive).
+- `eami-ui/src/components/agents/AgentConfigPanel.tsx`: `VALID_SCANNERS` has 10.
+- `schema/schema.sql`: the mirror.
+
+**Tests and verification:**
+- New: `schema/migrationtest/b271_agent_configs_test.go` (throwaway DB, 24→25→24, five row shapes) and `eami-api/internal/api/agent_config_scanners_pg_test.go` (real Postgres: defaults and validation).
+- The full `eami-api` suite passes; `go vet` is clean; 2 mutations are caught; `tsc` and `vite build` pass.
+- **Live:** a real packaged agent (WSL `.deb`) with planted fixtures, linked to agents created through the real API.
+  - Before the fix, the three scanners were `null` in steady state even with the fixtures present.
+  - After the migration's backfill they are populated every cycle, with no agent restart.
+  - A fresh-default agent created on the fixed code, and relinked, is served all 10.
+  - The real Windows endpoint: reports with `gpus` went from 0/72 to 7/8.
+  - A live `PUT` with `GPU` or `scheduled_tasks` returns 400.
+- **Reviews:** code and security, both clean of blocking, HIGH and MEDIUM issues in scope. Two LOW findings were fixed: the backfill's empty-array guard, and the test's global restore in `t.Cleanup`.
+
+**Limitations:**
+- Privacy volume: linked endpoints now send these scanners' data every cycle, like unlinked ones always did. B-279's sequencing is advanced accordingly, with an `endpoint_reports` retention decision and a fix for the pre-first-fetch full scan.
+- Recorded, not fixed:
+  - the default Windows scan path is stored as `C:\\Users` (B-277);
+  - `openapi.yaml` has no agent-config schema (Architect-EAMI);
+  - the `b271-admin@fixture.local` fixture user remains, referenced by 4 lifecycle events (founder call).
+
 ## B-273 — Packaged Linux/macOS agent now reads its installed config — 2026-09-30 (Claude Code)
 
 The evidence record is `B-273_VERIFICATION.md`. **Roadmap:** a Horizon 1 known-gap closure. The bug has no numbered roadmap item; it was prioritised by the founder as the most urgent of B-271–B-273.

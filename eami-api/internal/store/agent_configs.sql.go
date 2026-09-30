@@ -19,12 +19,35 @@ type AgentConfig struct {
 	UpdatedAt           time.Time
 }
 
+// AllScanners is every scanner name eami-agent's payload.Build gates on
+// (det.IsEnabled), in the column default's order. It is the only valid set
+// for enabled_scanners, and the default: B-271 found the old 6-name default
+// silently disabling ai_processes, gpu, python_envs and nodejs_ai on every
+// linked endpoint, because the agent treats a non-empty list as an
+// allow-list. Keep in sync with migration 000025's column default and the
+// UI's VALID_SCANNERS (AgentConfigPanel.tsx).
+var AllScanners = []string{
+	"ai_apps", "models", "mcp_servers", "cloud_clients", "network_activity", "browser",
+	"ai_processes", "gpu", "python_envs", "nodejs_ai",
+}
+
+// IsKnownScanner reports whether name is one of AllScanners (exact,
+// case-sensitive: the agent matches names exactly).
+func IsKnownScanner(name string) bool {
+	for _, s := range AllScanners {
+		if s == name {
+			return true
+		}
+	}
+	return false
+}
+
 // AgentConfigDefaults are the server-side defaults (match migration).
 var AgentConfigDefaults = AgentConfig{
 	ScanIntervalSeconds: 300,
 	ModelScanPaths:      []string{"/home", "/Users", `C:\Users`},
 	MaxReportSizeBytes:  5242880,
-	EnabledScanners:     []string{"ai_apps", "models", "mcp_servers", "cloud_clients", "network_activity", "browser"},
+	EnabledScanners:     append([]string(nil), AllScanners...),
 }
 
 const getAgentConfigSQL = `

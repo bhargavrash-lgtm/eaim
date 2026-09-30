@@ -3351,7 +3351,7 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 
 **Status:** QUEUED. Do not build until briefed.
 
-### B-271 — Linking an endpoint silently disables 4 of 10 scanners (default `agent_configs` row lists only 6) — **QUEUED, 2026-09-30 — live bug, high severity**
+### B-271 — Linking an endpoint silently disables 4 of 10 scanners (default `agent_configs` row lists only 6) — **DONE, 2026-09-30** (evidence: `B-271_VERIFICATION.md`)
 **Origin:** scanner capability audit (2026-09-30), recorded in `AI_LLM_SERVICE_MAPPING_DESIGN.md` §0. Minted at founder direction 2026-09-30. B-271–B-273 were confirmed free against BACKLOG.md directly: the counter read B-271 and no B-271+ reference existed anywhere in the repo's docs.
 
 **Problem (traced in code, not yet observed live; the stack was down):**
@@ -3365,10 +3365,10 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 
 **Acceptance criteria:**
 - [x] Confirm live with psql on the real dev DB: which linked endpoints' latest reports have these four fields null (done 2026-09-30, see below).
-- [ ] Decide the fix: default to all 10 names, and/or have the agent accept an explicit "all" value. Coordinate with B-269, since presets replace this row; a stop-gap fix may still be warranted before B-269 ships.
-- [ ] Server-side validation of scanner names against the real 10.
-- [ ] Bring the UI's scanner list in line with the real 10.
-- [ ] A real-Postgres test pinning the default, plus live verification that a linked endpoint reports all enabled scanners.
+- [x] Decide the fix: the default becomes all 10 (migration 000025), and existing rows are backfilled (founder D1/D2). No throwaway: B-269's migration will carry these rows into presets.
+- [x] Server-side validation of scanner names against the real 10 (400, exact match; nothing depended on the permissive behaviour).
+- [x] Bring the UI's scanner list in line with the real 10 (it also stripped unknown names on save).
+- [x] A real-Postgres test pinning the default, plus live verification that a linked endpoint reports all enabled scanners (real `.deb` agent with planted fixtures, plus the real Windows endpoint).
 
 **Dependencies:** overlaps B-269, which replaces `agent_configs`. Keep the B-194 demo-endpoint mitigation (`models` removed) in mind when changing defaults.
 
@@ -3377,6 +3377,30 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 - `gpus` is present in only **10 of 3,486** reports. Each is an isolated first-scan-after-restart running on built-in defaults and is followed by `null`. At 2026-09-19 01:01:58, for example, `gpus` is set and `local_models` null, and the next report is the reverse.
 - The scanner works; the config suppresses it.
 - `null` is ambiguous for the other three fields (an empty result also marshals as `null`). Full query results are in `B-273_VERIFICATION.md`.
+
+**Resolution (2026-09-30):**
+- **Migration `000025_agent_configs_all_scanners`:**
+  - the default is all 10;
+  - the backfill appends `ai_processes`/`gpu`/`python_envs`/`nodejs_ai` to every non-empty row, keeping other choices; the demo row keeps `models` off;
+  - the down migration reverts the default only.
+- **Code:**
+  - `store.AllScanners`/`IsKnownScanner` are the single Go source;
+  - `UpdateAgentConfig` returns 400 on an unknown name;
+  - the UI `VALID_SCANNERS` has 10;
+  - `schema.sql` is mirrored.
+- **Tests:**
+  - a migration test on a throwaway DB;
+  - two real-Postgres API tests;
+  - the full suite passes, and 2 mutations are caught.
+- **Live:**
+  - fixtures went from `null` to populated, both on the backfilled link and on a fresh-default link;
+  - on the real Windows endpoint, reports with `gpus` went from 0/72 to 7/8.
+- **Reviews:** code plus security. No blocking, HIGH or MEDIUM issues in scope. Two LOW findings were fixed: an empty array must not be narrowed by the backfill, and the test's global restore now runs in `t.Cleanup`.
+- **Recorded, not fixed:**
+  - the default Windows `model_scan_paths` is stored as `C:\\Users` (a doubled backslash; with B-277/B-194);
+  - `api/openapi.yaml` has no agent-config schema (contract drift, Architect-EAMI);
+  - the `b271-admin@fixture.local` fixture user is left in the Dev Org, because 4 lifecycle events reference it (founder call).
+
 
 ### B-272 — `network_activity` on Linux never matches anything: connections are compared as raw IPs against hostnames — **QUEUED, 2026-09-30**
 **Origin:** scanner capability audit (2026-09-30), recorded in `AI_LLM_SERVICE_MAPPING_DESIGN.md` §0. Minted at founder direction 2026-09-30. Free-check as B-271.
@@ -3551,6 +3575,11 @@ Choose in the brief.
 
 **Dependencies:** B-269 (the preset schema) and B-194 (the models scanner over-collection).
 
+**Added 2026-09-30 (B-271):**
+- The baseline default for `model_scan_paths` stores the Windows entry as `C:\\Users`, with a doubled backslash, because the SQL literal is taken literally. The API serves it as-is; Windows tolerates it, so the walk still happens.
+- The Go default (`store.AgentConfigDefaults`) is `C:\Users`, so the two have drifted.
+- Fix it together with the path restriction.
+
 ### B-278 — Installer and config hygiene (grouped, lower severity): wrong quickstart, silent missing config, unescaped YAML values, rewrite drops hand edits — **QUEUED, 2026-09-30 (Low)**
 **Origin:** B-273's reviews and live verification (2026-09-30; `B-273_VERIFICATION.md` "Follow-ups"). Minted at founder direction 2026-09-30. B-274–B-279 were confirmed free against BACKLOG.md directly: the counter read B-274, nothing referenced B-274 or higher, and a heading grep for native messaging, paste, macOS, Jamf, redirect, remote config, quickstart, installer and command-line found no overlapping open item. Related items are cross-referenced below.
 
@@ -3585,6 +3614,11 @@ Choose in the brief.
 
 **Dependencies:** B-194 (same class) and B-269 (presets could carry a collect-command-lines toggle).
 
+**Added 2026-09-30 (B-271 security review):**
+- **Sequencing:** B-271 enabled `ai_processes` every cycle on linked endpoints, where before it ran only on the first scan after a restart. Unlinked endpoints always ran it. The volume of Linux/macOS command lines reaching the backend is therefore higher, so **sequence this alongside or right after B-271, not later**. It doesn't block B-271.
+- **Retention:** pair it with a retention decision for `endpoint_reports`. It stores the whole report as JSONB with no retention policy; only `paste_events` has one.
+- **Pre-first-fetch scan:** even when an admin disables a scanner, the agent sends one full all-scanner report after every restart, because remote config applies only after the first send (`cmd/agent/main.go`). Fix by caching the last remote config locally, or by fetching config before the first scan.
+
 ### B-280 — EPIC: AI ITAM program (discovery, discovery administration, asset grouping, API convention, service mapping) — **IN PROGRESS, 2026-09-30**
 **Origin:** founder direction, 2026-09-30, alongside `AI_ITAM_EPIC_MASTER_SEQUENCE.md`.
 - B-280 was confirmed free against BACKLOG.md directly: the counter read B-280, and B-280 was referenced nowhere.
@@ -3604,6 +3638,6 @@ Choose in the brief.
 - `DISCOVERY_ADMIN_INVESTIGATION.md`;
 - `DYNAMIC_ASSET_GROUPING_EPIC.md` (**not in the repo yet** as of 2026-09-30; referenced by the index).
 
-**Status:** item 1 (B-273) is done (`6d64aaa`). Item 2 (B-271) is next.
+**Status:** items 1 (B-273, `6d64aaa`) and 2 (B-271) are done. Item 3 (B-272) is next.
 
 ## Next B-ID: B-281

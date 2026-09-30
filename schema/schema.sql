@@ -588,7 +588,8 @@ CREATE TABLE IF NOT EXISTS agent_configs (
     scan_interval_seconds INT          NOT NULL DEFAULT 300,
     model_scan_paths      TEXT[]       NOT NULL DEFAULT ARRAY['/home', '/Users', 'C:\\Users'],
     max_report_size_bytes INT          NOT NULL DEFAULT 5242880,
-    enabled_scanners      TEXT[]       NOT NULL DEFAULT ARRAY['ai_apps','models','mcp_servers','cloud_clients','network_activity','browser'],
+    -- All 10 scanners the agent gates on (B-271, migration 000025).
+    enabled_scanners      TEXT[]       NOT NULL DEFAULT ARRAY['ai_apps','models','mcp_servers','cloud_clients','network_activity','browser','ai_processes','gpu','python_envs','nodejs_ai'],
     updated_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
