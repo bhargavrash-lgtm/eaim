@@ -3603,6 +3603,7 @@ Choose in the brief.
 - **Every cycle, not once per restart.** The just-shipped B-271 fix (`b138ff7`) means linked endpoints now run `ai_processes` on every scan cycle (default 300 s), not only on the first scan after a restart. Command-line and MCP-arg data that may contain secrets now reaches the server every cycle.
 - **No retention limit.** `endpoint_reports` stores each full report verbatim as JSONB with **no retention policy** (only `paste_events` has one), so nothing limits how long any of it is kept.
 - **Scope:** redaction (below) plus an `endpoint_reports` retention decision are both in this item's scope.
+- **Placement (founder, 2026-09-30):** `AI_ITAM_EPIC_MASTER_SEQUENCE.md` Phase 4, **item 17**, after AI/LLM Service Mapping. It is a data-minimisation/retention concern, not a Phase 1 report-integrity gap; B-272 stays item 3.
 
 **Problem (code-level; from the B-273 security review):**
 - `ai_processes` sends **every user's full command line** for matched processes: `scanner_linux.go:30-36` (`/proc/<pid>/cmdline`) and `scanner_darwin.go:35-42` (`ps` args).

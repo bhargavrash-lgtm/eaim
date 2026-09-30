@@ -8,7 +8,12 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-09-30, newest) — B-271 fixture user deleted (audit untouched); B-279 prioritized
+## Active decision thread (2026-09-30, newest) — B-279 placed as master-sequence item 17 (Phase 4)
+
+- **Founder decision:** B-279 stays out of Phase 1. It is added as **item 17 in Phase 4**, after AI/LLM Service Mapping: a data-minimisation/retention concern, not a report-integrity gap. It remains prioritized within its own scope.
+- **B-272 stays item 3, unchanged, and is next.**
+
+## Active decision thread (2026-09-30) — B-271 fixture user deleted (audit untouched); B-279 prioritized
 
 - **The `b271-admin@fixture.local` fixture user is deleted** at founder direction, the way the product deletes users: the same `UPDATE users SET deleted_at = NOW()` as `DELETE /v1/users/{id}` (`store.SoftDeleteUser`), org-scoped.
   - A hard delete isn't possible without touching the audit trail: `agent_lifecycle_events.performed_by` has a plain FK (no `ON DELETE`), so a hard delete would mean rewriting those rows or weakening the constraint.
@@ -2697,6 +2702,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — placed B-279 as AI_ITAM_EPIC_MASTER_SEQUENCE.md item 17 (Phase 4) per founder; B-272 remains item 3 and is next. Docs only.
+
+Prior entry:
 2026-09-30 by Claude Code — soft-deleted the b271 fixture user (same as DELETE /v1/users/{id}); the 4 audit rows are verified unchanged (md5). B-279 is prioritized, with the compounding factor named. Docs only. Marker untouched.
 
 Prior entry:

@@ -85,6 +85,12 @@ anything.
 - [ ] 15. CI-reconciliation identity keys investigation.
 - [ ] 16. **AI/LLM Service Mapping** — the four-tier model, begins only
       once B-267 exists.
+- [ ] 17. **B-279** — report data minimisation (redact command-line and
+      MCP-arg secrets) plus an `endpoint_reports` retention decision.
+      Prioritized within its own scope (since B-271, this data arrives
+      every cycle and nothing limits retention), but placed here by founder
+      decision 2026-09-30: it's a data-minimisation/retention concern,
+      not a Phase 1 report-integrity gap.
 
 ---
 
