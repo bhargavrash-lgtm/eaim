@@ -39,7 +39,7 @@ anything.
       file. Done 2026-09-30 — `6d64aaa` (first fix `fa4a221`; reopened for
       RPM upgrades, re-closed in `6d64aaa`).
 - [x] 2. **B-271** — linking an endpoint silently disables 4 of 10
-      scanners. Done 2026-09-30 — HASH_PLACEHOLDER (migration 000025,
+      scanners. Done 2026-09-30 — `b138ff7` (migration 000025,
       live-verified; `B-271_VERIFICATION.md`).
 - [ ] 3. **B-272** — `network_activity` non-functional on Linux.
 - [ ] 4. Honest-state gap — "0" renders identically for "reported, found
