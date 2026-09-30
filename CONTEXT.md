@@ -8,7 +8,19 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-09-30, newest) — B-271 DONE (item 2); next is item 3 (B-272)
+## Active decision thread (2026-09-30, newest) — B-271 fixture user deleted (audit untouched); B-279 prioritized
+
+- **The `b271-admin@fixture.local` fixture user is deleted** at founder direction, the way the product deletes users: the same `UPDATE users SET deleted_at = NOW()` as `DELETE /v1/users/{id}` (`store.SoftDeleteUser`), org-scoped.
+  - A hard delete isn't possible without touching the audit trail: `agent_lifecycle_events.performed_by` has a plain FK (no `ON DELETE`), so a hard delete would mean rewriting those rows or weakening the constraint.
+  - **Founder rule: the audit log stays append-only, with no exceptions for fixture entries.** The 4 lifecycle rows were fingerprinted before and after the delete: md5 identical, count 4.
+- **B-279 is prioritized (founder).** Its entry now names the compounding factor:
+  - since B-271, command-line and MCP-arg data with potential secrets reaches the server every cycle;
+  - `endpoint_reports` has no retention policy.
+
+  A retention decision is in B-279's scope.
+- **Next:** master sequence item 3 (B-272), unless the founder slots B-279 first. B-279 is not in the master sequence; placing it is a founder call per the file's own rule.
+
+## Active decision thread (2026-09-30) — B-271 DONE (item 2); next is item 3 (B-272)
 
 - **B-271 is fixed, reviewed, live-verified and pushed.** The record is `B-271_VERIFICATION.md`.
   - Migration `000025` makes all 10 scanners the default and backfills existing rows (the demo row keeps `models` off).
@@ -2685,6 +2697,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — soft-deleted the b271 fixture user (same as DELETE /v1/users/{id}); the 4 audit rows are verified unchanged (md5). B-279 is prioritized, with the compounding factor named. Docs only. Marker untouched.
+
+Prior entry:
 2026-09-30 by Claude Code — B-271 DONE (migration 000025: all-10 default plus backfill; API 400 on unknown names; UI list of 10); live-verified with a real packaged agent and fixtures, plus the Windows endpoint's gpus; both reviews; master sequence item 2 ticked. Marker cleared.
 
 Prior entry:

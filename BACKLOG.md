@@ -3596,8 +3596,13 @@ Choose in the brief.
 
 **Dependencies:** B-274 (macOS delivery) for the macOS quickstart text.
 
-### B-279 — Report data minimisation: full process command lines and MCP server args sent unredacted — **QUEUED, 2026-09-30 (Medium, privacy)**
+### B-279 — Report data minimisation: full process command lines and MCP server args sent unredacted — **QUEUED, PRIORITIZED 2026-09-30 (founder) — compounded by B-271**
 **Origin:** B-273's reviews and live verification (2026-09-30; `B-273_VERIFICATION.md` "Follow-ups"). Minted at founder direction 2026-09-30. B-274–B-279 were confirmed free against BACKLOG.md directly: the counter read B-274, nothing referenced B-274 or higher, and a heading grep for native messaging, paste, macOS, Jamf, redirect, remote config, quickstart, installer and command-line found no overlapping open item. Related items are cross-referenced below.
+
+**Compounding factor, why this is prioritized (founder, 2026-09-30):**
+- **Every cycle, not once per restart.** The just-shipped B-271 fix (`b138ff7`) means linked endpoints now run `ai_processes` on every scan cycle (default 300 s), not only on the first scan after a restart. Command-line and MCP-arg data that may contain secrets now reaches the server every cycle.
+- **No retention limit.** `endpoint_reports` stores each full report verbatim as JSONB with **no retention policy** (only `paste_events` has one), so nothing limits how long any of it is kept.
+- **Scope:** redaction (below) plus an `endpoint_reports` retention decision are both in this item's scope.
 
 **Problem (code-level; from the B-273 security review):**
 - `ai_processes` sends **every user's full command line** for matched processes: `scanner_linux.go:30-36` (`/proc/<pid>/cmdline`) and `scanner_darwin.go:35-42` (`ps` args).
