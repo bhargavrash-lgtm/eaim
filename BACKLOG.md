@@ -3642,7 +3642,7 @@ Choose in the brief.
 **Design records:**
 - `AI_LLM_SERVICE_MAPPING_DESIGN.md`;
 - `DISCOVERY_ADMIN_INVESTIGATION.md`;
-- `DYNAMIC_ASSET_GROUPING_EPIC.md` (**not in the repo yet** as of 2026-09-30; referenced by the index).
+- `DYNAMIC_ASSET_GROUPING_EPIC.md` (added 2026-09-30; master-sequence item 6 resolves its §2 schema decision before B-269).
 
 **Status:** items 1 (B-273, `6d64aaa`) and 2 (B-271) are done. Item 3 (B-272) is next.
 

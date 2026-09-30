@@ -8,7 +8,15 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-09-30, newest) — B-279 placed as master-sequence item 17 (Phase 4)
+## Active decision thread (2026-09-30, newest) — DYNAMIC_ASSET_GROUPING_EPIC.md committed
+
+- **`DYNAMIC_ASSET_GROUPING_EPIC.md`** was saved verbatim at founder direction; the only addition is a B-280 cross-reference.
+  - It is a design record, not a build brief.
+  - Master-sequence item 6 now points to it: §2 is the schema decision (an optional rule definition on B-207's Groups), and §5 is why it must precede B-269.
+  - The "not in the repo yet" notes are removed from the master sequence and from B-280.
+- **Next unchanged:** item 3 (B-272).
+
+## Active decision thread (2026-09-30) — B-279 placed as master-sequence item 17 (Phase 4)
 
 - **Founder decision:** B-279 stays out of Phase 1. It is added as **item 17 in Phase 4**, after AI/LLM Service Mapping: a data-minimisation/retention concern, not a report-integrity gap. It remains prioritized within its own scope.
 - **B-272 stays item 3, unchanged, and is next.**
@@ -2702,6 +2710,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-09-30 by Claude Code — committed DYNAMIC_ASSET_GROUPING_EPIC.md (verbatim plus a B-280 cross-ref); cross-referenced from master-sequence item 6 and B-280. Docs only.
+
+Prior entry:
 2026-09-30 by Claude Code — placed B-279 as AI_ITAM_EPIC_MASTER_SEQUENCE.md item 17 (Phase 4) per founder; B-272 remains item 3 and is next. Docs only.
 
 Prior entry:

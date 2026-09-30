@@ -14,8 +14,6 @@ its real dependency.
 Related detailed design records, referenced by name, never pasted
 inline: `AI_LLM_SERVICE_MAPPING_DESIGN.md`,
 `DYNAMIC_ASSET_GROUPING_EPIC.md`, `DISCOVERY_ADMIN_INVESTIGATION.md`.
-(`DYNAMIC_ASSET_GROUPING_EPIC.md` is not in the repo yet as of
-2026-09-30.)
 
 **Epic B-ID:** **B-280** — the AI ITAM program as a whole (`BACKLOG.md`).
 
@@ -52,7 +50,8 @@ anything.
 
 - [ ] 6. **Dynamic Asset Grouping — schema resolution.** Extend B-207's
       Groups primitive with an optional rule definition. Full design in
-      `DYNAMIC_ASSET_GROUPING_EPIC.md`.
+      `DYNAMIC_ASSET_GROUPING_EPIC.md` (repo root; §2 is the schema
+      decision this item resolves, and §5 is why it must precede B-269).
 - [ ] 7. **API design convention — lock, don't assume.** Confirm B-137's
       real state, trace CMDB's exact endpoint shape, confirm real
       versioning practice. Deliverable: one written convention every
