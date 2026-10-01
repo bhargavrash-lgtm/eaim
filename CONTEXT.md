@@ -8,7 +8,24 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-01, newest) — B-281 + B-285 + B-284 DONE
+## Active decision thread (2026-10-01, newest) — B-286–B-290 minted; code-review standing check added
+
+- **Minted at founder direction** (the B-281/B-284/B-285 review follow-ups):
+
+  | B-ID | Item | Severity |
+  |---|---|---|
+  | **B-286** | Paste `occurred_at` unbounded: retention evasion, list pinning, chunk DoS | Medium |
+  | **B-287** | No request-size limit on direct API ingest with the service key. Same shape as B-243: one credential, unbounded blast radius. | **Medium, URGENT** |
+  | **B-288** | Unused `collected_at` index; 000026's blocking `CREATE INDEX` | Low |
+  | **B-289** | Alert on a persistent `still_running`, when Alerts is next touched | Low |
+  | **B-290** | darwin `sw_vers` has no timeout | Low |
+
+  The next B-ID is B-291.
+- **Process change:** `CLAUDE.md` Conventions gains **"Standing code-review checks"**. Every reviewer pass flags a new error path that sends raw error text, panics or stacks across a trust boundary instead of a reason code; B-285's `scanner_errors` is the standard.
+- **For the founder:** the "confirm no orphaned link" rule, said to have been added earlier, **isn't in the repo**; a full grep found no such rule. A placeholder in the same bullet asks for its wording.
+- No code changed.
+
+## Active decision thread (2026-10-01) — B-281 + B-285 + B-284 DONE
 
 - **B-281:** a hung scanner can no longer stop reporting.
   - `collect` waits only until the deadline, drops late writes and won't relaunch an in-flight scanner, so at most one stuck goroutine per scanner.
@@ -2807,6 +2824,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-01 by Claude Code — minted B-286–B-290 (B-287 urgent); added CLAUDE.md "Standing code-review checks" (no raw error text across a trust boundary); flagged that the orphaned-link rule isn't in the repo. Docs only.
+
+Prior entry:
 2026-10-01 by Claude Code — B-281 + B-285 + B-284 DONE (bounded per-scanner wait, no relaunch pile-up, reason-coded server logging, latest-by-received_at plus migration 000026, paste timestamp labels); live with a real FIFO hang and a skewed report; both reviews. Marker cleared.
 
 Prior entry:

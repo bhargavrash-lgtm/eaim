@@ -3772,4 +3772,84 @@ Choose in the brief.
 - `ingest.logScannerFailures` writes one structured server log line per failed scanner (allowlisted names and codes only; others are counted). It is also queryable in `endpoint_reports.report->'scanner_errors'`.
 - **Live:** one API log line per report during the hang.
 
-## Next B-ID: B-286
+### B-286 — Browser-reported paste timestamps are unbounded (retention evasion, partition manipulation) — **QUEUED, 2026-10-01 (Medium)**
+**Origin:** the B-281/B-284/B-285 reviews (2026-10-01; `B-281_B-284_B-285_VERIFICATION.md` "Follow-ups"). Minted at founder direction 2026-10-01. B-286–B-290 were confirmed free against BACKLOG.md directly: the counter read B-286, and nothing referenced B-286 or higher. An overlap grep found body-limit mentions only in B-107 (issue handler, done) and B-264 (tool write routes, which leaves "a wider body-limit" open), and nothing for paste `occurred_at` bounds, `still_running` alerting, the `collected_at` index or darwin `sw_vers`.
+
+**Problem (code-level; from the B-284 security review):**
+- `validatePasteEvent` (`eami-api/internal/api/paste_events.go`) accepts any RFC3339 `occurred_at`.
+- `paste_events` is a TimescaleDB hypertable **partitioned on `occurred_at`**, with **90-day retention**. The list query filters and sorts on it too.
+- A compromised agent, or anyone holding the service key, can therefore:
+  - **backdate** pastes past 90 days, so retention deletes them on its next run (**evasion**);
+  - backdate them outside the default list window (**hiding**);
+  - **future-date** them so they stay pinned at the top of the list and are never retired;
+  - **spread** timestamps widely, creating one chunk per spread value (a **TimescaleDB catalog DoS**; up to 100 events per relay item, with no limit on items per batch).
+- B-284 only **relabelled** the column "Occurred (browser-reported)" and added the server "Received"; it didn't bound the value.
+
+**Acceptance criteria:**
+- [ ] Clamp or reject `occurred_at` outside a window around the server's receive time (proposal: now−7d … now+5m; confirm in the brief), and record when a value was clamped.
+- [ ] Decide whether list sorting and filtering should use `received_at`.
+- [ ] Tests for backdated, future-dated and spread values.
+- [ ] Live-verify through the real collector.
+
+**Dependencies:** B-284 (done). Related to B-279 (`endpoint_reports` retention) and to the paste relay (B-275).
+
+### B-287 — No request-size limit on direct API ingest with the service key — **QUEUED, 2026-10-01 (Medium, URGENT)**
+**Origin:** the B-281/B-284/B-285 reviews (2026-10-01; `B-281_B-284_B-285_VERIFICATION.md` "Follow-ups"). Minted at founder direction 2026-10-01. B-286–B-290 were confirmed free against BACKLOG.md directly: the counter read B-286, and nothing referenced B-286 or higher. An overlap grep found body-limit mentions only in B-107 (issue handler, done) and B-264 (tool write routes, which leaves "a wider body-limit" open), and nothing for paste `occurred_at` bounds, `still_running` alerting, the `collected_at` index or darwin `sw_vers`.
+
+**Problem (code-level; from the B-285 security review):**
+- `decodeJSON` (`eami-api/internal/api/middleware.go`) has no `http.MaxBytesReader`. `/v1/ingest/batch` and `/v1/reports` use it.
+- The collector caps agent request bodies at 10 MB, but **anyone holding the service key can post straight to the API with no limit at all**, including huge `scanner_errors` maps, multi-MB `agent_id`/`hostname` values (now repeated in up to 10 log lines per report since B-285), or unbounded batches.
+- **Founder: the same shape as B-243.** One credential with an unbounded blast radius if it's ever misused or leaked. **Fix soon, not low in the queue.**
+
+**Acceptance criteria:**
+- [ ] `http.MaxBytesReader` on the ingest routes, sized to the collector's 10 MB cap (or a documented batch multiple), returning 413 when exceeded.
+- [ ] Caps on items per batch, `agent_id`/`hostname` length, and paste events per item (already 100).
+- [ ] Decide in the brief whether this is a global body limit for all JSON routes; B-264 left "a wider body-limit" open for tool writes, so fold that in or link to it.
+- [ ] Tests for an oversized body, an oversized `agent_id` and too many batch items.
+- [ ] Live-verify against the real API with the service key.
+
+**Dependencies:** relates to **B-243** (the single global service key) and B-264.
+
+### B-288 — The `collected_at` report index is now unused; the 000026 index build blocks writes — **QUEUED, 2026-10-01 (Low)**
+**Origin:** the B-281/B-284/B-285 reviews (2026-10-01; `B-281_B-284_B-285_VERIFICATION.md` "Follow-ups"). Minted at founder direction 2026-10-01. B-286–B-290 were confirmed free against BACKLOG.md directly: the counter read B-286, and nothing referenced B-286 or higher. An overlap grep found body-limit mentions only in B-107 (issue handler, done) and B-264 (tool write routes, which leaves "a wider body-limit" open), and nothing for paste `occurred_at` bounds, `still_running` alerting, the `collected_at` index or darwin `sw_vers`.
+
+**Problem:**
+- Since B-284, nothing reads `idx_reports_endpoint (endpoint_id, collected_at DESC)`; "latest" uses `idx_reports_endpoint_received`. The old index is now pure write overhead on `endpoint_reports`.
+- Separately, migration 000026 is a plain `CREATE INDEX`, which blocks writes to `endpoint_reports` while it builds. On a large deployment, that means a write stall during upgrade.
+
+**Acceptance criteria:**
+- [ ] Confirm no reader, including ad-hoc and reporting queries, then drop the old index in a migration.
+- [ ] Deploy notes for 000026: use `CREATE INDEX CONCURRENTLY` out of band first on large deployments. golang-migrate runs each file in a transaction, so `CONCURRENTLY` can't go in the migration itself.
+
+**Dependencies:** B-284 (done).
+
+### B-289 — Alert when a scanner stays `still_running` — **QUEUED, 2026-10-01 (Low)**
+**Origin:** the B-281/B-284/B-285 reviews (2026-10-01; `B-281_B-284_B-285_VERIFICATION.md` "Follow-ups"). Minted at founder direction 2026-10-01. B-286–B-290 were confirmed free against BACKLOG.md directly: the counter read B-286, and nothing referenced B-286 or higher. An overlap grep found body-limit mentions only in B-107 (issue handler, done) and B-264 (tool write routes, which leaves "a wider body-limit" open), and nothing for paste `occurred_at` bounds, `still_running` alerting, the `collected_at` index or darwin `sw_vers`.
+
+**Problem:**
+- Since B-281, a scanner blocked on a hung path is reported as `error`/`still_running` every cycle instead of freezing the agent.
+- A local user can deliberately plant one (a FIFO or a hung mount in a scanned path) to blind that scanner indefinitely. It's now **visible** in reports and server logs, but **nothing alerts** on it.
+
+**Acceptance criteria:**
+- [ ] An alert rule fires when the same endpoint reports the same scanner `still_running` for N consecutive reports or more than T minutes.
+- [ ] Use the existing Alerts mechanism; founder: build it **when Alerts' own mechanism is next touched**.
+- [ ] Tests, plus live verification with the B-281 FIFO reproduction (`B-281_B-284_B-285_VERIFICATION.md`).
+
+**Dependencies:** B-281 and B-285 (done), and the Alerts engine (`eami-api/internal/alerting`).
+
+### B-290 — macOS `osVersion()` runs `sw_vers` with no timeout — **QUEUED, 2026-10-01 (Low)**
+**Origin:** the B-281/B-284/B-285 reviews (2026-10-01; `B-281_B-284_B-285_VERIFICATION.md` "Follow-ups"). Minted at founder direction 2026-10-01. B-286–B-290 were confirmed free against BACKLOG.md directly: the counter read B-286, and nothing referenced B-286 or higher. An overlap grep found body-limit mentions only in B-107 (issue handler, done) and B-264 (tool write routes, which leaves "a wider body-limit" open), and nothing for paste `occurred_at` bounds, `still_running` alerting, the `collected_at` index or darwin `sw_vers`.
+
+**Problem:**
+- `eami-agent/internal/payload/platform_darwin.go` runs `exec.Command("sw_vers")` with no context or timeout, **outside** B-281's bounded scan wait.
+- If `sw_vers` hangs, `BuildWith` hangs before any scanner runs, which is the B-281 failure class through a different path.
+- Linux reads `/etc/os-release`, which is a small risk. On Windows, check whether a registry or WMI call is involved.
+
+**Acceptance criteria:**
+- [ ] `exec.CommandContext` with a short timeout, falling back to an empty `os_version`.
+- [ ] Audit the other pre-scan calls in `BuildWith` (`os.Hostname`, platform reads) for unbounded waits.
+- [ ] A test, plus a macOS check when hardware is available (B-014).
+
+**Dependencies:** B-281 (done). B-014 (macOS hardware) for live verification.
+
+## Next B-ID: B-291
