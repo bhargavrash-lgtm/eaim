@@ -150,6 +150,7 @@ func pasteEventToResp(e store.PasteEvent) PasteEventResp {
 		ID:                e.ID.String(),
 		DestinationDomain: e.DestinationDomain,
 		OccurredAt:        e.OccurredAt,
+		ReceivedAt:        e.ReceivedAt,
 	}
 	if e.ContentLength.Valid {
 		v := e.ContentLength.Int32

@@ -8,7 +8,25 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-09-30, newest) — B-281–B-285 minted (item 4 follow-ups); Endpoint Detail link-control decision
+## Active decision thread (2026-10-01, newest) — B-281 + B-285 + B-284 DONE
+
+- **B-281:** a hung scanner can no longer stop reporting.
+  - `collect` waits only until the deadline, drops late writes and won't relaunch an in-flight scanner, so at most one stuck goroutine per scanner.
+  - Live, with a real FIFO hang: pre-fix, 0 reports in 4 minutes; fixed, a report every cycle, 1 blocked thread and flat thread count.
+- **B-285:** full failure detail goes to the local log. Only reason codes leave the endpoint (D1), and the API logs one structured line per failure.
+- **B-284:** "latest report" is by server `received_at` (migration 000026). Paste Detection shows "Occurred (browser-reported)" plus "Received" (D2/D3). A future-dated report doesn't win (live).
+- **Reviews:** code (Medium nil-logger and four Lows fixed) and security (no HIGH).
+- **Proposed follow-ups, not minted** (in `B-281_B-284_B-285_VERIFICATION.md`):
+  - paste `occurred_at` is unbounded (MEDIUM: retention evasion, chunk DoS);
+  - API ingest has no body-size cap (MEDIUM);
+  - the unused `collected_at` index and the blocking `CREATE INDEX` note;
+  - alert on a persistent `still_running`;
+  - darwin `osVersion` has no timeout;
+  - a code-review rule for detection-package errors.
+- These three aren't master-sequence items (they're tracked in BACKLOG, now DONE). The next B-ID is still B-286.
+- **Next per the master sequence:** the B-252 Admin rename + Endpoint Detail brief (it carries `scanner_status`/`has_report`, and shows the link control on no-report endpoints).
+
+## Active decision thread (2026-09-30) — B-281–B-285 minted (item 4 follow-ups); Endpoint Detail link-control decision
 
 - **Minted at founder direction:**
 
@@ -2789,6 +2807,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-01 by Claude Code — B-281 + B-285 + B-284 DONE (bounded per-scanner wait, no relaunch pile-up, reason-coded server logging, latest-by-received_at plus migration 000026, paste timestamp labels); live with a real FIFO hang and a skewed report; both reviews. Marker cleared.
+
+Prior entry:
 2026-09-30 by Claude Code — minted B-281–B-285 (item 4 follow-ups; B-285 is built with B-281); recorded the Endpoint Detail decision to show the link control on a no-report endpoint. Docs only.
 
 Prior entry:

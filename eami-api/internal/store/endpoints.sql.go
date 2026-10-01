@@ -422,15 +422,20 @@ type ListAgentEndpointsParams struct {
 // pages through. $2 is the likeEscaper-escaped search (empty = no filter).
 const agentEndpointSearchSQL = `($2::text = '' OR e.hostname ILIKE '%' || $2 || '%' ESCAPE E'\\')`
 
-// latestReportJoinSQL picks each endpoint's ONE latest report (ties on
-// collected_at broken by id), so gpu_count, has_report, scanner_status and
-// latest_report always come from the same row and the report is read once.
-// A latest report exists exactly when any report does, so has_report is
-// lr.report IS NOT NULL. Uses idx_reports_endpoint (endpoint_id, collected_at DESC).
+// latestReportJoinSQL picks each endpoint's ONE latest report, so gpu_count,
+// has_report, scanner_status and latest_report always come from the same row
+// and the report is read once. A latest report exists exactly when any report
+// does, so has_report is lr.report IS NOT NULL.
+//
+// "Latest" is by the SERVER's receive time (received_at, set on insert), not
+// the agent-reported collected_at (B-284): a skewed or deliberately set agent
+// clock must not make an older scan -- or a future-dated one, permanently --
+// count as current. Ties broken by id. Matches the child-table counts, which
+// are rebuilt in arrival order. Uses idx_reports_endpoint_received (000026).
 const latestReportJoinSQL = `LEFT JOIN LATERAL (
 	SELECT er.report FROM endpoint_reports er
 	WHERE er.endpoint_id = e.id
-	ORDER BY er.collected_at DESC, er.id DESC
+	ORDER BY er.received_at DESC, er.id DESC
 	LIMIT 1
 ) lr ON true`
 

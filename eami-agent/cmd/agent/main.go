@@ -233,7 +233,7 @@ func runLoop(ctx context.Context, cfg *config.Config, log *slog.Logger) {
 	}
 
 	for {
-		report, err := payload.Build(cfg)
+		report, err := payload.BuildWith(cfg, log)
 		if err != nil {
 			log.Error("scan error", "err", err)
 		} else {

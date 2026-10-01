@@ -206,6 +206,9 @@ func TestPasteEventsRead_List_FiltersByDomainAndTime(t *testing.T) {
 	allowed := map[string]bool{
 		"ID": true, "DestinationDomain": true, "OccurredAt": true,
 		"ContentLength": true, "ContentHash": true, "OSUsername": true,
+		// B-284 (reviewed): the server's own receive time, shown beside the
+		// browser-reported occurred_at. A timestamp, no paste content.
+		"ReceivedAt": true,
 	}
 	if typ.NumField() != len(allowed) {
 		t.Fatalf("PasteEventResp field count changed (want %d, got %d) -- review before allowing", len(allowed), typ.NumField())

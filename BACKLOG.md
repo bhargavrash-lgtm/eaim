@@ -3665,7 +3665,7 @@ Choose in the brief.
 
 **Status:** items 1 (B-273, `6d64aaa`), 2 (B-271, `b138ff7`) and 4 (the honest-state gap, `ITEM4_HONEST_STATE_VERIFICATION.md`) are done. Item 3 (B-272) is DEFERRED (no Linux customer yet). Next: the B-252 Admin rename + Endpoint Detail brief, which carries item 4's `scanner_status`/`has_report` into Endpoint Detail.
 
-### B-281 — One hung scanner stops an endpoint from ever reporting again — **QUEUED, 2026-09-30 (High)**
+### B-281 — One hung scanner stops an endpoint from ever reporting again — **DONE, 2026-10-01** (evidence: `B-281_B-284_B-285_VERIFICATION.md`)
 **Origin:** master-sequence item 4's code review and live run (2026-09-30; `ITEM4_HONEST_STATE_VERIFICATION.md` "Found during"). Minted at founder direction 2026-09-30. B-281–B-285 were confirmed free against BACKLOG.md directly: the counter read B-281, nothing referenced B-281 or higher, and a grep for hung-scanner/timeout, `StartLimitIntervalSec`, clock skew, blank agent version and panic logging found no overlapping open item.
 
 **Problem (code-level; from the item-4 code review):**
@@ -3685,6 +3685,13 @@ Choose in the brief.
 - [ ] Live: a real agent with a deliberately blocking scan path still reports every cycle.
 
 **Dependencies:** item 4's `scanner_status` (done, `2fa8b0a`). **Built together with B-285**, which touches the same `runScan` path.
+
+**Resolution (2026-10-01):**
+- `payload.collect` stops waiting at the 30 s deadline. A still-running scanner is `error`/`timeout`; on the deadline, ready results are drained first.
+- Late writes are dropped via `commit` under the mutex.
+- A per-scanner `inFlight` flag stops relaunches (`still_running`), so there is at most one stuck goroutine per scanner.
+- **Live, with a real FIFO hang:** the pre-fix agent sent 0 reports in 4 minutes. The fixed agent reported every cycle with the 9 other scanners' real data, exactly 1 thread blocked on the FIFO across 7 cycles, and threads flat at 14.
+- Tests pass under `-race`. Both reviews: no blockers.
 
 ### B-282 — Agent version column is blank for every endpoint — **QUEUED, 2026-09-30 (Low)**
 **Origin:** master-sequence item 4's code review and live run (2026-09-30; `ITEM4_HONEST_STATE_VERIFICATION.md` "Found during"). Minted at founder direction 2026-09-30. B-281–B-285 were confirmed free against BACKLOG.md directly: the counter read B-281, nothing referenced B-281 or higher, and a grep for hung-scanner/timeout, `StartLimitIntervalSec`, clock skew, blank agent version and panic logging found no overlapping open item.
@@ -3719,7 +3726,7 @@ Choose in the brief.
 
 **Dependencies:** none. Keep the B-273 `.gitattributes` LF rule (the file is under `installer/linux/*`).
 
-### B-284 — Endpoint freshness trusts the agent's own clock (`collected_at`) — **QUEUED, 2026-09-30 (Medium, security-adjacent)**
+### B-284 — Endpoint freshness trusts the agent's own clock (`collected_at`) — **DONE, 2026-10-01** (evidence: `B-281_B-284_B-285_VERIFICATION.md`)
 **Origin:** master-sequence item 4's code review and live run (2026-09-30; `ITEM4_HONEST_STATE_VERIFICATION.md` "Found during"). Minted at founder direction 2026-09-30. B-281–B-285 were confirmed free against BACKLOG.md directly: the counter read B-281, nothing referenced B-281 or higher, and a grep for hung-scanner/timeout, `StartLimitIntervalSec`, clock skew, blank agent version and panic logging found no overlapping open item.
 
 **Problem:**
@@ -3737,7 +3744,13 @@ Choose in the brief.
 
 **Dependencies:** item 4's latest-report pick (`latestReportJoinSQL`). Relevant to B-270 and Endpoint Detail.
 
-### B-285 — Scanner crashes are recorded as "error" but never logged — **QUEUED, 2026-09-30 (Low–Medium)**
+**Resolution (2026-10-01):**
+- "Latest report" orders by server `received_at` (migration 000026 adds the index), so the counts and status/GPU/`latest_report` now agree on one ordering.
+- Paste Detection labels "Occurred (browser-reported)" and adds a server "Received" column (the API returns `received_at`).
+- **Live:** a report dated one year ahead, sent through the real collector as the same endpoint, is picked by the old rule but not the new one. Playwright 8/8.
+- **Not closed here (proposed follow-ups, not minted):** paste `occurred_at` is still unbounded (retention evasion and chunk DoS), and the API ingest routes have no body-size cap. Both are in the evidence file.
+
+### B-285 — Scanner crashes are recorded as "error" but never logged — **DONE, 2026-10-01** (evidence: `B-281_B-284_B-285_VERIFICATION.md`)
 **Origin:** master-sequence item 4's code review and live run (2026-09-30; `ITEM4_HONEST_STATE_VERIFICATION.md` "Found during"). Minted at founder direction 2026-09-30. B-281–B-285 were confirmed free against BACKLOG.md directly: the counter read B-281, nothing referenced B-281 or higher, and a grep for hung-scanner/timeout, `StartLimitIntervalSec`, clock skew, blank agent version and panic logging found no overlapping open item.
 
 **Problem:**
@@ -3752,5 +3765,11 @@ Choose in the brief.
 - [ ] Tests.
 
 **Dependencies / sequencing:** **built together with B-281.** Same function (`runScan`), same brief. Kept as its own ID for tracking (founder, 2026-09-30).
+
+**Resolution (2026-10-01, built with B-281):**
+- The full panic value, stack and error text go to the agent's local log.
+- The report carries reason codes only (`scanner_errors`: `timeout` / `still_running` / `panic` / `error`; founder D1).
+- `ingest.logScannerFailures` writes one structured server log line per failed scanner (allowlisted names and codes only; others are counted). It is also queryable in `endpoint_reports.report->'scanner_errors'`.
+- **Live:** one API log line per report during the hang.
 
 ## Next B-ID: B-286

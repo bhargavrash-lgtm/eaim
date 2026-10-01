@@ -161,9 +161,14 @@ func TestEndpoints_ScannerStatusConsistentOnCollectedAtTie_RealDB(t *testing.T) 
 	if err := env.pool.QueryRow(ctx, `INSERT INTO endpoints (org_id, agent_id, hostname) VALUES ($1, 'item4-tie', 'item4-tie') RETURNING id`, orgID).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
+	// Since B-284 "latest" is by received_at, so the tie must be on
+	// received_at (NOW() differs per insert): set it equal explicitly.
 	at := time.Now().Add(-time.Minute)
 	seedEndpointReport(t, env, ctx, id, orgID, at, `{"agent_id":"item4-tie","gpus":[{"name":"a"}],"scanner_status":{"gpu":"ok"}}`)
 	seedEndpointReport(t, env, ctx, id, orgID, at, `{"agent_id":"item4-tie","gpus":null,"scanner_status":{"gpu":"disabled"}}`)
+	if _, err := env.pool.Exec(ctx, `UPDATE endpoint_reports SET received_at = $2 WHERE endpoint_id = $1`, id, at); err != nil {
+		t.Fatal(err)
+	}
 
 	resp := env.do(t, http.MethodGet, "/v1/endpoints/"+id.String(), viewer, nil)
 	if resp.StatusCode != http.StatusOK {

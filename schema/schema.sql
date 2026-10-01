@@ -103,6 +103,8 @@ CREATE TABLE endpoint_reports (
 );
 CREATE INDEX idx_reports_endpoint ON endpoint_reports(endpoint_id, collected_at DESC);
 CREATE INDEX idx_reports_collected ON endpoint_reports(collected_at DESC);
+-- B-284 (000026): "latest report" is chosen by server receive time.
+CREATE INDEX idx_reports_endpoint_received ON endpoint_reports(endpoint_id, received_at DESC);
 -- Note: not a hypertable — UUID PRIMARY KEY is incompatible with TimescaleDB
 -- partitioning (child tables FK-reference id alone). Plain indexes suffice for v1.
 

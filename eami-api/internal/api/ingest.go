@@ -30,11 +30,14 @@ type batchIngestItem struct {
 // We only parse fields we store in normalised tables; the raw JSON blob always
 // lands verbatim in endpoint_reports.report (JSONB) regardless.
 type agentReport struct {
-	AgentID      string    `json:"agent_id"`
-	Hostname     string    `json:"hostname"`
-	CollectedAt  time.Time `json:"collected_at"`
-	AgentVersion string    `json:"agent_version"`
-	Platform     struct {
+	// ScannerErrors (B-285): per failed scanner, a short reason code. Logged
+	// server-side by logScannerFailures; the full detail stays on the endpoint.
+	ScannerErrors map[string]string `json:"scanner_errors"`
+	AgentID       string            `json:"agent_id"`
+	Hostname      string            `json:"hostname"`
+	CollectedAt   time.Time         `json:"collected_at"`
+	AgentVersion  string            `json:"agent_version"`
+	Platform      struct {
 		OS        string `json:"os"`
 		Arch      string `json:"arch"`
 		OSVersion string `json:"os_version"`
@@ -45,11 +48,11 @@ type agentReport struct {
 		Source  string `json:"source"`
 	} `json:"ai_apps"`
 	LocalModels []struct {
-		Name      string    `json:"name"`
-		Source    string    `json:"source"`
-		FilePath  string    `json:"file_path"`
-		SizeBytes int64     `json:"size_bytes"`
-		ModelType string    `json:"model_type"`
+		Name       string    `json:"name"`
+		Source     string    `json:"source"`
+		FilePath   string    `json:"file_path"`
+		SizeBytes  int64     `json:"size_bytes"`
+		ModelType  string    `json:"model_type"`
 		ModifiedAt time.Time `json:"modified_at"`
 	} `json:"local_models"`
 	MCPServers []struct {
@@ -229,6 +232,7 @@ func (s *Server) processIngestItem(ctx context.Context, orgID uuid.UUID, item ba
 	if err != nil {
 		return err
 	}
+	logScannerFailures(orgID, endpointID, reportID, agentID, rep.ScannerErrors)
 
 	// 4. Insert normalised AI apps.
 	for _, app := range rep.AIApps {
@@ -372,4 +376,31 @@ func (s *Server) processPasteEventRelayItem(ctx context.Context, orgID uuid.UUID
 		return fmt.Errorf("paste event relay: batch insert: %w", err)
 	}
 	return nil
+}
+
+// scannerFailureReasons are the reason codes eami-agent sends in
+// scanner_errors (payload.Reason*).
+var scannerFailureReasons = map[string]bool{"timeout": true, "still_running": true, "panic": true, "error": true}
+
+// logScannerFailures writes one structured server-side log line per scanner
+// that failed in this report (B-285), so failures are queryable in the API's
+// logs as well as in endpoint_reports.report->'scanner_errors'. Only known
+// scanner names and known reason codes are logged verbatim: the report is
+// agent-supplied, so anything else is summarised as a count rather than
+// echoed into the server log.
+func logScannerFailures(orgID, endpointID, reportID uuid.UUID, agentID string, failures map[string]string) {
+	unrecognised := 0
+	for scanner, reason := range failures {
+		if !store.IsKnownScanner(scanner) || !scannerFailureReasons[reason] {
+			unrecognised++
+			continue
+		}
+		slog.Warn("endpoint scanner failed",
+			"org_id", orgID, "endpoint_id", endpointID, "report_id", reportID,
+			"agent_id", agentID, "scanner", scanner, "reason", reason)
+	}
+	if unrecognised > 0 {
+		slog.Warn("endpoint report has unrecognised scanner_errors entries",
+			"org_id", orgID, "endpoint_id", endpointID, "report_id", reportID, "count", unrecognised)
+	}
 }

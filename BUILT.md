@@ -1,5 +1,36 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-281 + B-285 + B-284 — hung scanners can't stop reporting; failures logged; freshness by server clock — 2026-10-01 (Claude Code)
+
+The evidence record is `B-281_B-284_B-285_VERIFICATION.md`.
+
+**Files:**
+- `eami-agent/internal/payload/builder.go` and `builder_test.go`: `collect()` with a bounded wait, the late-write drop, a per-scanner `inFlight`, reason codes in `scanner_errors`, and full detail to the local log. `BuildWith`, with a nil-logger fallback.
+- `eami-agent/cmd/agent/main.go`: calls `BuildWith`.
+- `eami-api/internal/api/ingest.go`: `logScannerFailures`.
+- `eami-api/internal/store/endpoints.sql.go`: latest report by `received_at`.
+- `schema/migrations-v2/000026_endpoint_reports_received_index` and `schema/schema.sql`.
+- `eami-api/internal/api/types.go`, `paste_events.go`: paste `received_at`.
+- `eami-ui/src/pages/ops/PasteEventsPage.tsx`, `hooks/usePasteEvents.ts`: "Occurred (browser-reported)" plus "Received".
+- Tests: `b281_b284_b285_pg_test.go`; item 4's tie test now sets equal `received_at`; the paste field guard is updated with a review note.
+
+**Verified:**
+- Agent tests pass, including under `-race`. The full API suite, the migration suite and `tsc` pass. 2 new mutations are caught.
+- **Live, with a real FIFO hang:** pre-fix, 0 reports in 4 minutes. Fixed, a report every cycle, 9 scanners' real data, exactly 1 FIFO-blocked thread across cycles, threads flat at 14, and server log lines.
+- **Skew:** a report dated a year ahead doesn't win.
+- **Playwright 8/8**, which also gives item 4's "Scan failed" its first real reproduction.
+
+**Reviews:** code (one Medium and four Lows fixed) and security (no HIGH).
+
+**Proposed follow-ups, not minted:**
+- paste `occurred_at` is unbounded (MEDIUM);
+- API ingest has no body-size cap (MEDIUM);
+- the old `collected_at` index is now unused, and the plain `CREATE INDEX` blocks writes while it builds;
+- alert on a persistent `still_running`;
+- darwin `osVersion` has no timeout;
+- a code-review rule for detection-package errors;
+- `openapi.yaml` drift.
+
 ## Master-sequence item 4 — honest scanner state (never reported / disabled / scan failed / found nothing / not known) — 2026-09-30 (Claude Code)
 
 The evidence record is `ITEM4_HONEST_STATE_VERIFICATION.md`. This is `AI_ITAM_EPIC_MASTER_SEQUENCE.md` item 4 (epic B-280). It has no B-ID.

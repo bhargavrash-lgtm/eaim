@@ -1,11 +1,16 @@
 // Package payload assembles the full endpoint Report by running all detection
-// scanners in parallel with a shared 30-second context deadline.
+// scanners in parallel. Each scanner gets the same 30-second deadline, and
+// Build never waits past it: a scanner still running is reported as an error
+// and the report goes out with every other scanner's result (B-281).
 package payload
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -37,16 +42,16 @@ type Report struct {
 	AgentVersion string    `json:"agent_version"`
 	Platform     Platform  `json:"platform,omitempty"`
 
-	LocalModels       []models.LocalModel            `json:"local_models"`
-	CloudClients      []cloud_clients.CloudClient    `json:"cloud_clients"`
-	NetworkActivity   network_activity.ScanResult    `json:"network_activity"`
-	AIProcesses       []ai_processes.AIProcess       `json:"ai_processes"`
-	AIApps            []ai_apps.AIApp                `json:"ai_apps"`
-	MCPServers        []mcp_servers.MCPServer        `json:"mcp_servers"`
-	GPUs              []gpu.GPU                      `json:"gpus"`
-	PythonEnvs        []python_envs.PythonEnv        `json:"python_envs"`
-	NodeProjects      []nodejs_ai.NodeProject        `json:"node_projects"`
-	BrowserExtensions []browser.BrowserExtension     `json:"browser_extensions"`
+	LocalModels       []models.LocalModel         `json:"local_models"`
+	CloudClients      []cloud_clients.CloudClient `json:"cloud_clients"`
+	NetworkActivity   network_activity.ScanResult `json:"network_activity"`
+	AIProcesses       []ai_processes.AIProcess    `json:"ai_processes"`
+	AIApps            []ai_apps.AIApp             `json:"ai_apps"`
+	MCPServers        []mcp_servers.MCPServer     `json:"mcp_servers"`
+	GPUs              []gpu.GPU                   `json:"gpus"`
+	PythonEnvs        []python_envs.PythonEnv     `json:"python_envs"`
+	NodeProjects      []nodejs_ai.NodeProject     `json:"node_projects"`
+	BrowserExtensions []browser.BrowserExtension  `json:"browser_extensions"`
 
 	// ScannerStatus records, per scanner name (the names DetectionConfig
 	// gates on), what happened in this scan: ScannerOK, ScannerDisabled or
@@ -55,46 +60,183 @@ type Report struct {
 	// marshal their field as JSON null (master-sequence item 4). Reports
 	// from agents that predate this field have no scanner_status at all.
 	ScannerStatus map[string]string `json:"scanner_status"`
+
+	// ScannerErrors gives a short reason code for each scanner whose status
+	// is ScannerError: ReasonTimeout, ReasonStillRunning, ReasonPanic or
+	// ReasonError (B-285). Codes only -- raw error strings and panic values
+	// can carry file paths or argument fragments, so the full detail stays
+	// in the endpoint's local log (founder decision D1).
+	ScannerErrors map[string]string `json:"scanner_errors,omitempty"`
 }
 
 // Scanner status values carried in Report.ScannerStatus.
 const (
 	ScannerOK       = "ok"       // ran and returned without error (an empty result is a real "found nothing")
 	ScannerDisabled = "disabled" // not enabled by config for this scan
-	ScannerError    = "error"    // ran and failed: an error, a panic, or the scan deadline passed
+	ScannerError    = "error"    // did not produce a trustworthy result; see Report.ScannerErrors
+)
+
+// Reason codes carried in Report.ScannerErrors.
+const (
+	ReasonTimeout      = "timeout"       // still running at, or returned only after, the scan deadline
+	ReasonStillRunning = "still_running" // the previous scan's run of this scanner never returned, so it was not started again
+	ReasonPanic        = "panic"         // the scanner panicked
+	ReasonError        = "error"         // the scanner returned an error
 )
 
 const scanTimeout = 30 * time.Second
 
-// runScan runs one scanner in its own goroutine (tracked by wg) if enabled,
-// and records its status: ScannerDisabled without running it, ScannerOK if
-// fn returns nil, ScannerError if fn returns an error or panics -- or if
-// the scan deadline passed while it ran. Several scanners stop early on
-// ctx.Done() and return a partial or empty list with a nil error; calling
-// that "ok" would show a truncated result as a real "found nothing".
-func runScan(ctx context.Context, wg *sync.WaitGroup, enabled bool, name string, fn func() error, setStatus func(name, status string)) {
-	if !enabled {
-		setStatus(name, ScannerDisabled)
-		return
-	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		status := ScannerError // stays "error" if fn panics
-		defer func() {
-			recover() //nolint:errcheck
-			setStatus(name, status)
-		}()
-		if err := fn(); err == nil && ctx.Err() == nil {
-			status = ScannerOK
+// inFlight records scanners whose goroutine has not returned yet, across scan
+// cycles. A Go goroutine cannot be stopped from outside, so a scanner blocked
+// in a syscall (a hung filesystem, a FIFO) stays blocked; without this, every
+// cycle would start another copy and the stuck goroutines -- each holding an
+// OS thread while blocked in a syscall -- would pile up without bound. With
+// it, at most one goroutine per scanner name can ever be stuck (B-281).
+var inFlight = struct {
+	sync.Mutex
+	running map[string]bool
+}{running: map[string]bool{}}
+
+// scannerSpec is one scanner to run. fn returns the scanner's error and
+// stores its result only through commit.
+type scannerSpec struct {
+	name    string
+	enabled bool
+	fn      func(ctx context.Context, commit func(func())) error
+}
+
+type scanOutcome struct {
+	status string // ScannerOK or ScannerError
+	reason string // set when status is ScannerError
+}
+
+// collect runs specs in parallel and returns each scanner's status and, for
+// errors, its reason code. It never waits past ctx's deadline: a scanner
+// still running then is ReasonTimeout. Results are written only through
+// commit, which applies a write under mu only while collect has not yet
+// returned, so a straggler finishing later can never touch the report being
+// sent.
+func collect(ctx context.Context, specs []scannerSpec, mu *sync.Mutex, log *slog.Logger) (status, reasons map[string]string) {
+	status = make(map[string]string, len(specs))
+	reasons = map[string]string{}
+	closed := false
+	commit := func(write func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !closed {
+			write()
 		}
-	}()
+	}
+	fail := func(name, reason string) {
+		status[name] = ScannerError
+		reasons[name] = reason
+	}
+
+	type done struct {
+		name string
+		out  scanOutcome
+	}
+	results := make(chan done, len(specs)) // buffered: a straggler's send never blocks
+	pending := map[string]bool{}
+
+	for _, sp := range specs {
+		if !sp.enabled {
+			status[sp.name] = ScannerDisabled
+			continue
+		}
+		inFlight.Lock()
+		if inFlight.running[sp.name] {
+			inFlight.Unlock()
+			fail(sp.name, ReasonStillRunning)
+			log.Warn("scanner not started: its previous run has not returned", "scanner", sp.name)
+			continue
+		}
+		inFlight.running[sp.name] = true
+		inFlight.Unlock()
+		pending[sp.name] = true
+
+		go func(sp scannerSpec) {
+			out := scanOutcome{status: ScannerError, reason: ReasonPanic} // if fn panics
+			defer func() {
+				if p := recover(); p != nil {
+					// Full detail stays local (B-285, founder decision D1).
+					log.Error("scanner panicked", "scanner", sp.name, "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
+				}
+				inFlight.Lock()
+				delete(inFlight.running, sp.name)
+				inFlight.Unlock()
+				results <- done{sp.name, out}
+			}()
+			err := sp.fn(ctx, commit)
+			switch {
+			case err != nil:
+				out = scanOutcome{ScannerError, ReasonError}
+				log.Warn("scanner returned an error", "scanner", sp.name, "err", err)
+			case ctx.Err() != nil:
+				// Several scanners stop early on ctx.Done() and return a
+				// partial or empty list with a nil error: not "ok".
+				out = scanOutcome{ScannerError, ReasonTimeout}
+				log.Warn("scanner finished after the scan deadline; its result is not trusted", "scanner", sp.name)
+			default:
+				out = scanOutcome{status: ScannerOK}
+			}
+		}(sp)
+	}
+
+	for len(pending) > 0 {
+		select {
+		case d := <-results:
+			delete(pending, d.name)
+			status[d.name] = d.out.status
+			if d.out.status == ScannerError {
+				reasons[d.name] = d.out.reason
+			}
+		case <-ctx.Done():
+			// Take any result that is already waiting before declaring the
+			// rest timed out: select picks randomly when both are ready, and a
+			// scanner whose data is in the report must not be called "timeout".
+		drain:
+			for {
+				select {
+				case d := <-results:
+					delete(pending, d.name)
+					status[d.name] = d.out.status
+					if d.out.status == ScannerError {
+						reasons[d.name] = d.out.reason
+					}
+				default:
+					break drain
+				}
+			}
+			for name := range pending {
+				fail(name, ReasonTimeout)
+				log.Warn("scanner still running at the scan deadline; reporting without it", "scanner", name)
+			}
+			pending = nil
+		}
+	}
+
+	mu.Lock()
+	closed = true
+	mu.Unlock()
+	return status, reasons
 }
 
 // Build runs all enabled scanners in parallel and assembles a Report.
 // Scanners not listed in cfg.Detection.EnabledScanners are skipped;
 // an empty list means all scanners are enabled (default).
 func Build(cfg *config.Config) (*Report, error) {
+	return BuildWith(cfg, slog.Default())
+}
+
+// BuildWith is Build with the agent's logger, which receives full scanner
+// error and panic detail (never put in the report).
+func BuildWith(cfg *config.Config, log *slog.Logger) (*Report, error) {
+	if log == nil {
+		// A nil logger would panic inside collect's deferred recover, which
+		// nothing catches: never let logging take the agent down.
+		log = slog.Default()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
 	defer cancel()
 
@@ -115,106 +257,91 @@ func Build(cfg *config.Config) (*Report, error) {
 		},
 	}
 
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	report.ScannerStatus = make(map[string]string, 10)
-	setStatus := func(name, status string) {
-		mu.Lock()
-		report.ScannerStatus[name] = status
-		mu.Unlock()
-	}
-
 	det := &cfg.Detection // shorthand
-
-	// fn stores its own result (under mu) and returns the scanner's error.
-	scan := func(name string, fn func() error) {
-		runScan(ctx, &wg, det.IsEnabled(name), name, fn, setStatus)
+	spec := func(name string, fn func(ctx context.Context, commit func(func())) error) scannerSpec {
+		return scannerSpec{name: name, enabled: det.IsEnabled(name), fn: fn}
+	}
+	specs := []scannerSpec{
+		spec("models", func(ctx context.Context, commit func(func())) error {
+			r, err := models.Scan(ctx, models.ScanOptions{
+				MinSizeMB:      cfg.Detection.MinModelSizeMB,
+				ExtraScanPaths: cfg.Detection.ModelFileScanPaths,
+			})
+			if err == nil {
+				commit(func() { report.LocalModels = r })
+			}
+			return err
+		}),
+		spec("cloud_clients", func(ctx context.Context, commit func(func())) error {
+			r, err := cloud_clients.Scan(ctx)
+			if err == nil {
+				commit(func() { report.CloudClients = r })
+			}
+			return err
+		}),
+		spec("network_activity", func(ctx context.Context, commit func(func())) error {
+			r, err := network_activity.Scan(ctx)
+			if err == nil {
+				commit(func() { report.NetworkActivity = r })
+			}
+			return err
+		}),
+		spec("ai_processes", func(ctx context.Context, commit func(func())) error {
+			r, err := ai_processes.Scan(ctx)
+			if err == nil {
+				commit(func() { report.AIProcesses = r })
+			}
+			return err
+		}),
+		spec("ai_apps", func(ctx context.Context, commit func(func())) error {
+			r, err := ai_apps.Scan(ctx)
+			if err == nil {
+				commit(func() { report.AIApps = r })
+			}
+			return err
+		}),
+		spec("mcp_servers", func(ctx context.Context, commit func(func())) error {
+			r, err := mcp_servers.Scan(ctx)
+			if err == nil {
+				commit(func() { report.MCPServers = r })
+			}
+			return err
+		}),
+		spec("gpu", func(ctx context.Context, commit func(func())) error {
+			r, err := gpu.Scan(ctx)
+			if err == nil {
+				commit(func() { report.GPUs = r })
+			}
+			return err
+		}),
+		spec("python_envs", func(ctx context.Context, commit func(func())) error {
+			r, err := python_envs.Scan(ctx)
+			if err == nil {
+				commit(func() { report.PythonEnvs = r })
+			}
+			return err
+		}),
+		spec("nodejs_ai", func(ctx context.Context, commit func(func())) error {
+			r, err := nodejs_ai.Scan(ctx)
+			if err == nil {
+				commit(func() { report.NodeProjects = r })
+			}
+			return err
+		}),
+		spec("browser", func(ctx context.Context, commit func(func())) error {
+			r, err := browser.Scan(ctx)
+			if err == nil {
+				commit(func() { report.BrowserExtensions = r })
+			}
+			return err
+		}),
 	}
 
-	scan("models", func() error {
-		r, err := models.Scan(ctx, models.ScanOptions{
-			MinSizeMB:      cfg.Detection.MinModelSizeMB,
-			ExtraScanPaths: cfg.Detection.ModelFileScanPaths,
-		})
-		if err != nil {
-			return err
-		}
-		mu.Lock(); report.LocalModels = r; mu.Unlock()
-		return nil
-	})
-	scan("cloud_clients", func() error {
-		r, err := cloud_clients.Scan(ctx)
-		if err != nil {
-			return err
-		}
-		mu.Lock(); report.CloudClients = r; mu.Unlock()
-		return nil
-	})
-	scan("network_activity", func() error {
-		r, err := network_activity.Scan(ctx)
-		if err != nil {
-			return err
-		}
-		mu.Lock(); report.NetworkActivity = r; mu.Unlock()
-		return nil
-	})
-	scan("ai_processes", func() error {
-		r, err := ai_processes.Scan(ctx)
-		if err != nil {
-			return err
-		}
-		mu.Lock(); report.AIProcesses = r; mu.Unlock()
-		return nil
-	})
-	scan("ai_apps", func() error {
-		r, err := ai_apps.Scan(ctx)
-		if err != nil {
-			return err
-		}
-		mu.Lock(); report.AIApps = r; mu.Unlock()
-		return nil
-	})
-	scan("mcp_servers", func() error {
-		r, err := mcp_servers.Scan(ctx)
-		if err != nil {
-			return err
-		}
-		mu.Lock(); report.MCPServers = r; mu.Unlock()
-		return nil
-	})
-	scan("gpu", func() error {
-		r, err := gpu.Scan(ctx)
-		if err != nil {
-			return err
-		}
-		mu.Lock(); report.GPUs = r; mu.Unlock()
-		return nil
-	})
-	scan("python_envs", func() error {
-		r, err := python_envs.Scan(ctx)
-		if err != nil {
-			return err
-		}
-		mu.Lock(); report.PythonEnvs = r; mu.Unlock()
-		return nil
-	})
-	scan("nodejs_ai", func() error {
-		r, err := nodejs_ai.Scan(ctx)
-		if err != nil {
-			return err
-		}
-		mu.Lock(); report.NodeProjects = r; mu.Unlock()
-		return nil
-	})
-	scan("browser", func() error {
-		r, err := browser.Scan(ctx)
-		if err != nil {
-			return err
-		}
-		mu.Lock(); report.BrowserExtensions = r; mu.Unlock()
-		return nil
-	})
-
-	wg.Wait()
+	var mu sync.Mutex
+	status, reasons := collect(ctx, specs, &mu, log)
+	report.ScannerStatus = status
+	if len(reasons) > 0 {
+		report.ScannerErrors = reasons
+	}
 	return report, nil
 }

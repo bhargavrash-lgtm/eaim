@@ -366,10 +366,13 @@ type SpendTimeSeries struct {
 type PasteEventResp struct {
 	ID                string    `json:"id"`
 	DestinationDomain string    `json:"destination_domain"`
-	OccurredAt        time.Time `json:"occurred_at"`
-	ContentLength     *int32    `json:"content_length,omitempty"`
-	ContentHash       *string   `json:"content_hash,omitempty"`
-	OSUsername        *string   `json:"os_username,omitempty"`
+	OccurredAt        time.Time `json:"occurred_at"` // browser-reported, not verified
+	// ReceivedAt is the server's own receive time (B-284): unlike
+	// occurred_at, it can't be set by the reporting browser or agent.
+	ReceivedAt    time.Time `json:"received_at"`
+	ContentLength *int32    `json:"content_length,omitempty"`
+	ContentHash   *string   `json:"content_hash,omitempty"`
+	OSUsername    *string   `json:"os_username,omitempty"`
 }
 
 type PasteEventListResponse struct {

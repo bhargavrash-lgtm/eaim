@@ -128,7 +128,10 @@ export function PasteEventsPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   const pasteEventColumns: Column<PasteEvent>[] = [
-    { key: 'occurred_at', header: 'Timestamp', render: (e) => <span className="text-xs text-gray-400 font-mono whitespace-nowrap">{formatTs(e.occurred_at)}</span> },
+    // B-284: occurred_at comes from the reporting browser, so it's labelled
+    // as such; received_at is the server's own clock.
+    { key: 'occurred_at', header: 'Occurred (browser-reported)', render: (e) => <span className="text-xs text-gray-400 font-mono whitespace-nowrap">{formatTs(e.occurred_at)}</span> },
+    { key: 'received_at', header: 'Received', render: (e) => <span className="text-xs text-gray-400 font-mono whitespace-nowrap">{e.received_at ? formatTs(e.received_at) : '—'}</span> },
     { key: 'destination_domain', header: 'Domain', render: (e) => <span className="font-medium text-gray-900">{e.destination_domain}</span> },
     { key: 'content_length', header: 'Length', render: (e) => <span className="text-gray-600">{formatBytes(e.content_length)}</span> },
     { key: 'content_hash', header: 'Hash', render: (e) => e.content_hash ? <HashCell hash={e.content_hash} /> : <span className="text-gray-300">—</span> },

@@ -10,7 +10,8 @@ import { STALE_TIMES } from '@/lib/query'
 export interface PasteEvent {
   id: string
   destination_domain: string
-  occurred_at: string
+  occurred_at: string // browser-reported (B-284)
+  received_at?: string // server receive time (B-284; not in openapi.yaml yet)
   content_length?: number | null
   content_hash?: string | null
   os_username?: string | null
