@@ -22,7 +22,7 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 
   The next B-ID is B-291.
 - **Process change:** `CLAUDE.md` Conventions gains **"Standing code-review checks"**. Every reviewer pass flags a new error path that sends raw error text, panics or stacks across a trust boundary instead of a reason code; B-285's `scanner_errors` is the standard.
-- **For the founder:** the "confirm no orphaned link" rule, said to have been added earlier, **isn't in the repo**; a full grep found no such rule. A placeholder in the same bullet asks for its wording.
+- **The orphaned-link check is now recorded** (founder wording, 2026-10-01). It sits beside the raw-error-text check in `CLAUDE.md`'s "Standing code-review checks": "Confirm no previously-reachable user action or link became orphaned by this change" (origin: B-196 fix-up). It replaces the earlier placeholder.
 - No code changed.
 
 ## Active decision thread (2026-10-01) — B-281 + B-285 + B-284 DONE
@@ -2824,6 +2824,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-01 by Claude Code — added the founder-worded orphaned-action/link check to CLAUDE.md "Standing code-review checks" (replacing the placeholder). Docs only.
+
+Prior entry:
 2026-10-01 by Claude Code — minted B-286–B-290 (B-287 urgent); added CLAUDE.md "Standing code-review checks" (no raw error text across a trust boundary); flagged that the orphaned-link rule isn't in the repo. Docs only.
 
 Prior entry:
