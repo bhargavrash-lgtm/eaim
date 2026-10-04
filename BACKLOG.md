@@ -3915,4 +3915,27 @@ Choose in the brief.
 - **The spec drift stays with Architect-EAMI** (`API_CONTRACT_DRIFT.md` C15). Don't edit `openapi.yaml` here.
 **Severity:** Low–Medium. No security impact, but it hides whether alerting works at all. **Status:** QUEUED.
 
-## Next B-ID: B-293
+### B-293 — Agent applies remote config correctly (master-sequence item 8a) — **QUEUED, 2026-10-05 — investigation (Part A) first, build after founder approval**
+**Origin:** founder brief "Item 8a", 2026-10-05, from the scanner capability audit (2026-09-30, §1 and §4) and `DISCOVERY_ADMIN_INVESTIGATION.md` Part 1. Minted at founder direction 2026-10-05. B-293 was confirmed free against BACKLOG.md directly (the counter read B-293 and the number appeared nowhere else). A grep for open items covering remote-config replace, persist, first-scan fetch or reporting back found none. **B-277** (bounds) overlaps on validation only, and **B-278** item 4 (rewriting `agent.yaml` drops hand edits) constrains where state may be stored. Both are cross-referenced, not absorbed.
+**Why:** presets (B-269) are only real if the agent can apply them. Confirmed defects today:
+- remote config merges non-empty fields only, so it can never switch a scanner back on or clear a path;
+- the API rejects empty lists;
+- config lives in memory only and is lost on restart;
+- it is fetched only after a successful send, so the first scan after every restart runs on built-in defaults;
+- `max_report_size_bytes` is read and ignored;
+- `model_file_size_mb` can't be set remotely;
+- nothing tells the server which config the agent is actually running.
+
+**Scope** (the founder brief's Part A decides the details):
+- a full-effective-config wire format with a content-hash `config_version`;
+- replace semantics gated on `config_version`, for compatibility;
+- a persisted last-known-good state file, never a rewrite of the admin's YAML;
+- a fetch before the first scan, with a short timeout;
+- `config_version` and `config_source` in each report;
+- bounds, decided in Part A, possibly a minimal slice of B-277.
+
+**Out:** presets, Groups, new config fields beyond what Part A justifies, UI (the Endpoint Detail display is B-270). Unlinked endpoints still get no config (B-269's org default handles that).
+**Unblocks:** B-269 (preset content) and B-270 ("applied config"). No dependency on item 6.
+**Status:** QUEUED. Part A investigation in progress.
+
+## Next B-ID: B-294

@@ -106,6 +106,10 @@ anything.
 
 ## Phase 2 — Discovery admin design (build in this order, each satisfying items 6 and 7)
 
+- [ ] 8a. **B-293** — Agent applies remote config correctly: replace not
+      merge, persisted, fetched before first scan, applied config reported
+      back. Prerequisite for B-269's preset content and for B-270's
+      "applied config" display. No dependency on item 6 (Groups).
 - [ ] 8. **B-269** — Discovery presets, group-based assignment,
       multi-group precedence resolved before build.
       Splitting: preset DEFINITION (name, version, scanner content,
@@ -113,7 +117,11 @@ anything.
       dependency on item 6. Preset ASSIGNMENT to a fleet via Groups still
       waits on item 6's schema resolution. Do not build group-based
       assignment before item 6 closes.
+      **Depends on 8a (B-293):** a preset is only real if the agent can
+      apply it (replace semantics, persistence, first-scan fetch).
 - [ ] 9. **B-270** — Endpoint Detail read-only effective-config view.
+      **Depends on 8a (B-293):** "last config actually applied" needs the
+      agent to report the config it is running.
 - [ ] 10. Shadow-agent surfacing + "Onboard as Governed Agent" flow.
 - [ ] 11. Model characterization (Ollama extension).
 - [ ] 12. **B-267** — Discovery Probe + real Discovery Setup page.
