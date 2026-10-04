@@ -63,7 +63,7 @@ anything.
       new page. **Also (founder, 2026-09-30):** show the agent-link control on
       an endpoint with no scan report. Don't hide it as the current drawer
       does; that's where manual linking is most useful.
-      **Handoff brief done 2026-10-05** (`B-252_C2_VERIFICATION.md`):
+      **Handoff brief done 2026-10-05** — `9e5dc02` (`B-252_C2_VERIFICATION.md`):
       - Endpoint Detail carries all five honest states.
       - The link control is shown on report-less endpoints.
       - Minimal C3 parity was confirmed live, and then Discover was retired.

@@ -2956,7 +2956,7 @@ Choices, for the founder:
   - **Done 2026-09-29** (`B-252_C0_VERIFICATION.md`): (a) `EndpointDrawer`/`LinkedAgentControl` extracted to `components/endpoints/`; (c) UI role-gating parity via `lib/rbac.ts`, including approver Overview-only on Agent Detail and the operator note-only tool panel.
   - **(b) moved to C1** (founder decision 2026-09-29): delete the orphaned `AgentAssetPanel`/`ToolAssetPanel` as part of C1, not as a separate brief. Nothing imports either file.
 - [x] **C1 — DONE 2026-09-30** (`B-252_C1_VERIFICATION.md`; filter named `?id=`, a deliberate deviation from the approved `agent_id` wording, reasoning recorded). Assets agent rows open Agent Detail at its new `/assets/agents/:id` home (redirect from `/gateway/agents/:id`), with an Agent Classification tab. **Agent cross-links from C10 ship here.** **Also deletes the orphaned `components/cmdb/AgentAssetPanel.tsx` and `ToolAssetPanel.tsx`** (moved from C0(b), founder 2026-09-29).
-- [x] **C2 — DONE 2026-10-05** (`B-252_C2_VERIFICATION.md`). Endpoint Detail at `/assets/endpoints/:id`: Overview (item 4's honest states), Agent Link (shown even with no report), Classification (shared `AssetClassificationTab`), approver role state, licence-off pending state. No Connections tab (C6). The read-only effective-config view stays **B-270** (master-sequence item 9). Shipped with the **Settings → Admin rename** (`/settings` → `/admin` redirect keeps `?tab=`) and the Discovery Hub and CMDB placeholder tabs (the first real §7.8).
+- [x] **C2 — DONE 2026-10-05** — `9e5dc02` (`B-252_C2_VERIFICATION.md`). Endpoint Detail at `/assets/endpoints/:id`: Overview (item 4's honest states), Agent Link (shown even with no report), Classification (shared `AssetClassificationTab`), approver role state, licence-off pending state. No Connections tab (C6). The read-only effective-config view stays **B-270** (master-sequence item 9). Shipped with the **Settings → Admin rename** (`/settings` → `/admin` redirect keeps `?tab=`) and the Discovery Hub and CMDB placeholder tabs (the first real §7.8).
 - [~] **C3** Assets parity for endpoints (OS, last seen, per-domain counts, server filters). **Folds B-228/B-229. Needs Architect contract authorization before its brief; measure query cost in its Part A.**
   - **Minimal C3 DONE 2026-10-05** (`B-252_C2_VERIFICATION.md`, founder D1–D3):
     - `GET /v1/cmdb/assets` endpoint rows gain nullable endpoint fields, plus the server-side `os` filter (**B-228 done**).
@@ -2968,7 +2968,7 @@ Choices, for the founder:
     - a sort parameter (Assets sorts by name; Discover sorted by last seen);
     - a fleet-scale cost measurement;
     - the openapi entries (NOTES.md).
-- [x] **C4 — DONE 2026-10-05** (`B-252_C2_VERIFICATION.md`). Discover retired only after parity was confirmed live (8/8 endpoints, cell by cell, against a pre-change baseline):
+- [x] **C4 — DONE 2026-10-05** — `9e5dc02` (`B-252_C2_VERIFICATION.md`). Discover retired only after parity was confirmed live (8/8 endpoints, cell by cell, against a pre-change baseline):
   - `/discover` → `/assets?kind=endpoint`;
   - nav entry removed;
   - `DiscoverPage.tsx` and `EndpointDrawer.tsx` deleted;
