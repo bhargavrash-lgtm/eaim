@@ -1516,6 +1516,13 @@ No schema/migration work (`policies.org_id` has existed since the original schem
 **Provenance — a real gap found and corrected, not a routine new idea:** "Third-party public API" was one of four original strategic epics discussed early in this session, alongside IdP/SSO, agentless discovery, and the VM appliance — of the four, only the VM appliance was ever actually logged in the repo (**B-053, DONE**). This epic existed only in prior conversation and externally-generated reference documents (e.g. the ServiceNow battle card referenced in B-136), never committed to `BACKLOG.md`/`CONTEXT.md`/`ROADMAP.md` until now — confirmed by direct search of all three files (plus `BUILT.md`/`CHANGELOG.md`) before logging, not assumed. **The other two (IdP/SSO, agentless discovery) had the identical gap** — also discussed, also never logged anywhere in the repo at the time this entry was first written; confirmed by the same direct search. Now logged properly as **B-138** (IdP/SSO) and **B-139** (agentless discovery) — as of 2026-08-29, all four of the original strategic epics are durably recorded in the repo.
 **Acceptance criteria:** none yet — this entry is a scoping placeholder. First step for whoever picks this up is deciding what data/control surface the API exposes in v1 (read-only governance data first is the obvious lower-risk starting scope, vs. write access to policies/approvals) and whether `api_keys` is reused or a new credential type is needed.
 **Dependencies:** `api_keys` (B-098) as the likely credential foundation — extends, does not modify, unless investigation finds it unsuitable.
+**Further dependencies (added 2026-10-05, founder direction)** — must be resolved before any public surface ships:
+- **B-243**: a single global service key authorizes writes into any org.
+- **B-287**: no request-size limit on direct API ingest with the service key.
+- **B-253**: the RBAC split. **DONE 2026-09-29.** Its role model is the authorization baseline the public API must expose rather than bypass. Per-route role requirements are still undocumented (`API_CONTRACT_DRIFT.md` C17).
+- **The `API_CONTRACT_DRIFT.md` cleanup**: a public contract can't be published from a spec with 54 undocumented routes.
+
+**This remains an unscoped epic:** no investigation, no design, no acceptance criteria. `API_CONVENTION.md` §9's post-B-137 versioning rules are forward-looking until it is scoped.
 **Status:** logged 2026-08-29. Discussed, never investigated, never previously logged in the repo. B-ID confirmed free (counter stood at B-137, no collision) before minting.
 
 ### B-138 — EPIC: Identity provider / SSO integration (Azure AD, Okta) — **logged, investigation not started**
@@ -3887,6 +3894,25 @@ Choose in the brief.
   - Checked 2026-10-05: **the tile isn't broken.** There is no global 403 handler (no toast, no logout), and `MetricCard` shows "Endpoints Monitored: —".
   - But "—" reads as "unknown", not "not available for your role", and two wasted 403s are made on every Dashboard load.
   - Fix: gate the query on `can.viewEndpoints`, and hide the tile or show the role note for approvers. Do the same check for the other approver-unreadable tiles (the B-216 note).
+- [ ] **The Agent Link tab says "No automatic match exists…" even when a link is set** (added 2026-10-05, the origin of master-sequence item 5).
+  - `LinkedAgentControl.tsx`'s footnote is unconditional, so under a populated control it reads as "unlinked".
+  - Fix: show that note only when unlinked. When linked, show "Linked to <agent>" (the agent's name), for both the admin select and the read-only view.
 **Severity:** Low. No data exposure; cosmetic or recoverable. **Status:** QUEUED.
 
-## Next B-ID: B-292
+### B-292 — Notification test always shows as failed: UI reads `{success, error}`, handler returns `{sent, reason}` — **QUEUED (Low–Medium), 2026-10-05**
+**Origin:** B-238 code review I1 (pre-existing), re-checked into `API_CONTRACT_DRIFT.md` C15. Minted at founder direction 2026-10-05. B-292 was confirmed free against BACKLOG.md directly (the counter read B-292 and the number appeared nowhere else). A grep found no open item for it: the B-238 entry recorded it as "still unminted".
+**Problem** (checked in code 2026-10-05):
+- `POST /v1/settings/notifications/test` (`settings.go`) returns `TestNotificationResp{sent, reason}`.
+- Admin → Notifications (`AdminPage.tsx` `onTest`) reads `result.success` and `result.error`, the shape `api/openapi.yaml` documents.
+- `success` is never present, so **every outcome shows as a red error toast reading "Test sent."**
+  - A working Slack webhook that really delivered is shown as failed.
+  - A real failure loses its reason (`not_configured`, `slack_not_configured`, `smtp_not_configured`, or the fixed delivery-failure reason).
+- An admin can't tell from the UI whether notifications work.
+**Fix (UI/handler; not the spec):**
+- Make the UI read `{sent, reason}`. Show a success toast when `sent`. When not sent, show an error toast with a fixed, human message per reason code. The reason codes are already fixed strings; keep it that way and don't echo raw errors (standing review check).
+- Or change the handler to the documented shape. Pick one in the brief; the UI-reads-handler option keeps B-238's reason codes.
+- Add a test pinning the response shape.
+- **The spec drift stays with Architect-EAMI** (`API_CONTRACT_DRIFT.md` C15). Don't edit `openapi.yaml` here.
+**Severity:** Low–Medium. No security impact, but it hides whether alerting works at all. **Status:** QUEUED.
+
+## Next B-ID: B-293

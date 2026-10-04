@@ -71,13 +71,12 @@ anything.
       - The `GET /v1/cmdb/assets` extension is item 7's first real
         implementation (precedent in §6 of the verification record). Item 7
         itself stays open until its written convention is locked.
-- [ ] 5. Windows endpoint governed-agent link trace.
-      **Read-only check 2026-10-05: link exists, and the UI shows it. No bug found, recommend closing.**
-      - Both Windows `Bhargav_tej` endpoints are linked in the database: `db2e7ea8…` → `bhargav-demo-endpoint` and `0392716a…` → `b164-b165-governed-liveverify`.
-      - `GET /v1/endpoints/{id}` returns that `gateway_agent_id`, and the Agent Link tab's options (`GET /v1/gateway/agents`, unpaginated, 10 agents) contain both agents. So the tab renders the linked agent, not "Not linked".
-      - This was traced through code and the database, **not opened in a browser**: no login was available without creating a fixture user, which the brief's read-only rule excluded.
-      - The control's footnote ("No automatic match exists…") is always shown, even when a link exists. It is accurate, but can read as "unlinked".
-      - Not ticked: awaiting founder confirmation to close.
+- [x] 5. Windows endpoint governed-agent link trace. Done 2026-10-05 — `429d791`
+      (closed at founder direction). **No link bug:**
+      - Both `Bhargav_tej` endpoints are linked in the database (`db2e7ea8…` → `bhargav-demo-endpoint`, `0392716a…` → `b164-b165-governed-liveverify`).
+      - The Agent Link tab reads that link (`GET /v1/endpoints/{id}` → `gateway_agent_id`, rendered against the unpaginated agent list).
+      - The original concern was the always-on "No automatic match exists…" note under a populated control. That copy fix is now in B-291.
+      - Verified by a database and code trace, not a live browser.
 
 ---
 
@@ -97,7 +96,11 @@ anything.
       - Open at lock: OpenAPI-first or same-epic; deprecation length (deferred to B-137).
       - B-137 is a scoping placeholder with no design.
       - **Not ticked.**
-- [ ] 7a. **Contract drift hand-off.** `API_CONTRACT_DRIFT.md` (54 undocumented routes, 3 spec-only operations, 17 field/response mismatches) **goes to Architect-EAMI before item 8 starts.**
+- [ ] 7a. **Contract drift hand-off.** `API_CONTRACT_DRIFT.md` (3 documented operations that don't exist as documented, 54 undocumented routes, 17 field/response mismatches) **goes to Architect-EAMI before item 8 starts.**
+      **The gate is hand-off plus acknowledgement, not completion.**
+      - Item 8 may start once the file has been handed to Architect-EAMI *and* Architect-EAMI has acknowledged receiving it.
+      - Fixing the drift in `api/openapi.yaml` is **not** a precondition for item 8. It proceeds on Architect-EAMI's own schedule.
+      - New drift keeps being appended under `API_CONVENTION.md` §10.
 
 ---
 

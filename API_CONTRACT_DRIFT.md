@@ -4,18 +4,27 @@
 **Hand-off rule (master sequence):** this list goes to Architect-EAMI **before item 8 starts**.
 **Consolidated:** 2026-10-05 by Claude Code, from NOTES.md, BACKLOG.md and every `*_VERIFICATION.md`. This is now the single drift log: new drift is added here, not to NOTES.md (`API_CONVENTION.md` §7, §9).
 **Method:**
-- §A was **generated** by diffing every `r.Get/Post/Put/Patch/Delete` route in `eami-api/internal/api/router.go` against the `paths:` operations in `api/openapi.yaml` (path parameters normalised).
-- §B and §C entries were each **re-checked against the current `openapi.yaml`** on 2026-10-05. Entries already fixed in the spec are dropped, not carried.
+- §A and §B were **generated** by diffing every `r.Get/Post/Put/Patch/Delete` route in `eami-api/internal/api/router.go` against the `paths:` operations in `api/openapi.yaml` (path parameters normalised).
+- §C entries were each **re-checked against the current `openapi.yaml`** on 2026-10-05. Entries already fixed in the spec are dropped, not carried.
+- **Order:** §A comes first because a generated client calling those operations fails outright (404 or 405), which is worse than a missing entry.
 - Routes served by `eami-gateway` (`/v1/gateway/tokens`, `/v1/gateway/tokens/{jti}/revoke`, `/v1/mcp/sse`, `/v1/mcp/messages`) are documented in the same spec and are not drift.
 
 **Counts:** 118 eami-api routes vs 71 documented operations.
-- §A: **54 routes are served but undocumented** (53 plus `/health`).
-- §B: 3 operations are documented but not served as documented.
+- §A: 3 operations are documented but don't exist as documented.
+- §B: **54 routes are served but undocumented** (53 plus `/health`).
 - §C: 17 field, parameter or response mismatches on documented routes.
 
 ---
 
-## A. Routes served by eami-api but absent from `openapi.yaml` (54)
+## A. Documented operations that don't exist as documented (3) — fix or remove first
+
+| # | Spec says | Reality | Note |
+|---|---|---|---|
+| A1 | `GET /v1/gateway/tools/{toolId}` | No such route in eami-api | B-252 C5 (Tool Detail) needs a single-tool read. Decide whether to build it or drop it from the spec. |
+| A2 | `GET /v1/gateway/nodes/{nodeId}` | No such route (only list and delete) | `gateway_nodes` has no real writer (B-080). |
+| A3 | `POST /v1/memory/episodes/search` | Served as **`GET`** (and the `/v1/gateway/episodes/search` alias) | Method mismatch. A generated-client call would 405. |
+
+## B. Routes served by eami-api but absent from `openapi.yaml` (54)
 
 | Area | # | Routes |
 |---|---|---|
@@ -44,15 +53,7 @@ Each group's origin, where one is recorded:
 - **Auth and users:** B-212.
 - **Model pricing:** the B-106-class note in BACKLOG.
 - **Reorder:** the `PUT` alias is undocumented; `POST` is documented (see C10).
-- **`GET /v1/memory/episodes/search`:** see B3.
-
-## B. Documented, but not served as documented (3)
-
-| # | Spec says | Reality | Note |
-|---|---|---|---|
-| B1 | `GET /v1/gateway/tools/{toolId}` | No such route in eami-api | B-252 C5 (Tool Detail) needs a single-tool read. Decide whether to build it or drop it from the spec. |
-| B2 | `GET /v1/gateway/nodes/{nodeId}` | No such route (only list and delete) | `gateway_nodes` has no real writer (B-080). |
-| B3 | `POST /v1/memory/episodes/search` | Served as **`GET`** (and the `/v1/gateway/episodes/search` alias) | Method mismatch. A generated-client call would 405. |
+- **`GET /v1/memory/episodes/search`:** see A3.
 
 ## C. Field, parameter and response mismatches on documented routes (17)
 
@@ -72,7 +73,7 @@ Each group's origin, where one is recorded:
 | C12 | `POST /v1/auth/api-keys` and `POST /v1/gateway/tokens` | `CreateAPIKeyRequest` / `APIKeyResp` lack `agent_id` and `expires_at`. `AITokenResponse` lacks `jti`. `ToolSpend` (FinOps) is undocumented. | B-098, B-108 | **B-106** |
 | C13 | `POST /v1/gateway/agents` | Missing the `409 conflict` for a duplicate name | B-074 (NOTES 2026-08-19) | here |
 | C14 | `POST /v1/users/invite` | Description says the link expires after 72 h; the code uses 48 h. The 201 schema omits `user` and `expires_at`. The 409 description is inaccurate. | B-212, B-242 review | **B-213** (72 h text) + here |
-| C15 | `POST /v1/settings/notifications/test` | Spec and UI expect `{success, error}`; the handler returns `{sent, reason}`, so the UI shows every result as an error. **This is a user-visible bug, not just a documentation gap.** | B-238 review I1 | here (needs a fix decision: handler or spec + UI) |
+| C15 | `POST /v1/settings/notifications/test` | Spec and UI expect `{success, error}`; the handler returns `{sent, reason}`, so the UI shows every result as an error. **This is a user-visible bug, not just a documentation gap.** | B-238 review I1 | **B-292** (UI/handler fix); the spec half stays here for Architect-EAMI |
 | C16 | `GET /v1/audit/export` | Real optional filters (`agent_name`, `tool_name`, `decision`, RFC3339 `from`/`to`) and the bounded-error responses are undocumented | B-221 | **B-222** |
 | C17 | All routes | **No per-route role requirements are documented.** B-253 made several routes, and some PATCH fields, admin-only. | B-253 (NOTES 2026-09-29) | here |
 
@@ -82,4 +83,4 @@ Each group's origin, where one is recorded:
 
 - **Adding drift:** a new row in the right section, with source and tracking ID, in the same commit as the code change (`API_CONVENTION.md` §7, §9).
 - **When Architect-EAMI fixes a row:** delete it here in the same commit as the `openapi.yaml` change, and regenerate `eami-ui/src/api/schema.ts`. Where a UI hook uses the `apiFetch` escape hatch only because of that row, switch it to the generated client.
-- **Re-generate §A:** diff `router.go`'s routes against `openapi.yaml`'s `paths:`. The method is described above; the script is not committed.
+- **Re-generate §A and §B:** diff `router.go`'s routes against `openapi.yaml`'s `paths:`. The method is described above; the script is not committed.

@@ -60,6 +60,14 @@
 - **After B-137 exposes a public surface:** a breaking change needs a new major version (`/v2` for the affected surface), plus a deprecation period for the old one. The length of that period is set when B-137 is designed.
 - **Exception: security fixes** may break a contract immediately at any stage. Each one must be documented: what changed, why, and which consumers were affected. That goes in `API_CONTRACT_DRIFT.md`, and also in the release notes once a public surface exists.
 
+## 10. Drift is recorded in the same commit
+
+- **Any commit that adds or changes an API route, parameter, field, response shape or status code appends a row to `API_CONTRACT_DRIFT.md` in that same commit**, unless the same commit also updates `api/openapi.yaml` through Architect-EAMI.
+  - Each row names the route or schema, the drift, its source (B-ID) and its tracking ID.
+  - A commit that removes drift (Architect-EAMI fixed the spec) deletes the row in the same commit.
+- **Reviewers check it.** Every mandatory code-review pass on a change that touches `eami-api/internal/api/router.go`, a handler's request or response types, or a store type serialised to JSON confirms that the matching `API_CONTRACT_DRIFT.md` row exists. A missing row is a review finding, the same as a missing test.
+- Why: before this rule, drift was logged ad hoc in NOTES.md, BACKLOG.md and verification files, and the spec fell 54 routes behind without anyone tracking it.
+
 ---
 
 ## Open for the founder at lock time

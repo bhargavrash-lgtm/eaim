@@ -8,7 +8,22 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-05, newest) — Item 7 convention drafted; drift consolidated; B-291 minted; item 5 checked
+## Active decision thread (2026-10-05, newest) — Item 5 closed; B-292 minted; B-137 deps; drift gate clarified
+
+- **Item 5 ticked** (founder direction; evidence `429d791`). There was no link bug: both `Bhargav_tej` endpoints are linked and the tab reads the link. The concern was the always-on "No automatic match exists" note. Verified by DB and code trace, not a live browser.
+- **B-291 gains a fourth fix:** show the note only when unlinked, and "Linked to <agent>" when linked.
+- **Minted B-292** (Low–Medium): the notification test always shows a red "Test sent." toast.
+  - The UI reads `{success, error}`; the handler returns `{sent, reason}`.
+  - A working Slack webhook looks failed, and real failure reasons are lost.
+  - The fix is in the UI or handler; the spec half stays with Architect-EAMI (drift C15).
+  - The next B-ID is **B-293**.
+- **B-137:** dependency line added (B-243, B-287, B-253 done as the baseline, and the drift cleanup). It remains an unscoped epic.
+- **Item 7a gate:** the drift file handed to Architect-EAMI **and acknowledged**, not completed.
+  - In the drift file, the 3 documented operations that don't exist as documented now come first, as §A.
+- **`API_CONVENTION.md` §10:** any commit adding or changing a route or field appends to `API_CONTRACT_DRIFT.md` in the same commit, and reviewers check it.
+- **Item 7 still "awaiting founder lock".** Docs only.
+
+## Active decision thread (2026-10-05) — Item 7 convention drafted; drift consolidated; B-291 minted; item 5 checked
 
 - **Item 7:** `API_CONVENTION.md` drafted.
   - Principles 1–7 are verbatim from `B-252_C2_VERIFICATION.md` §6. The source has **seven**; the C2 completion report's summary of "six" left out #6, authorization and licensing.
@@ -2872,6 +2887,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-05 by Claude Code — item 5 closed (`429d791`); B-291 +Agent Link note; B-292 minted (notification test); B-137 dependencies; item 7a gate = handed and acknowledged; drift §A reordered; API_CONVENTION §10 same-commit drift rule. Docs only. Marker cleared.
+
+Prior entry:
 2026-10-05 by Claude Code — item 7 convention drafted (`API_CONVENTION.md`, awaiting lock); drift consolidated (`API_CONTRACT_DRIFT.md`, item 7a); B-291 minted; sort folded into C3; re-measure on B-132; item 5 checked (linked, no bug). Docs only. Marker cleared.
 
 Prior entry:
