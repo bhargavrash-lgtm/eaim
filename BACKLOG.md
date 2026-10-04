@@ -1473,6 +1473,10 @@ No schema/migration work (`policies.org_id` has existed since the original schem
 **Acceptance criteria:** none yet — this entry is a scoping placeholder. First step for whoever picks this up is investigating (c) above (the only genuinely unchecked item of the three) and confirming (a)/(b)'s existing severity assessments still hold, before any brief is written.
 **Dependencies:** B-070, B-043, B-100 (all investigate-not-modify at this stage). Blocks nothing — explicitly not to be built until a real customer need materializes.
 **Status:** logged 2026-08-29 from a scalability/DR/integrations discussion. Zero investigation started.
+**Attached 2026-10-05 (founder direction): fleet-scale query re-measure.**
+- B-252 C3's per-page CMDB endpoint enrichment (`enrichCMDBEndpoints`) and the `GET /v1/cmdb/assets` union were measured only at dev scale: 8 endpoints, 4,945 reports, 0.6 ms per page (`B-252_C2_VERIFICATION.md` §3).
+- B-196 Brief 1's security review also noted that each list call runs the three-table UNION three times (total, page, per-type counts), with no index on the `ci_type_id` columns.
+- Re-measure both with `EXPLAIN (ANALYZE, BUFFERS)` against a seeded large org (thousands of endpoints, a realistic report history) before any horizontal-scale work is scoped.
 
 ### B-133 — Data lifecycle/retention strategy for ever-growing TimescaleDB hypertables — **logged, investigation not started**
 **Objective:** `audit_log` (append-only by design — this table is never meant to shrink, per its own tamper-evident hash-chain purpose), `token_usage`, and `paste_events` all grow unbounded with no retention policy, compression, or archival strategy defined anywhere in the codebase. Needs investigation into a real retention policy (what can safely age out vs. what must never be deleted — `audit_log` likely never, the other two plausibly compactable/archivable), TimescaleDB's native compression features (columnar compression on aged chunks, already available in the `timescale/timescaledb-ha:pg16` image already in use), and connection-pooling behavior under sustained load as data volume grows.
@@ -2965,7 +2969,10 @@ Choices, for the founder:
     - Query cost measured: 0.6 ms per page on dev data.
   - **Still open:**
     - **B-229** (`has_ai`/`has_local_model`), out per founder D2;
-    - a sort parameter (Assets sorts by name; Discover sorted by last seen);
+    - a sort parameter (Assets sorts by name; Discover sorted by last seen). **Folded here, not minted (2026-10-05):** it is the same route and the same C3 parity gap.
+      - Checked: Assets' column headers don't sort at all today. No column sets `sortable`, so a click does nothing, and the server orders by `lower(name), asset_kind, id`.
+      - There is no page-only sort bug today. `DataTable`'s sort is client-side over the rows it is given, though, so marking an Assets column `sortable` *would* sort only the loaded page. Don't do that as a shortcut.
+      - Build it to `API_CONVENTION.md` §8: server-side `sort` + `order`, allowlisted per resource, 400 on unknown values, tie-break on `id`, nulls last. Default: Endpoints view by `last_seen desc` (Discover's order), pending founder confirmation.
     - a fleet-scale cost measurement;
     - the openapi entries (NOTES.md).
 - [x] **C4 — DONE 2026-10-05** — `9e5dc02` (`B-252_C2_VERIFICATION.md`). Discover retired only after parity was confirmed live (8/8 endpoints, cell by cell, against a pre-change baseline):
@@ -3866,4 +3873,20 @@ Choose in the brief.
 
 **Dependencies:** B-281 (done). B-014 (macOS hardware) for live verification.
 
-## Next B-ID: B-291
+### B-291 — Assets/Endpoint/Dashboard UI rough edges (grouped) — **QUEUED (Low), 2026-10-05**
+**Origin:** B-252 C2 code review (P3, P4) plus the approver Dashboard note first seen in B-216 (2026-09-23, never given an ID). Minted at founder direction 2026-10-05. B-291 was confirmed free against BACKLOG.md directly (the counter read B-291 and the number appeared nowhere else), and a grep found no open item covering any of the three.
+- [ ] **Assets page number isn't clamped** when a filter or refetch shrinks the total below the current page.
+  - Since B-252 C3 the page is in the URL, so a stale `?page=` link (or a filter change racing a refetch) can land on an empty page.
+  - It shows "No assets match these filters" even though matches exist on earlier pages, until the user clicks Previous.
+  - Fix: clamp to the last page when `page > totalPages` after a load, `replace`-ing the URL.
+- [ ] **Endpoint Detail's detection sections collapse on refresh.**
+  - `EndpointDetections`' per-section open state is local and resets when the endpoint query refetches. This is pre-existing: moved verbatim from the drawer.
+  - Fix: key the open state by section name so it survives a refetch, or lift it.
+- [ ] **Dashboard requests `GET /v1/endpoints?per_page=1` as an approver.**
+  - Approvers can't read endpoints (B-253), so the request gets 403, and is retried once (React Query `retry: 1`).
+  - Checked 2026-10-05: **the tile isn't broken.** There is no global 403 handler (no toast, no logout), and `MetricCard` shows "Endpoints Monitored: —".
+  - But "—" reads as "unknown", not "not available for your role", and two wasted 403s are made on every Dashboard load.
+  - Fix: gate the query on `can.viewEndpoints`, and hide the tile or show the role note for approvers. Do the same check for the other approver-unreadable tiles (the B-216 note).
+**Severity:** Low. No data exposure; cosmetic or recoverable. **Status:** QUEUED.
+
+## Next B-ID: B-292

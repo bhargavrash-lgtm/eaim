@@ -133,3 +133,8 @@ Found by the B-236 reviews. They predate B-236 and sit outside its diff. At foun
 - **`EndpointDetections`' collapsible sections reset their open state on refetch** (review P4, pre-existing; moved verbatim from the drawer).
 - **The Dashboard requests `GET /v1/endpoints?per_page=1` for approvers**, who get 403 (B-253). This is pre-existing. The tile should be gated on `can.viewEndpoints`, like Endpoint Detail now is.
 - **C3 query cost was measured only at dev scale** (8 endpoints, 4,945 reports; 0.6 ms per page). Re-measure once a large seeded org exists.
+
+## 2026-10-05 — `api/openapi.yaml` drift consolidated
+
+- Every drift note above (and in BACKLOG.md and the verification files) is consolidated, re-checked against the current spec, into **`API_CONTRACT_DRIFT.md`**, plus a generated router-vs-spec route diff.
+- New drift goes there, not here (`API_CONVENTION.md` §7, §9). The entries above are kept as history.

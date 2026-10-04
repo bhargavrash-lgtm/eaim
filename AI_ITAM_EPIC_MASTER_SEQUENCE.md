@@ -72,6 +72,12 @@ anything.
         implementation (precedent in §6 of the verification record). Item 7
         itself stays open until its written convention is locked.
 - [ ] 5. Windows endpoint governed-agent link trace.
+      **Read-only check 2026-10-05: link exists, and the UI shows it. No bug found, recommend closing.**
+      - Both Windows `Bhargav_tej` endpoints are linked in the database: `db2e7ea8…` → `bhargav-demo-endpoint` and `0392716a…` → `b164-b165-governed-liveverify`.
+      - `GET /v1/endpoints/{id}` returns that `gateway_agent_id`, and the Agent Link tab's options (`GET /v1/gateway/agents`, unpaginated, 10 agents) contain both agents. So the tab renders the linked agent, not "Not linked".
+      - This was traced through code and the database, **not opened in a browser**: no login was available without creating a fixture user, which the brief's read-only rule excluded.
+      - The control's footnote ("No automatic match exists…") is always shown, even when a link exists. It is accurate, but can read as "unlinked".
+      - Not ticked: awaiting founder confirmation to close.
 
 ---
 
@@ -85,6 +91,13 @@ anything.
       real state, trace CMDB's exact endpoint shape, confirm real
       versioning practice. Deliverable: one written convention every
       Phase 2 item follows.
+      **Convention drafted, awaiting founder lock (2026-10-05):** `API_CONVENTION.md`.
+      - Principles 1–7 are copied from B-252 C2's §6.
+      - Added: §8 sorting, §9 breaking changes.
+      - Open at lock: OpenAPI-first or same-epic; deprecation length (deferred to B-137).
+      - B-137 is a scoping placeholder with no design.
+      - **Not ticked.**
+- [ ] 7a. **Contract drift hand-off.** `API_CONTRACT_DRIFT.md` (54 undocumented routes, 3 spec-only operations, 17 field/response mismatches) **goes to Architect-EAMI before item 8 starts.**
 
 ---
 
