@@ -8,7 +8,25 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-05, newest) — Drift-row check added to standing code-review checks
+## Active decision thread (2026-10-05, newest) — Item 8a (B-293): Part 0 done, Part A reported, awaiting approval
+
+- **Part 0** (`a6f3b48`): item 8a was inserted before item 8, with dependency notes on items 8 and 9, and B-293 minted (confirmed free). The CLAUDE.md drift-row check the brief asked for was already in place (`c716547`).
+- **Part A** (`5fbb434`): `B-293_PART_A_INVESTIGATION.md`.
+  - Traced defects confirmed. One new finding: a data race between the models scanner goroutine and `FetchConfig` on the shared config pointer.
+  - Proposal:
+    - a full-config wire format with a content-hash `config_version` (`c1:` + sha256 of canonical JSON);
+    - replace only on a versioned, complete, hash-verified response, otherwise today's merge;
+    - a per-OS state file with ownership/ACL checks, including the Windows DACL and pre-created-directory risk;
+    - a fetch with a 10 s cap before every scan;
+    - per-scan config snapshots;
+    - `config_version`, `config_source` and `config_error` in reports;
+    - three detail-only Endpoint fields;
+    - a minimal B-277 slice;
+    - enforce `max_report_size_bytes` with a visible `too_large`;
+    - add `model_file_size_mb` (migration 000027).
+- **Founder decisions pending:** D-a to D-g. **The marker stays set**: the build is part of this brief, waiting on approval.
+
+## Active decision thread (2026-10-05) — Drift-row check added to standing code-review checks
 
 - **CLAUDE.md "Standing code-review checks"** gains a third check, founder wording, next to the raw-error-text and orphaned-link checks: "Confirm any commit that adds or changes an API route, field, response or status code also appends a row to API_CONTRACT_DRIFT.md in the same commit. A missing row is a review finding. See API_CONVENTION.md §10."
 - This makes `API_CONVENTION.md` §10's reviewer rule binding on every mandatory review pass, not just a convention-document rule.
@@ -2893,6 +2911,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-05 by Claude Code — item 8a (B-293): Part 0 committed; Part A investigation reported (`B-293_PART_A_INVESTIGATION.md`), decisions D-a to D-g pending. No code. Marker still set (build awaits approval).
+
+Prior entry:
 2026-10-05 by Claude Code — added the API_CONTRACT_DRIFT.md same-commit check to CLAUDE.md "Standing code-review checks" (founder wording; API_CONVENTION.md §10). Docs only.
 
 Prior entry:

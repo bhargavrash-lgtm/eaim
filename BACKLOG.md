@@ -3936,6 +3936,6 @@ Choose in the brief.
 
 **Out:** presets, Groups, new config fields beyond what Part A justifies, UI (the Endpoint Detail display is B-270). Unlinked endpoints still get no config (B-269's org default handles that).
 **Unblocks:** B-269 (preset content) and B-270 ("applied config"). No dependency on item 6.
-**Status:** QUEUED. Part A investigation in progress.
+**Status:** QUEUED. **Part A done 2026-10-05** (`B-293_PART_A_INVESTIGATION.md`). Decisions D-a to D-g are awaiting the founder; no build before approval.
 
 ## Next B-ID: B-294
