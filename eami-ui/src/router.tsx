@@ -10,8 +10,8 @@ import { ResetPasswordPage } from '@/pages/auth/ResetPasswordPage'
 import { ProfilePage } from '@/pages/settings/ProfilePage'
 import { SetupWizardPage } from '@/pages/setup/SetupWizardPage'
 import { DashboardPage } from '@/pages/dashboard/DashboardPage'
-import { DiscoverPage } from '@/pages/discover/DiscoverPage'
 import { AssetsPage } from '@/pages/cmdb/AssetsPage'
+import { EndpointDetailPage } from '@/pages/cmdb/EndpointDetailPage'
 import { AgentsPage } from '@/pages/gateway/AgentsPage'
 import { AgentDetailPage } from '@/pages/gateway/AgentDetailPage'
 import { PoliciesPage } from '@/pages/gateway/PoliciesPage'
@@ -25,7 +25,7 @@ import { MemoryPage } from '@/pages/ops/MemoryPage'
 import { PasteEventsPage } from '@/pages/ops/PasteEventsPage'
 import { AuditPage } from '@/pages/ops/AuditPage'
 import AlertsPage from '@/pages/ops/AlertsPage'
-import { SettingsPage } from '@/pages/settings/SettingsPage'
+import { AdminPage } from '@/pages/admin/AdminPage'
 
 // B-252 C1: Agent Detail moved to /assets/agents/:id. The old path is kept
 // only as a redirect for bookmarks and external links (every in-app link
@@ -34,6 +34,12 @@ function AgentDetailRedirect() {
   const { id } = useParams<{ id: string }>()
   const { search, hash } = useLocation()
   return <Navigate to={`/assets/agents/${encodeURIComponent(id ?? '')}${search}${hash}`} replace />
+}
+
+// B-252: /settings (any ?tab=) now lives at /admin.
+function SettingsRedirect() {
+  const location = useLocation()
+  return <Navigate to={`/admin${location.search}`} replace />
 }
 
 export const router = createBrowserRouter([
@@ -45,9 +51,11 @@ export const router = createBrowserRouter([
     element: <AppShell />,
     children: [
       { path: '/dashboard', element: <DashboardPage /> },
-      { path: '/discover', element: <DiscoverPage /> },
+      // B-252 C4: Discover is retired; its list now lives in Assets' Endpoints view.
+      { path: '/discover', element: <Navigate to="/assets?kind=endpoint" replace /> },
       { path: '/assets', element: <AssetsPage /> },
       { path: '/assets/agents/:id', element: <AgentDetailPage /> },
+      { path: '/assets/endpoints/:id', element: <EndpointDetailPage /> },
       { path: '/gateway/agents', element: <AgentsPage /> },
       { path: '/gateway/agents/:id', element: <AgentDetailRedirect /> },
       { path: '/gateway/policies', element: <PoliciesPage /> },
@@ -61,7 +69,9 @@ export const router = createBrowserRouter([
       { path: '/paste-events', element: <PasteEventsPage /> },
       { path: '/audit', element: <AuditPage /> },
       { path: '/alerts', element: <AlertsPage /> },
-      { path: '/settings', element: <SettingsPage /> },
+      // B-252: Settings is renamed Admin; old links and bookmarks keep their ?tab=.
+      { path: '/admin', element: <AdminPage /> },
+      { path: '/settings', element: <SettingsRedirect /> },
       { path: '/profile', element: <ProfilePage /> },
     ],
   },

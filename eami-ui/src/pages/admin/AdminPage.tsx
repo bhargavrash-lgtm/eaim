@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Copy, Check, Eye, EyeOff } from 'lucide-react'
+import { Copy, Check, Construction, Eye, EyeOff } from 'lucide-react'
 import { AppTopBar } from '@/components/layout/AppTopBar'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -1040,7 +1040,7 @@ function LicenseTab() {
 
 // ── Tab bar + routing ──────────────────────────────────────────────────────────
 
-type TabId = 'org' | 'users' | 'notifications' | 'api-keys' | 'model-pricing' | 'license'
+type TabId = 'org' | 'users' | 'notifications' | 'api-keys' | 'model-pricing' | 'license' | 'discovery-hub' | 'cmdb'
 const TABS: { id: TabId; label: string }[] = [
   { id: 'org', label: 'Organisation' },
   { id: 'users', label: 'Users' },
@@ -1048,11 +1048,79 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'api-keys', label: 'API Keys' },
   { id: 'model-pricing', label: 'Model Pricing' },
   { id: 'license', label: 'License' },
+  // B-252 (DESIGN_SYSTEM.md §7.7): Settings is renamed Admin and gains these
+  // two tabs. Placeholders for now -- the first real use of §7.8's pattern.
+  { id: 'discovery-hub', label: 'Discovery Hub' },
+  { id: 'cmdb', label: 'CMDB' },
 ]
+
+// ── Roadmap placeholders (DESIGN_SYSTEM.md §7.8) ──────────────────────────────
+// One centered EmptyState saying plainly what is coming and where it sits on
+// the roadmap. No mockup, no fabricated preview of unbuilt functionality.
+
+function RoadmapPlaceholder({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white">
+      <EmptyState icon={<Construction className="h-10 w-10" />} title={title} description={description} />
+    </div>
+  )
+}
+
+const DISCOVERY_SUBTABS = [
+  { id: 'agent-based', label: 'Agent-Based' },
+  { id: 'agentless', label: 'Agentless' },
+] as const
+type DiscoverySubTab = (typeof DISCOVERY_SUBTABS)[number]['id']
+
+function DiscoveryHubTab({ sub, onSub }: { sub: DiscoverySubTab; onSub: (s: DiscoverySubTab) => void }) {
+  // WAI-ARIA tabs: roving tabIndex, arrow keys move and select.
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
+    const i = DISCOVERY_SUBTABS.findIndex((t) => t.id === sub)
+    const n = DISCOVERY_SUBTABS.length
+    const next = DISCOVERY_SUBTABS[(i + (e.key === 'ArrowRight' ? 1 : n - 1)) % n]
+    onSub(next.id)
+    document.getElementById(`discovery-tab-${next.id}`)?.focus()
+  }
+  return (
+    <div className="space-y-4">
+      <div className="inline-flex rounded-md border border-gray-200 bg-white p-0.5" role="tablist" aria-label="Discovery Hub sections" onKeyDown={onKeyDown}>
+        {DISCOVERY_SUBTABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            id={`discovery-tab-${t.id}`}
+            aria-controls={`discovery-panel-${t.id}`}
+            aria-selected={sub === t.id}
+            tabIndex={sub === t.id ? 0 : -1}
+            onClick={() => onSub(t.id)}
+            className={`rounded px-3 py-1.5 text-sm font-medium ${sub === t.id ? 'bg-brand-50 text-brand-700' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" id={`discovery-panel-${sub}`} aria-labelledby={`discovery-tab-${sub}`}>
+        {sub === 'agent-based' ? (
+          <RoadmapPlaceholder
+            title="Agent-based discovery setup is coming"
+            description="Define discovery presets (which scanners run, scan interval, model paths) and generate install packages for endpoint agents. Horizon 1, Discovery administration — B-269."
+          />
+        ) : (
+          <RoadmapPlaceholder
+            title="Agentless discovery is coming"
+            description="Configure agentless scan rules for the Discovery Probe: network ranges, credentials and scan schedules. Horizon 1, Discovery administration — B-267."
+          />
+        )}
+      </div>
+    </div>
+  )
+}
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 
-export function SettingsPage() {
+export function AdminPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const tabParam = searchParams.get('tab') as TabId | null
   const activeTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'org'
@@ -1060,6 +1128,8 @@ export function SettingsPage() {
   function setTab(id: TabId) {
     setSearchParams({ tab: id }, { replace: true })
   }
+  const subParam = searchParams.get('sub')
+  const discoverySub: DiscoverySubTab = DISCOVERY_SUBTABS.some((t) => t.id === subParam) ? (subParam as DiscoverySubTab) : 'agent-based'
 
   // Scroll to top on tab change
   const contentRef = useRef<HTMLDivElement>(null)
@@ -1067,7 +1137,7 @@ export function SettingsPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <AppTopBar breadcrumb={[{ label: 'Settings' }]} />
+      <AppTopBar breadcrumb={[{ label: 'Admin' }]} />
 
       {/* Tab bar */}
       <div className="border-b border-gray-200 bg-white px-6">
@@ -1096,6 +1166,15 @@ export function SettingsPage() {
         {activeTab === 'api-keys' && <ApiKeysTab />}
         {activeTab === 'model-pricing' && <ModelPricingTab />}
         {activeTab === 'license' && <LicenseTab />}
+        {activeTab === 'discovery-hub' && (
+          <DiscoveryHubTab sub={discoverySub} onSub={(s) => setSearchParams({ tab: 'discovery-hub', sub: s }, { replace: true })} />
+        )}
+        {activeTab === 'cmdb' && (
+          <RoadmapPlaceholder
+            title="CMDB grouping rules are coming"
+            description="Static, dynamic and hybrid asset groups with out-of-the-box defaults, usable as targets for presets and policies. Manage classifications stays on the Assets page. Horizon 1, AI ITAM item 6 — Dynamic Asset Grouping."
+          />
+        )}
       </div>
     </div>
   )

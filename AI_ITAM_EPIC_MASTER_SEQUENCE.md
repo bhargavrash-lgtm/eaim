@@ -63,6 +63,14 @@ anything.
       new page. **Also (founder, 2026-09-30):** show the agent-link control on
       an endpoint with no scan report. Don't hide it as the current drawer
       does; that's where manual linking is most useful.
+      **Handoff brief done 2026-10-05** (`B-252_C2_VERIFICATION.md`):
+      - Endpoint Detail carries all five honest states.
+      - The link control is shown on report-less endpoints.
+      - Minimal C3 parity was confirmed live, and then Discover was retired.
+      - Settings was renamed Admin.
+      - The `GET /v1/cmdb/assets` extension is item 7's first real
+        implementation (precedent in §6 of the verification record). Item 7
+        itself stays open until its written convention is locked.
 - [ ] 5. Windows endpoint governed-agent link trace.
 
 ---

@@ -4,7 +4,8 @@ import { Link, useNavigate } from 'react-router-dom'
 
 // Phase 1 of the top-bar retrofit (B-201): the real, working logout
 // mechanism, extracted unmodified from Topbar.tsx (already correct on
-// Dashboard/Discover/Settings/FinOps/Paste Detection) into its own shared
+// Dashboard/Discover/Settings/FinOps/Paste Detection -- Discover since retired
+// and Settings renamed Admin, B-252 C2/C4) into its own shared
 // component -- so Phase 1's 9-page rollout and Phase 2's later top-bar
 // unification share one implementation, instead of Phase 1 hand-copying
 // this logic 9 times and Phase 2 replacing it again shortly after.

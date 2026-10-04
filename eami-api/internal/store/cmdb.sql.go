@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -51,6 +52,20 @@ type CMDBAsset struct {
 	WorkspaceName  *string            `json:"workspace_name"`
 	WorkspaceLabel string             `json:"workspace_label"`
 	Classification CMDBClassification `json:"classification"`
+
+	// Endpoint-only fields (B-252 C3; null for agents and tools). Same
+	// meaning, names and "latest report" rule (server received_at, B-284)
+	// as GET /v1/endpoints, so a count always comes with the honest state
+	// that says whether it means anything (master-sequence item 4):
+	// HasReport false = never reported; ScannerStatus null = not known.
+	OS              *string         `json:"os"`
+	LastSeen        *time.Time      `json:"last_seen"`
+	AIAppCount      *int64          `json:"ai_app_count"`
+	LocalModelCount *int64          `json:"local_model_count"`
+	MCPServerCount  *int64          `json:"mcp_server_count"`
+	GPUCount        *int64          `json:"gpu_count"`
+	HasReport       *bool           `json:"has_report"`
+	ScannerStatus   json.RawMessage `json:"scanner_status"`
 }
 
 type CMDBAssetFilter struct {
@@ -64,10 +79,17 @@ type CMDBAssetFilter struct {
 	// reads a single agent's resolved classification). Still org-scoped
 	// like every other filter, so a foreign id matches nothing.
 	ID     *uuid.UUID
+	// OS narrows to endpoints reporting this platform (B-228; one of
+	// CMDBEndpointOSValues). Agents and tools have no OS, so they never match.
+	OS     string
 	Query  string
 	Limit  int
 	Offset int
 }
+
+// CMDBEndpointOSValues are the platform values eami-agent reports
+// (runtime.GOOS) and the only values the os filter accepts.
+var CMDBEndpointOSValues = map[string]bool{"windows": true, "linux": true, "darwin": true}
 
 type CMDBTypeCount struct {
 	TypeID     uuid.UUID `json:"type_id"`
@@ -212,21 +234,24 @@ SELECT e.id,'endpoint'::text asset_kind,e.hostname name,
        CASE WHEN e.risk_score >= 70 THEN 'high' WHEN e.risk_score >= 40 THEN 'medium' ELSE 'low' END risk_tier,
        e.workspace_id,w.name workspace_name,
        COALESCE(e.ci_type_id, d.id) type_id,
-       CASE WHEN e.ci_type_id IS NULL THEN 'default' ELSE 'explicit' END classification_source
+       CASE WHEN e.ci_type_id IS NULL THEN 'default' ELSE 'explicit' END classification_source,
+       NULLIF(e.os_info->>'os', '') os
 FROM endpoints e
 LEFT JOIN workspaces w ON w.id=e.workspace_id AND w.org_id=e.org_id
 JOIN ci_types d ON d.org_id=e.org_id AND d.asset_kind='endpoint' AND d.is_default
 WHERE e.org_id=$1 AND $2
 UNION ALL
 SELECT a.id,'agent',a.name,a.model,a.status,a.risk_tier,a.workspace_id,w.name,
-       COALESCE(a.ci_type_id,d.id),CASE WHEN a.ci_type_id IS NULL THEN 'default' ELSE 'explicit' END
+       COALESCE(a.ci_type_id,d.id),CASE WHEN a.ci_type_id IS NULL THEN 'default' ELSE 'explicit' END,
+       NULL::text
 FROM gateway_agents a
 LEFT JOIN workspaces w ON w.id=a.workspace_id AND w.org_id=a.org_id
 JOIN ci_types d ON d.org_id=a.org_id AND d.asset_kind='agent' AND d.is_default
 WHERE a.org_id=$1
 UNION ALL
 SELECT t.id,'tool',t.name,t.type,t.status,NULL::text,NULL::uuid,NULL::text,
-       COALESCE(t.ci_type_id,d.id),CASE WHEN t.ci_type_id IS NULL THEN 'default' ELSE 'explicit' END
+       COALESCE(t.ci_type_id,d.id),CASE WHEN t.ci_type_id IS NULL THEN 'default' ELSE 'explicit' END,
+       NULL::text
 FROM gateway_tools t
 JOIN ci_types d ON d.org_id=t.org_id AND d.asset_kind='tool' AND d.is_default
 WHERE t.org_id=$1`
@@ -255,6 +280,9 @@ func cmdbFilteredSQL(f CMDBAssetFilter) (string, []any) {
 	if f.ID != nil {
 		add("a.id=$%d", *f.ID)
 	}
+	if f.OS != "" {
+		add("a.os=$%d", f.OS)
+	}
 	if strings.TrimSpace(f.Query) != "" {
 		// Search is a literal substring match: escape ILIKE's own metacharacters
 		// so "_" or "%" in a hostname matches only itself, not everything.
@@ -277,7 +305,7 @@ func (q *Queries) ListCMDBAssets(ctx context.Context, f CMDBAssetFilter) ([]CMDB
 	args = append(args, f.Limit, f.Offset)
 	query := base + ` SELECT id,asset_kind,name,NULLIF(detail,''),status,risk_tier,workspace_id,workspace_name,
 CASE WHEN asset_kind='tool' THEN 'not_workspace_scoped' WHEN workspace_id IS NULL THEN 'global_floor' ELSE 'workspace' END,
-category_id,category_name,type_id,type_name,classification_source
+category_id,category_name,type_id,type_name,classification_source,os
 FROM filtered ORDER BY lower(name),asset_kind,id LIMIT $` + fmt.Sprint(len(args)-1) + ` OFFSET $` + fmt.Sprint(len(args))
 	rows, err := q.db.Query(ctx, query, args...)
 	if err != nil {
@@ -287,12 +315,71 @@ FROM filtered ORDER BY lower(name),asset_kind,id LIMIT $` + fmt.Sprint(len(args)
 	var out []CMDBAsset
 	for rows.Next() {
 		var a CMDBAsset
-		if err := rows.Scan(&a.ID, &a.AssetKind, &a.Name, &a.Detail, &a.Status, &a.RiskTier, &a.WorkspaceID, &a.WorkspaceName, &a.WorkspaceLabel, &a.Classification.CategoryID, &a.Classification.CategoryName, &a.Classification.TypeID, &a.Classification.TypeName, &a.Classification.Source); err != nil {
+		if err := rows.Scan(&a.ID, &a.AssetKind, &a.Name, &a.Detail, &a.Status, &a.RiskTier, &a.WorkspaceID, &a.WorkspaceName, &a.WorkspaceLabel, &a.Classification.CategoryID, &a.Classification.CategoryName, &a.Classification.TypeID, &a.Classification.TypeName, &a.Classification.Source, &a.OS); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, a)
 	}
-	return out, total, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	rows.Close()
+	if err := q.enrichCMDBEndpoints(ctx, f.OrgID, out); err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
+// cmdbEndpointDetailSQL fills the endpoint-only fields for one page of
+// endpoint rows. It runs once per page, for that page's ids only, so the
+// per-endpoint latest-report lookup (the same latestReportJoinSQL, server
+// received_at, as GET /v1/endpoints) and child-table counts never run over
+// the whole inventory just to sort and paginate it.
+const cmdbEndpointDetailSQL = `
+SELECT e.id, e.last_seen,
+	(SELECT COUNT(*) FROM endpoint_ai_apps    WHERE endpoint_id = e.id),
+	(SELECT COUNT(*) FROM endpoint_model_files WHERE endpoint_id = e.id),
+	(SELECT COUNT(*) FROM endpoint_mcp_servers WHERE endpoint_id = e.id),
+	CASE WHEN jsonb_typeof(lr.report->'gpus') = 'array' THEN jsonb_array_length(lr.report->'gpus') ELSE 0 END,
+	lr.report IS NOT NULL,
+	lr.report->'scanner_status'
+FROM endpoints e
+` + latestReportJoinSQL + `
+WHERE e.org_id = $1 AND e.id = ANY($2)`
+
+func (q *Queries) enrichCMDBEndpoints(ctx context.Context, orgID uuid.UUID, assets []CMDBAsset) error {
+	idx := map[uuid.UUID]int{}
+	var ids []uuid.UUID
+	for i, a := range assets {
+		if a.AssetKind == "endpoint" {
+			idx[a.ID] = i
+			ids = append(ids, a.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := q.db.Query(ctx, cmdbEndpointDetailSQL, orgID, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id                       uuid.UUID
+			lastSeen                 time.Time
+			apps, models, mcps, gpus int64
+			hasReport                bool
+			status                   json.RawMessage
+		)
+		if err := rows.Scan(&id, &lastSeen, &apps, &models, &mcps, &gpus, &hasReport, &status); err != nil {
+			return err
+		}
+		a := &assets[idx[id]]
+		a.LastSeen, a.AIAppCount, a.LocalModelCount, a.MCPServerCount, a.GPUCount = &lastSeen, &apps, &models, &mcps, &gpus
+		a.HasReport, a.ScannerStatus = &hasReport, status
+	}
+	return rows.Err()
 }
 
 func (q *Queries) CountCMDBAssetsByType(ctx context.Context, f CMDBAssetFilter) ([]CMDBTypeCount, error) {

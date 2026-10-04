@@ -166,7 +166,7 @@ export function AgentLineageTab({ agentId }: { agentId: string }) {
           <span className="font-semibold">{unpriced}</span>{' '}
           call{unpriced !== 1 ? 's' : ''} in the {windowText} used a model with no configured pricing and {unpriced !== 1 ? 'are' : 'is'} not
           included in the cost above, so it may be undercounted.{' '}
-          <Link to="/settings?tab=model-pricing" className="font-medium underline">Add pricing</Link>
+          <Link to="/admin?tab=model-pricing" className="font-medium underline">Add pricing</Link>
         </div>
       )}
 

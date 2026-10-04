@@ -36,6 +36,9 @@ export const can = {
   testTool: adminOrOperator, // POST /v1/gateway/tools/{id}/test
   deleteTool: admin, // DELETE /v1/gateway/tools/{id}
   // Endpoints
+  // GET /v1/endpoints[/{id}] (admin, operator, viewer): B-253 gives
+  // approvers no endpoint reads, so Endpoint Detail shows them a role state.
+  viewEndpoints: (r: Role) => r === 'admin' || r === 'operator' || r === 'viewer',
   linkEndpointAgent: admin, // PATCH /v1/endpoints/{id}/link-agent
 }
 

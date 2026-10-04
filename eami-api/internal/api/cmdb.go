@@ -89,6 +89,10 @@ func (s *Server) cmdbFilter(r *http.Request, includeEndpoints bool) (store.CMDBA
 	if f.ID, err = parseOptionalUUID(q.Get("id")); err != nil {
 		return f, errors.New("invalid id")
 	}
+	// B-228: server-side platform filter (endpoint-only), allowlisted.
+	if f.OS = q.Get("os"); f.OS != "" && !store.CMDBEndpointOSValues[f.OS] {
+		return f, errors.New("os must be windows, linux, or darwin")
+	}
 	return f, nil
 }
 
@@ -149,6 +153,7 @@ func (s *Server) ListCMDBAssets(w http.ResponseWriter, r *http.Request) {
 	f.Offset = (page - 1) * perPage
 	assets, total, err := s.queries.ListCMDBAssets(r.Context(), f)
 	if err != nil {
+		slog.Error("cmdb: list assets failed", "org_id", uc.OrgID, "err", err)
 		writeError(w, 500, "internal_error", "failed to list CMDB assets")
 		return
 	}
@@ -157,12 +162,14 @@ func (s *Server) ListCMDBAssets(w http.ResponseWriter, r *http.Request) {
 	}
 	// Navigation counts drive the classification sidebar, so they must not be
 	// narrowed by the sidebar's own selection (category/type/kind) — otherwise
-	// every unselected classification reads 0. Workspace, search, and license
-	// filters still apply.
+	// every unselected classification reads 0. The os filter is the Endpoints
+	// view's own selection too (B-228), so it is cleared the same way.
+	// Workspace, search, and license filters still apply.
 	nav := f
-	nav.CategoryID, nav.TypeID, nav.Kind, nav.ID = nil, nil, "", nil
+	nav.CategoryID, nav.TypeID, nav.Kind, nav.ID, nav.OS = nil, nil, "", nil, ""
 	counts, err := s.queries.CountCMDBAssetsByType(r.Context(), nav)
 	if err != nil {
+		slog.Error("cmdb: count assets failed", "org_id", uc.OrgID, "err", err)
 		writeError(w, 500, "internal_error", "failed to count CMDB assets")
 		return
 	}

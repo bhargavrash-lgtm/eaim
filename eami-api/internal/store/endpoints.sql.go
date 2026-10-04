@@ -449,7 +449,7 @@ SELECT
 	(SELECT COUNT(*) FROM endpoint_ai_apps    WHERE endpoint_id = e.id) AS ai_app_count,
 	(SELECT COUNT(*) FROM endpoint_model_files WHERE endpoint_id = e.id) AS model_count,
 	(SELECT COUNT(*) FROM endpoint_mcp_servers WHERE endpoint_id = e.id) AS mcp_count,
-	COALESCE(jsonb_array_length(NULLIF(lr.report->'gpus', 'null'::jsonb)), 0) AS gpu_count,
+	CASE WHEN jsonb_typeof(lr.report->'gpus') = 'array' THEN jsonb_array_length(lr.report->'gpus') ELSE 0 END AS gpu_count,
 	e.gateway_agent_id, ga.name,
 	lr.report IS NOT NULL AS has_report,
 	lr.report->'scanner_status' AS scanner_status
@@ -496,7 +496,7 @@ SELECT
 	(SELECT COUNT(*) FROM endpoint_ai_apps    WHERE endpoint_id = e.id) AS ai_app_count,
 	(SELECT COUNT(*) FROM endpoint_model_files WHERE endpoint_id = e.id) AS model_count,
 	(SELECT COUNT(*) FROM endpoint_mcp_servers WHERE endpoint_id = e.id) AS mcp_count,
-	COALESCE(jsonb_array_length(NULLIF(lr.report->'gpus', 'null'::jsonb)), 0) AS gpu_count,
+	CASE WHEN jsonb_typeof(lr.report->'gpus') = 'array' THEN jsonb_array_length(lr.report->'gpus') ELSE 0 END AS gpu_count,
 	e.gateway_agent_id, ga.name,
 	lr.report IS NOT NULL AS has_report,
 	lr.report->'scanner_status' AS scanner_status
@@ -534,7 +534,7 @@ SELECT
 	(SELECT COUNT(*) FROM endpoint_ai_apps    WHERE endpoint_id = e.id) AS ai_app_count,
 	(SELECT COUNT(*) FROM endpoint_model_files WHERE endpoint_id = e.id) AS model_count,
 	(SELECT COUNT(*) FROM endpoint_mcp_servers WHERE endpoint_id = e.id) AS mcp_count,
-	COALESCE(jsonb_array_length(NULLIF(lr.report->'gpus', 'null'::jsonb)), 0) AS gpu_count,
+	CASE WHEN jsonb_typeof(lr.report->'gpus') = 'array' THEN jsonb_array_length(lr.report->'gpus') ELSE 0 END AS gpu_count,
 	e.gateway_agent_id, ga.name,
 	lr.report IS NOT NULL AS has_report,
 	lr.report->'scanner_status' AS scanner_status,

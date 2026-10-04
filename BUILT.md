@@ -1,5 +1,76 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-252 C2 + C3 (minimal) + C4 — Admin rename, Endpoint Detail, Discover retired — 2026-10-05 (Claude Code)
+
+The evidence record (Part A, decisions D1–D3, the live run, both reviews and cleanup) is `B-252_C2_VERIFICATION.md`. §6 of that record explains how D1 sets the precedent for master-sequence item 7 (API convention).
+
+**Server**
+- `store/cmdb.sql.go`:
+  - `CMDBAsset` gains nullable endpoint-only fields (`os`, `last_seen`, the four counts, `has_report`, `scanner_status`); they are null for agents and tools.
+  - The union carries only `os`.
+  - `enrichCMDBEndpoints` fills the rest per page, scoped `org_id` + `ANY(page ids)`, with `latestReportJoinSQL` (the same rule as `/v1/endpoints`).
+  - New `CMDBAssetFilter.OS` and the `CMDBEndpointOSValues` allowlist.
+- `store/endpoints.sql.go` and `cmdb.sql.go`: the GPU count is guarded with `jsonb_typeof = 'array'`, so a malformed report counts 0 instead of a 500.
+- `api/cmdb.go`:
+  - an `os` filter that returns a fixed-message 400 when the value isn't allowed;
+  - navigation counts ignore `os`;
+  - `slog.Error` on both 500 paths.
+- **Tests:** `api/cmdb_endpoint_fields_pg_test.go` (real Postgres), 3 tests:
+  - fields set or null by kind;
+  - never-reported and legacy rows;
+  - values equal to `/v1/endpoints`;
+  - the OS filter, plus 400s;
+  - unlicensed orgs see no endpoints;
+  - counts ignore `os`;
+  - a non-array `gpus` returns 200 with a count of 0.
+
+**UI**
+- **Admin:** `pages/admin/AdminPage.tsx` (git mv from `pages/settings/SettingsPage.tsx`).
+  - Renamed to Admin.
+  - New **Discovery Hub** tab (Agent-Based | Agentless via `?sub=`, full ARIA) and **CMDB** tab. Both are `RoadmapPlaceholder`s, the first real §7.8.
+  - `/settings` → `/admin` (`SettingsRedirect` keeps the query string).
+  - Nav entry renamed. FinOps and Lineage links updated.
+- **Endpoint Detail:** `pages/cmdb/EndpointDetailPage.tsx` (new) at `/assets/endpoints/:id`.
+  - Overview: summary grid plus `components/endpoints/EndpointDetections.tsx`, extracted verbatim from the drawer.
+  - "Never reported" is separate from "Report data unavailable".
+  - Agent Link is shown even with no report.
+  - Classification uses `components/cmdb/AssetClassificationTab.tsx`, new and shared; `AgentClassificationTab` now wraps it.
+  - Other states: approver role state, licence-off §7.4 pending state, not-found and error states.
+- **Assets:** `pages/cmdb/AssetsPage.tsx`.
+  - `?kind=endpoint` shows endpoint columns: OS, Agent version, Last seen, AI apps, Local models, MCPs, GPUs, each count with its honest state. Mixed-list columns are unchanged.
+  - Platform filter.
+  - All filters, search (250 ms debounce, 200-character cap) and the page are in the URL.
+  - Unlicensed orgs get the §7.4 pending state.
+  - Endpoint rows open Endpoint Detail.
+- **Discover retired:** `/discover` → `/assets?kind=endpoint`. The nav entry is removed. `DiscoverPage.tsx` and `EndpointDrawer.tsx` are deleted. Agent Detail's graph endpoint node navigates to Endpoint Detail.
+- **Supporting changes:**
+  - `useCMDB.ts`: `CMDBEndpointFields` and the `os` parameter.
+  - `scannerState.ts`: `ScannerStateSource`, so CMDB rows reuse `categoryState`.
+  - `format.ts`: `formatOS`.
+  - `lib/rbac.ts`: `viewEndpoints`.
+- **Docs:** `DESIGN_SYSTEM.md` §7.7 rows marked Built; §7.8 "planned" plus the "first real implementation" note; a stale `EndpointDrawer` reference fixed.
+
+**Verified 2026-10-05**
+- `go build`, `go vet` and the full `go test ./...` (eami-api, real Postgres) pass, as do `tsc --noEmit` and `vite build`.
+- **Live Playwright run: 92/92 PASS**, with real logins for admin, viewer, approver and an unlicensed-org admin, cross-checked with psql and a pre-change Discover baseline of 8 endpoints covering all 5 honest states:
+  - all 8 Assets rows and all 8 Endpoint Detail Overviews equal the baseline;
+  - the OS filter equals psql;
+  - classification save and reset checked in psql;
+  - redirects and the dead-link sweep (17 pages);
+  - Back restores the filtered view;
+  - the approver makes no endpoint or CMDB requests;
+  - the licence-off pending state appears on a real 403.
+- C3 query cost: 0.6 ms per page (dev scale).
+- Security review clean. Code review had no Critical or High; every Medium and Low was fixed, except L7, P3 and P4 (logged in NOTES.md).
+
+**Limitations**
+- The openapi drift is logged, not fixed (Architect-EAMI).
+- B-229 is not done (D2).
+- Assets sorts by name, not last seen.
+- C3 cost was measured at dev scale only.
+- The effective-config view is B-270 (item 9).
+- Tool rows still use the Assets classification panel until C5.
+
 ## B-281 + B-285 + B-284 — hung scanners can't stop reporting; failures logged; freshness by server clock — 2026-10-01 (Claude Code)
 
 The evidence record is `B-281_B-284_B-285_VERIFICATION.md`.

@@ -7,11 +7,10 @@
 // Tool/Workflow/Endpoint connections (Focused Mode only, never an
 // org-wide graph).
 import { useEffect, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ShieldCheck } from 'lucide-react'
 import { SlideOverPanel, LoadingSpinner, EmptyState, StatusPill } from '@/components/common'
 import { AppTopBar } from '@/components/layout/AppTopBar'
-import { EndpointDrawer } from '@/components/endpoints/EndpointDrawer'
 import { useAgent, useAgentConnections } from '@/hooks/useAgents'
 import { can, useOrgRole } from '@/lib/rbac'
 import { usePolicy } from '@/hooks/usePolicies'
@@ -165,6 +164,13 @@ export function AgentDetailPage() {
   // (approver) never request it.
   const { data: connections, isLoading: connectionsLoading, error: connectionsError } = useAgentConnections(can.viewAgentConnections(role) ? id ?? null : null)
   const [selected, setSelected] = useState<SelectedGraphNode | null>(null)
+  const navigate = useNavigate()
+  // B-252 C2: an endpoint node opens its Endpoint Detail page (the drawer is
+  // retired); policy, workflow and tool nodes keep their panels for now.
+  function selectNode(node: SelectedGraphNode) {
+    if (node.kind === 'endpoint') navigate(`/assets/endpoints/${node.id}`)
+    else setSelected(node)
+  }
   const [searchParams, setSearchParams] = useSearchParams()
   const tabParam = searchParams.get('tab')
   const activeTab: TabId = tabs.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'overview'
@@ -264,7 +270,7 @@ export function AgentDetailPage() {
             agentName={agent.name}
             connections={connections}
             selected={selected}
-            onSelect={setSelected}
+            onSelect={selectNode}
           />
         )}
         </div>)}
@@ -338,9 +344,6 @@ export function AgentDetailPage() {
       )}
       {selected?.kind === 'tool' && (
         <ToolDetailPanel toolId={selected.id} onClose={() => setSelected(null)} />
-      )}
-      {selected?.kind === 'endpoint' && (
-        <EndpointDrawer endpointId={selected.id} onClose={() => setSelected(null)} />
       )}
     </div>
   )

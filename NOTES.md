@@ -121,3 +121,15 @@ Found by the B-236 reviews. They predate B-236 and sit outside its diff. At foun
 - **`api/openapi.yaml` (Architect-EAMI, not edited): `GET /v1/cmdb/assets` gained an optional `id` (uuid) query parameter** (B-252 C1).
   - Add it before C2 and C5 reuse it for Endpoint and Tool Detail, so `useCMDBAsset` can drop the `apiFetch` escape hatch (security review SR-1).
 - **The Assets nav item is visible to approvers**, but CMDB reads refuse them, so the page's queries fail for them. This existed before C1. C1 only stopped Agent Detail's breadcrumb from sending approvers there. The sidebar role-based hiding belongs to C11.
+
+## 2026-10-05 — B-252 C2/C3/C4 follow-ups (not fixed; out of scope)
+
+- **`api/openapi.yaml` (Architect-EAMI, not edited): contract drift from this brief** (review L7).
+  - `CMDBAsset` gained nullable `os`, `last_seen`, `ai_app_count`, `local_model_count`, `mcp_server_count`, `gpu_count`, `has_report` and `scanner_status`.
+  - `GET /v1/cmdb/assets` gained an optional `os` query parameter (enum `windows | linux | darwin`; 400 otherwise).
+  - The `Endpoint` schema is missing `first_seen`, which `GET /v1/endpoints/{id}` already returns. The drift predates this brief; it was found here.
+  - The UI types these locally: `useCMDB.ts` (`CMDBEndpointFields`) and `EndpointDetailPage.tsx` (`EndpointDetail`).
+- **Assets' page number isn't clamped** when a refetch shrinks the total below the current page (review P3, pre-existing). It now lives in the URL, so a stale `?page=` link shows an empty page until Previous is clicked.
+- **`EndpointDetections`' collapsible sections reset their open state on refetch** (review P4, pre-existing; moved verbatim from the drawer).
+- **The Dashboard requests `GET /v1/endpoints?per_page=1` for approvers**, who get 403 (B-253). This is pre-existing. The tile should be gated on `can.viewEndpoints`, like Endpoint Detail now is.
+- **C3 query cost was measured only at dev scale** (8 endpoints, 4,945 reports; 0.6 ms per page). Re-measure once a large seeded org exists.

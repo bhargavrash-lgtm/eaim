@@ -2,7 +2,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, apiFetch } from '@/api/client'
 import type { components } from '@/api/schema'
 
-export type CMDBAsset = components['schemas']['CMDBAsset']
+// B-252 C3: endpoint rows also carry these (null for agents and tools). Not
+// in api/openapi.yaml yet (drift logged for Architect-EAMI), so typed here.
+export type CMDBEndpointFields = {
+  os?: string | null
+  last_seen?: string | null
+  ai_app_count?: number | null
+  local_model_count?: number | null
+  mcp_server_count?: number | null
+  gpu_count?: number | null
+  has_report?: boolean | null
+  scanner_status?: Record<string, string> | null
+}
+export type CMDBAsset = components['schemas']['CMDBAsset'] & CMDBEndpointFields
+export type CMDBEndpointOS = 'windows' | 'linux' | 'darwin'
 export type CMDBCategory = components['schemas']['CMDBCategory']
 export type CMDBType = components['schemas']['CMDBType']
 export type CMDBAssetKind = components['schemas']['CMDBAssetKind']
@@ -16,6 +29,7 @@ export type CMDBAssetParams = {
   category_id?: string
   type_id?: string
   workspace_id?: string
+  os?: CMDBEndpointOS // B-228: server-side, endpoint-only
   q?: string
 }
 
@@ -52,7 +66,7 @@ export function useCMDBAssets(params: CMDBAssetParams) {
     queryFn: async () => {
       const { data, error } = await api.GET('/v1/cmdb/assets', { params: { query: params } })
       if (error) throw error
-      return data
+      return data as Omit<typeof data, 'data'> & { data: CMDBAsset[] }
     },
   })
 }

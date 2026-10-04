@@ -1,6 +1,5 @@
-// Moved from pages/discover/DiscoverPage.tsx (B-252 C0). formatRelativeTime
-// is shared by the Discover list and EndpointDrawer; formatBytes is the
-// drawer's.
+// Endpoint formatting helpers, shared by Assets' endpoint view and Endpoint
+// Detail (B-252 C2/C3; first extracted from Discover in C0).
 
 // ── Formatting helpers ──────────────────────────────────────────────────────
 
@@ -9,6 +8,13 @@ export function formatBytes(bytes: number | null | undefined): string {
   if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`
   if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(0)} MB`
   return `${bytes} B`
+}
+
+// The platform values eami-agent reports (runtime.GOOS) as display labels.
+const OS_LABEL: Record<string, string> = { windows: 'Windows', linux: 'Linux', darwin: 'macOS' }
+export function formatOS(os: string | null | undefined): string {
+  if (!os) return '—'
+  return OS_LABEL[os] ?? os
 }
 
 export function formatRelativeTime(iso: string): string {

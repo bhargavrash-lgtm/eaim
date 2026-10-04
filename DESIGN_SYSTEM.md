@@ -294,12 +294,12 @@ disclosed, both judged visually negligible, neither introduces a new
 one-off value into a pattern explicitly meant to be reused elsewhere.
 **This is the standing default for any future label-value UI on this
 page or others, not only a retrofit for already-wide containers** —
-`DiscoverPage.tsx`'s `EndpointDrawer` has a structurally similar
-`justify-between` name+metadata pattern (its `<li>` rows, e.g. MCP
-servers/AI apps/local models) inside a narrow 480px `SlideOverPanel`; it
-wasn't retrofitted to this grid (the edge-justification mechanism there
-is naturally far less visually extreme at that width, not urgent), but a
-future rebuild of that panel should reach for this grid pattern too,
+`EndpointDetections.tsx` (Endpoint Detail's Overview; extracted verbatim
+from Discover's retired `EndpointDrawer` in B-252 C2) still has a
+structurally similar `justify-between` name+metadata pattern (its `<li>`
+rows, e.g. MCP servers/AI apps/local models). It was a narrow 480px
+panel when that was judged not urgent; it now renders full page width,
+so a future rebuild of those rows should reach for this grid pattern,
 not the older per-row `justify-between` approach.
 
 **(b) Dynamic-content containers must size to their real content — with
@@ -366,10 +366,10 @@ already lives, on the Assets page, unchanged.
 an endpoint row in Assets:**
 | Tab | Status | Roadmap source |
 |---|---|---|
-| Overview | Planned next | Absorbs Discover's real content (AI apps, models, MCP servers) — Discover retires as a standalone page entirely |
+| Overview | Built (B-252 C2) — verified: `B-252_C2_VERIFICATION.md` | Absorbs Discover's real content, with honest scanner states (item 4) — Discover retired (C4), its list now Assets' Endpoints view (C3) |
 | Connections | Planned next | Already-logged asset-perspective relationship graph extension |
-| Agent Link | Planned next | Currently trapped inside Discover |
-| Classification | Planned next | Per-asset classification assignment — reuses the same taxonomy "Manage classifications" defines on Assets, does not duplicate it |
+| Agent Link | Built (B-252 C2) — verified: `B-252_C2_VERIFICATION.md` | Moved from Discover; shown even when the endpoint has no scan report |
+| Classification | Built (B-252 C2) — verified: `B-252_C2_VERIFICATION.md` | Per-asset classification assignment — reuses the same taxonomy "Manage classifications" defines on Assets, does not duplicate it (shared `AssetClassificationTab`) |
 | Spend | Future | Confirmed real gap — endpoint-level FinOps, not yet workspace-scoped |
 
 **Tool Detail:**
@@ -388,8 +388,9 @@ consideration, not a current decision.
 ### 7.8 Planned Top-Level Navigation — Physical Roadmap Placeholders
 
 To keep the roadmap physically visible in the running product (so a future
-capability is never silently forgotten), 5 real sidebar entries exist as inert
-placeholder pages ahead of their actual build:
+capability is never silently forgotten), 5 sidebar entries are planned as inert
+placeholder pages ahead of their actual build. **Status (2026-10-04): planned, not
+yet built** — none of the five exists in the running product yet:
 
 | Nav item | Roadmap source | Placeholder status |
 |---|---|---|
@@ -403,6 +404,12 @@ A placeholder page reuses the existing EmptyState component exactly as built —
 real AppTopBar, real page shell, one centered EmptyState with a title and a plain
 description of what's coming and which Horizon it belongs to. No new pattern,
 no mockup detail, no fabricated preview of unbuilt functionality.
+
+**First real implementation (B-252, 2026-10-04):** Admin's **Discovery Hub**
+(sub-tabs Agent-Based | Agentless) and **CMDB** tabs, which render this
+pattern as tab content inside the Admin page shell, not as sidebar pages:
+`RoadmapPlaceholder` in `eami-ui/src/pages/admin/AdminPage.tsx`. The five
+sidebar placeholders above should reuse the same treatment when built.
 
 **Deliberately NOT given a top-level entry** (recorded here so nothing looks
 forgotten just because it isn't in the sidebar): SSO/IdP, Groups bulk-tagging,

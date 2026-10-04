@@ -1,6 +1,5 @@
 import {
   LayoutDashboard,
-  Monitor,
   Bot,
   ShieldCheck,
   Wrench,
@@ -34,7 +33,6 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, group: 'main' },
-  { label: 'Discover', path: '/discover', icon: Monitor, group: 'main' },
   // Assets (B-196 increment 1, CMDB epic): a real, new top-level page, not
   // one of CLAUDE.md's six named core sidebar pages -- flagged explicitly
   // per the one-spine rule rather than silently added. Judged a legitimate
@@ -58,7 +56,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Paste Detection', path: '/paste-events', icon: Copy, group: 'ops' },
   { label: 'Audit', path: '/audit', icon: ScrollText, group: 'ops' },
   { label: 'Alerts', path: '/alerts', icon: Bell, group: 'ops' },
-  { label: 'Settings', path: '/settings', icon: Settings, group: 'admin' },
+  { label: 'Admin', path: '/admin', icon: Settings, group: 'admin' },
   // My Workspaces (B-216): the real entry point into Workspace mode
   // (DESIGN_SYSTEM.md §0) for a user who has real workspace_memberships
   // rows -- filtered out of both Sidebar render loops entirely (not just

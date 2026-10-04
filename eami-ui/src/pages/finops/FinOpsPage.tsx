@@ -360,7 +360,7 @@ export function FinOpsPage() {
             <span className="font-semibold">{unrecognizedModelCount}</span>{' '}
             dispatch{unrecognizedModelCount !== 1 ? 'es' : ''} this period used a model with no configured
             pricing — its cost shows as $0.00, so totals below may be undercounted.{' '}
-            <Link to="/settings?tab=model-pricing" className="font-medium underline">Add pricing</Link>
+            <Link to="/admin?tab=model-pricing" className="font-medium underline">Add pricing</Link>
           </div>
         )}
 

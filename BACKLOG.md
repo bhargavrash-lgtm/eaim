@@ -2463,7 +2463,7 @@ For example, `GET /v1/audit?page=4294967297&per_page=100` wraps the offset to 0 
 - **Honest labels:** "Loading…" replaces a false "0 endpoints" while loading, and a failed request shows an error plus Retry. The platform filter is labelled "applies to this page only" (founder-chosen option (c)).
 **Verification:** live paging past 25, both unfiltered (37 endpoints) and filtered (30 matches). No endpoint ID repeats across pages, and one debounced request goes out per search. The page clamp is review-verified only, because focus-refetch is disabled app-wide.
 
-### B-228 — Server-side OS/platform filter for `GET /v1/endpoints` — **QUEUED, 2026-09-27**
+### B-228 — Server-side OS/platform filter for `GET /v1/endpoints` — **DONE, 2026-10-05** (via B-252 C3: the filter is `GET /v1/cmdb/assets?os=`, which now backs the endpoint list; evidence `B-252_C2_VERIFICATION.md`)
 **Origin:** B-227's founder-approved option (c). The Discover platform filter is client-side and only narrows the current page, and it is now honestly labelled that way. A real fix needs an `os` query parameter in `api/openapi.yaml`, which Architect-EAMI owns, plus a handler/store filter on `os_info`. Minted at founder direction after the same free-ID check.
 **Status:** QUEUED.
 
@@ -2956,9 +2956,23 @@ Choices, for the founder:
   - **Done 2026-09-29** (`B-252_C0_VERIFICATION.md`): (a) `EndpointDrawer`/`LinkedAgentControl` extracted to `components/endpoints/`; (c) UI role-gating parity via `lib/rbac.ts`, including approver Overview-only on Agent Detail and the operator note-only tool panel.
   - **(b) moved to C1** (founder decision 2026-09-29): delete the orphaned `AgentAssetPanel`/`ToolAssetPanel` as part of C1, not as a separate brief. Nothing imports either file.
 - [x] **C1 — DONE 2026-09-30** (`B-252_C1_VERIFICATION.md`; filter named `?id=`, a deliberate deviation from the approved `agent_id` wording, reasoning recorded). Assets agent rows open Agent Detail at its new `/assets/agents/:id` home (redirect from `/gateway/agents/:id`), with an Agent Classification tab. **Agent cross-links from C10 ship here.** **Also deletes the orphaned `components/cmdb/AgentAssetPanel.tsx` and `ToolAssetPanel.tsx`** (moved from C0(b), founder 2026-09-29).
-- [ ] **C2** Endpoint Detail at `/assets/endpoints/:id`: Overview, Agent Link (scanner settings read-only, "shared by N endpoints"), Classification. Discover rows open it.
-- [ ] **C3** Assets parity for endpoints (OS, last seen, per-domain counts, server filters). **Folds B-228/B-229. Needs Architect contract authorization before its brief; measure query cost in its Part A.**
-- [ ] **C4** Retire Discover (redirect).
+- [x] **C2 — DONE 2026-10-05** (`B-252_C2_VERIFICATION.md`). Endpoint Detail at `/assets/endpoints/:id`: Overview (item 4's honest states), Agent Link (shown even with no report), Classification (shared `AssetClassificationTab`), approver role state, licence-off pending state. No Connections tab (C6). The read-only effective-config view stays **B-270** (master-sequence item 9). Shipped with the **Settings → Admin rename** (`/settings` → `/admin` redirect keeps `?tab=`) and the Discovery Hub and CMDB placeholder tabs (the first real §7.8).
+- [~] **C3** Assets parity for endpoints (OS, last seen, per-domain counts, server filters). **Folds B-228/B-229. Needs Architect contract authorization before its brief; measure query cost in its Part A.**
+  - **Minimal C3 DONE 2026-10-05** (`B-252_C2_VERIFICATION.md`, founder D1–D3):
+    - `GET /v1/cmdb/assets` endpoint rows gain nullable endpoint fields, plus the server-side `os` filter (**B-228 done**).
+    - The Assets Endpoints view gains OS, Agent version, Last seen and the four honest-state counts.
+    - The filters are in the URL.
+    - Query cost measured: 0.6 ms per page on dev data.
+  - **Still open:**
+    - **B-229** (`has_ai`/`has_local_model`), out per founder D2;
+    - a sort parameter (Assets sorts by name; Discover sorted by last seen);
+    - a fleet-scale cost measurement;
+    - the openapi entries (NOTES.md).
+- [x] **C4 — DONE 2026-10-05** (`B-252_C2_VERIFICATION.md`). Discover retired only after parity was confirmed live (8/8 endpoints, cell by cell, against a pre-change baseline):
+  - `/discover` → `/assets?kind=endpoint`;
+  - nav entry removed;
+  - `DiscoverPage.tsx` and `EndpointDrawer.tsx` deleted;
+  - Agent Detail's graph endpoint node opens Endpoint Detail.
 - [ ] **C5** Tool Detail at `/assets/tools/:id`: Overview/Credentials with inline Test, and Classification. **Partly absorbs B-256.**
 - [ ] **C6** Connections tabs: the endpoint graph (B-196 extension) and tool connections (new API).
 - [ ] **C7** Agent Credentials tab plus edit-in-place. **Absorbs B-255.** Settings → API Keys narrows (Q5).

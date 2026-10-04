@@ -2,7 +2,7 @@
 // (master-sequence item 4). A bare "0" / "None detected" used to mean any of:
 // never reported, scanner disabled, scan failed, or genuinely found nothing.
 // The API now returns has_report and the latest report's scanner_status; this
-// is the one place both Discover's list and EndpointDrawer turn them into a
+// is the one place every surface (Assets, Endpoint Detail) turns them into a
 // state. Nothing is inferred from a null category on its own.
 import type { components } from '@/api/schema'
 
@@ -11,8 +11,12 @@ type Endpoint = components['schemas']['Endpoint']
 // has_report / scanner_status are not in api/openapi.yaml yet (drift logged
 // for Architect-EAMI), so they are typed here, not in the generated schema.
 export type ScannerStatus = 'ok' | 'disabled' | 'error'
-export type EndpointWithScannerStatus = Endpoint & {
-  has_report?: boolean
+export type EndpointWithScannerStatus = Endpoint & ScannerStateSource
+
+// Anything carrying the two fields: a /v1/endpoints row or detail, or a CMDB
+// endpoint row (B-252 C3). One rule set for every surface.
+export type ScannerStateSource = {
+  has_report?: boolean | null
   scanner_status?: Record<string, string> | null
 }
 
@@ -36,7 +40,7 @@ export type CategoryState =
   | { kind: 'error' }                // the scanner ran and failed in the latest scan
   | { kind: 'unknown' }              // the report predates scanner_status and shows nothing
 
-export function categoryState(ep: EndpointWithScannerStatus, category: Category, count: number): CategoryState {
+export function categoryState(ep: ScannerStateSource, category: Category, count: number): CategoryState {
   if (ep.has_report === false) return { kind: 'never' }
   const status = ep.scanner_status?.[CATEGORY_SCANNER[category]]
   if (status === 'ok') return { kind: 'count', count }

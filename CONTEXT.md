@@ -8,7 +8,33 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-01, newest) — B-286–B-290 minted; code-review standing check added
+## Active decision thread (2026-10-05, newest) — B-252 C2 + minimal C3 + C4 DONE (Admin rename, Endpoint Detail, Discover retired)
+
+- **Built** (founder D1–D3 all Option A):
+  - `GET /v1/cmdb/assets` endpoint rows gain nullable endpoint fields and a server-side `os` filter (**B-228 done**).
+  - The Assets Endpoints view reaches Discover parity.
+  - New Endpoint Detail at `/assets/endpoints/:id` (Overview, Agent Link even with no report, Classification; approver and licence-off states).
+  - Settings → Admin (`/settings` redirects), with the Discovery Hub and CMDB placeholder tabs (the first real §7.8).
+  - Discover retired only after parity was confirmed live: `/discover` redirects; `DiscoverPage` and `EndpointDrawer` are deleted.
+- **Evidence:** `B-252_C2_VERIFICATION.md`. The live run passed 92/92 against a pre-change baseline of 8 endpoints covering all 5 honest states. Security review was clean. Code-review M1, M2, L1–L6, P1, P2 and P5 were fixed.
+- **Item 7 (API convention):** D1 is its first real implementation. §6 of the verification record writes up the precedent:
+  - extend general endpoints;
+  - nullable kind-specific fields;
+  - shared field meaning;
+  - allowlisted, fail-closed filters;
+  - per-page enrichment;
+  - additive `/v1`, with openapi drift logged.
+
+  **Item 7 is not ticked**: its deliverable, a locked written convention, still needs founder decisions (openapi-first or not, sort parameters, B-137's state, a breaking-change policy).
+- **Logged in NOTES.md, no B-IDs minted:**
+  - the openapi drift (CMDBAsset fields, the `os` parameter, Endpoint `first_seen`);
+  - the Assets page clamp;
+  - the detections section-state reset;
+  - the Dashboard requesting `/v1/endpoints` for approvers;
+  - a fleet-scale cost re-measure.
+- **Still open under B-252 C3:** B-229, sort. **Next in sequence:** item 5 (Windows endpoint governed-agent link trace), or the founder's pick. B-270 (item 9) now has its Endpoint Detail page to live on.
+
+## Active decision thread (2026-10-01) — B-286–B-290 minted; code-review standing check added
 
 - **Minted at founder direction** (the B-281/B-284/B-285 review follow-ups):
 
@@ -2824,6 +2850,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-05 by Claude Code — B-252 C2 + minimal C3 + C4 done (Admin rename, Endpoint Detail, Discover retired; B-228 done). Evidence `B-252_C2_VERIFICATION.md`. Marker cleared.
+
+Prior entry:
 2026-10-01 by Claude Code — added the founder-worded orphaned-action/link check to CLAUDE.md "Standing code-review checks" (replacing the placeholder). Docs only.
 
 Prior entry:
