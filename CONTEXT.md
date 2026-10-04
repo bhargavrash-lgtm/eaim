@@ -8,7 +8,13 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-05, newest) — Item 5 closed; B-292 minted; B-137 deps; drift gate clarified
+## Active decision thread (2026-10-05, newest) — Drift-row check added to standing code-review checks
+
+- **CLAUDE.md "Standing code-review checks"** gains a third check, founder wording, next to the raw-error-text and orphaned-link checks: "Confirm any commit that adds or changes an API route, field, response or status code also appends a row to API_CONTRACT_DRIFT.md in the same commit. A missing row is a review finding. See API_CONVENTION.md §10."
+- This makes `API_CONVENTION.md` §10's reviewer rule binding on every mandatory review pass, not just a convention-document rule.
+- Item 7 is still awaiting founder lock. Docs only.
+
+## Active decision thread (2026-10-05) — Item 5 closed; B-292 minted; B-137 deps; drift gate clarified
 
 - **Item 5 ticked** (founder direction; evidence `429d791`). There was no link bug: both `Bhargav_tej` endpoints are linked and the tab reads the link. The concern was the always-on "No automatic match exists" note. Verified by DB and code trace, not a live browser.
 - **B-291 gains a fourth fix:** show the note only when unlinked, and "Linked to <agent>" when linked.
@@ -2887,6 +2893,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-05 by Claude Code — added the API_CONTRACT_DRIFT.md same-commit check to CLAUDE.md "Standing code-review checks" (founder wording; API_CONVENTION.md §10). Docs only.
+
+Prior entry:
 2026-10-05 by Claude Code — item 5 closed (`429d791`); B-291 +Agent Link note; B-292 minted (notification test); B-137 dependencies; item 7a gate = handed and acknowledged; drift §A reordered; API_CONVENTION §10 same-commit drift rule. Docs only. Marker cleared.
 
 Prior entry:
