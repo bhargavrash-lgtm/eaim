@@ -125,6 +125,18 @@ anything.
       assignment before item 6 closes.
       **Depends on 8a (B-293):** a preset is only real if the agent can
       apply it (replace semantics, persistence, first-scan fetch).
+      **Design (founder, 2026-10-05):** `DISCOVERY_PRESETS_DESIGN.md`.
+      Slices, each shippable, in order. Tick item 8 only when all four
+      are done:
+      - [ ] Slice 0 (prerequisite): B-277 path allowlist and depth limit.
+      - [ ] Slice 1 (backend): schema, migration, endpoint-keyed config
+            delivery, assignment, validation, API, tests.
+      - [ ] Slice 2 (UI): preset list, editor, draft/publish/revert,
+            rollout summary.
+      - [ ] Slice 3: enrollment keys, deployments, package builder,
+            bundles.
+      - [ ] Slice 4: bulk adopt and unmanaged strip, then B-270 and
+            retiring Configure on Agent Detail.
       **Sequencing (founder, 2026-10-05): B-277's path allowlist and
       walk-depth limit must land before item 8's preset content, or inside
       B-269's first slice.** Why:

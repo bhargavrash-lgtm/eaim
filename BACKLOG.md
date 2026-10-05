@@ -3382,7 +3382,51 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 - Preset **definition** (name, version, scanner content, package generation) can be designed and built now. It has no dependency on master-sequence item 6.
 - Preset **assignment** to a fleet via Groups waits on item 6's schema resolution (`DYNAMIC_ASSET_GROUPING_EPIC.md` §2). Don't build group-based assignment before item 6 closes.
 
-**Status:** QUEUED. Do not build until briefed.
+**Design record (founder, 2026-10-05): `DISCOVERY_PRESETS_DESIGN.md`.** It supersedes the fix sketch above where they differ.
+- **Every endpoint is bound to exactly one preset.**
+  - The org default (star) is only the package builder's pre-selection, never a fallback.
+  - No assignment means no config (404; the agent reverts after two 404s, B-293 D-c).
+  - This replaces "`discovery_preset_id` NULL = org default".
+- **Bootstrap versus pushed config.**
+  - The installer carries only the control-plane URL, the enrollment key and the CA cert. Signed installers never change.
+  - Scanners, interval, paths, model size and report cap are pushed: published and pulled within one scan interval.
+- **Config follows the endpoint's preset, not the governed-agent link** (the link stays for governance identity only; B-270 retires "Configure").
+- **Model:**
+  - `preset`, with a builder-default flag and archive;
+  - `preset_version`, with a draft, published or superseded status. Published versions are immutable, there is at most one draft, and each carries the same `c1` hash the agent verifies.
+  - `endpoint_preset_assignment` (with history);
+  - `enrollment_key` (hashed, prefix, expiry, max uses, revocable, org-bound).
+- **Lifecycle:**
+  - Edits touch the draft only, under an optimistic lock.
+  - Publish shows an impact panel: bound endpoints, agents 1.3.0 and newer versus older, a diff and warnings, and needs confirmation.
+  - Revert republishes an old version as a new version number.
+  - Validation uses the agent's bounds (the B-293 slice and B-277) with shared vectors.
+  - Archive is blocked from deletion while endpoints are bound.
+- **Page: Admin › Discovery Hub › Agent-Based**, the B-252 C2 placeholder (*not* a separate "Discovery setup" destination as first sketched).
+  - An unmanaged-endpoints strip with Adopt.
+  - A presets table with a rollout column (applied / behind / rejected / unknown).
+  - Sections: Presets, Deployments and Package builder.
+  - A "Standard" preset is seeded with all 10 scanners and **empty** model paths.
+- **Migration:**
+  - Each `agent_configs` row becomes "Migrated: <agent>", with identical contents merged.
+  - Linked endpoints are assigned, so behaviour doesn't change.
+  - Paths B-277 would reject are kept but flagged "needs review".
+- **Security:**
+  - Admin-only writes, enforced server-side.
+  - Cross-org adversarial tests on every route, including key exchange.
+  - All mutations audited through the existing trail.
+  - Publish and key issuance are step-up (B-231) candidates.
+
+**Slices (each shippable, in order; tick item 8 only when all four are done):**
+- [ ] **Slice 0 (prerequisite):** B-277's path allowlist and walk-depth limit.
+- [ ] **Slice 1 (backend):** schema, migration, endpoint-keyed config delivery, assignment, validation, API, tests. Highest risk.
+- [ ] **Slice 2 (UI):** preset list, editor, draft/publish/revert, rollout summary.
+- [ ] **Slice 3:** enrollment keys, deployments, package builder, bundles.
+- [ ] **Slice 4:** bulk adopt and the unmanaged strip, then B-270 (Endpoint Detail) and retiring Configure on Agent Detail.
+
+**Deferred:** group-based assignment (item 6), canary or percentage rollout, scheduled publish, per-endpoint overrides, two-person publish approval, and reusing the versioning pattern for probe settings (item 12; reuse the approach, don't abstract until the second use).
+
+**Status:** QUEUED. Design recorded 2026-10-05; Part A investigation next. **No build until the founder approves Part A.**
 
 ### B-270 — Read-only effective-config view on Endpoint Detail (Layer 3) — **QUEUED, 2026-09-30 — build order item 2 (with B-252 C2)**
 **Origin:** `DISCOVERY_ADMIN_INVESTIGATION.md` Part 1B(d). Founder-approved build order, 2026-09-30. Minted at founder direction 2026-09-30. B-270 was confirmed free against BACKLOG.md directly: the counter read B-269, and B-269 and B-270 were referenced nowhere. A grep for open items covering presets, effective config or enrollment keys found only B-267's own forward references to this work.
