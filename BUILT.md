@@ -1,5 +1,73 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-293 (item 8a) — Agent applies remote config correctly: replace not merge, persisted, fetched before the first scan, reported back — 2026-10-05 (Claude Code)
+
+The evidence record is `B-293_VERIFICATION.md`; the Part A investigation is `B-293_PART_A_INVESTIGATION.md`. Founder decisions D-a to D-g were all approved, with guards (two consecutive 404s; a fixed drop order; specific reason codes).
+
+**Agent (`eami-agent`, 1.3.0)**
+- **New `internal/remoteconfig`:**
+  - `remoteconfig.go`: `Config`, the `c1` canonical `Version()`, `Validate` (bounds with specific reason codes), `ParseResponse` (versioned replace vs pre-B-293 legacy merge), `KnownScanners`.
+  - `state.go`, plus `state_unix.go` and `state_windows.go`: the state file.
+    - Atomic write.
+    - Every directory from the OS base (`%ProgramData%`, `/var/lib`, `/Library/Application Support`) down is checked on each load, save and delete.
+    - New directories are created with a protected DACL atomically, or at 0700.
+    - Reparse points, symlinks and untrusted owners are refused (security review H-1).
+    - Size cap; strict decode; hash; bounds; identity binding.
+  - `manager.go`: the effective config, sources, the two-consecutive-404 revert, and per-scan `Snapshot`.
+- `collector.Sender.FetchConfig` now returns the raw, 256 KiB-capped result. It applies nothing itself. The old in-place merge and `AgentConfigUpdate` are gone.
+- `cmd/agent/main.go`:
+  - fetches (10 s cap) **before every scan**, including the first after a restart, instead of after a successful send;
+  - loads the saved config at startup;
+  - gives each scan a private config snapshot;
+  - stamps `config_version`, `config_source` and `config_error` on each report;
+  - enforces the size cap.
+- `config.go`:
+  - `AllScanners`; an absent `enabled_scanners` key becomes the explicit full list at load;
+  - `IsEnabled` is plain membership, so **an empty list runs nothing** (D-a);
+  - `FileLoaded` tells `local` apart from `defaults`.
+- `payload/size.go`: `EnforceMaxSize` with the fixed `DropOrder` and the `too_large` reason code (D-e).
+- **Packaging:** `eami-agent.service` adds `StateDirectory=eami-agent` (0700). New `postremove.sh` removes `/var/lib/eami-agent` on deb purge or rpm erase only.
+
+**API (`eami-api`)**
+- **Config routes:**
+  - Remote config and admin `GET`/`PUT` always return the full config, with `[]` never `null`, plus `config_version` and `model_file_size_mb`.
+  - PUT accepts `[]` for both lists and validates the agent's bounds (`store.AgentConfigLimits`, including the new network-path rule), returning 400s with fixed messages.
+- `store.AgentConfig.Version()` (the same canonical form as the agent, with golden vectors).
+- `GET /v1/endpoints/{id}` adds `applied_config_version`, `config_source`, `config_error` (agent codes allowlisted, else `unrecognised`) and `expected_config_version` (null when unlinked).
+- Ingest's scanner-failure log allowlist gains `too_large`.
+
+**Schema:** migration 000027 adds `model_file_size_mb` (default 100, CHECK 1–100000) and backfills `'{}'` scanner lists to the full list. The `down` migration drops the column. `schema.sql` is updated.
+
+**Docs:**
+- `API_CONTRACT_DRIFT.md` rows C18–C20.
+- The CLAUDE.md **scanner release rule** (server first, agent second; D-b).
+- BACKLOG: B-277 partly done; B-294 minted (MSI leaves the state folder, D-d).
+
+**Verified 2026-10-05**
+- **Builds and tests:**
+  - Agent: `go build` (Windows, linux, darwin), `go vet` and the full `go test ./...` on Windows; the Linux test binaries were run in WSL as root, including the Unix permission, symlink and chain tests.
+  - API: the full `go test ./...` (real Postgres), and `schema/migrationtest`, including the B-293 up, backfill, CHECK and down test.
+  - Golden vectors were recomputed independently in Python.
+- **Both reviews:** no Critical findings.
+  - Security H-1, M-1, M-2 and L-1, and code-review M2 and L1–L6, were all fixed and tested.
+  - Code-review M1 is covered by a pre-deploy check query, which found 0 rows here.
+- **Live, on the real packaged agent** (WSL `.deb`; 1.3.0, then the final 1.3.1 after the review fixes):
+  - **c:** the old 1.2.1 agent's first scan after install ignored the server; 1.3.x's first scan already ran the remote config.
+  - **a:** a full list switched `models` back on without a restart; clearing the paths removed them; an empty list disabled all 10 scanners, and Endpoint Detail renders every category as "Disabled".
+  - **d:** applied versus expected version showed a visible mismatch after a PUT, until the agent polled.
+  - **b:** with the API down, a restart ran on the persisted config (`persisted` + `fetch_failed`).
+  - **Size cap and remote model size:** a remote `model_file_size_mb: 1` surfaced 8000 2 MB files; a 1 MiB cap dropped only `models` with `too_large`.
+  - **Tampered and world-readable state files** were rejected, falling back to local.
+  - **e and f** (fake collector): oversized, wrong type, hash-valid interval 1 s, traversal, UNC, incomplete, mismatch and `{}` were each rejected with their own code, keeping last-known-good. A legacy response merged as before and was not persisted. Two consecutive 404s reverted to local.
+- Evidence in full: `B-293_VERIFICATION.md`.
+
+**Limitations**
+- **Rollout:** agents older than 1.3.0 keep merging (they can't clear paths or re-enable scanners) until they update. They also report none of the config fields (`null`, "not known").
+- **B-277 remainder:** `/` is still a valid path. The path allowlist or local opt-in and the walk-depth limit stay in B-277.
+- **Windows persistence can be disabled, not abused:** a user who pre-creates `%ProgramData%\EAMI` before the agent first runs disables persistence on that machine (fail-closed); B-294 adds MSI pre-creation. The MSI also leaves the folder on uninstall (B-294). The installed Windows MSI on this machine was not changed, and the Windows code was verified by native unit tests only.
+- **`config_error` is the latest rejection only:** with the API down, a rejected state file shows as `fetch_failed` in the report; the state code is in the local log.
+- **UI:** `AgentConfigPanel` can't express `[]` yet (B-269/B-270).
+
 ## B-252 C2 + C3 (minimal) + C4 — Admin rename, Endpoint Detail, Discover retired — 2026-10-05 (Claude Code)
 
 The evidence record (Part A, decisions D1–D3, the live run, both reviews and cleanup) is `B-252_C2_VERIFICATION.md`. §6 of that record explains how D1 sets the precedent for master-sequence item 7 (API convention).

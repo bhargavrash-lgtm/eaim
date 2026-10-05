@@ -67,6 +67,15 @@ type Report struct {
 	// can carry file paths or argument fragments, so the full detail stays
 	// in the endpoint's local log (founder decision D1).
 	ScannerErrors map[string]string `json:"scanner_errors,omitempty"`
+
+	// The config this scan ran with (B-293), set by the agent loop from
+	// remoteconfig.Manager.Status. ConfigVersion is "" unless a versioned
+	// remote config was in force; ConfigSource is remote, persisted, local
+	// or defaults; ConfigError is the last rejected config's reason code.
+	// EnforceMaxSize never drops these or ScannerStatus.
+	ConfigVersion string `json:"config_version"`
+	ConfigSource  string `json:"config_source"`
+	ConfigError   string `json:"config_error,omitempty"`
 }
 
 // Scanner status values carried in Report.ScannerStatus.
@@ -82,6 +91,7 @@ const (
 	ReasonStillRunning = "still_running" // the previous scan's run of this scanner never returned, so it was not started again
 	ReasonPanic        = "panic"         // the scanner panicked
 	ReasonError        = "error"         // the scanner returned an error
+	ReasonTooLarge     = "too_large"     // its result was dropped to keep the report under max_report_size_bytes (B-293)
 )
 
 const scanTimeout = 30 * time.Second
@@ -223,8 +233,9 @@ func collect(ctx context.Context, specs []scannerSpec, mu *sync.Mutex, log *slog
 }
 
 // Build runs all enabled scanners in parallel and assembles a Report.
-// Scanners not listed in cfg.Detection.EnabledScanners are skipped;
-// an empty list means all scanners are enabled (default).
+// Scanners not listed in cfg.Detection.EnabledScanners are skipped; an
+// empty list runs none (B-293: config.Load fills in the full list when the
+// YAML doesn't set one, so "all" is always explicit).
 func Build(cfg *config.Config) (*Report, error) {
 	return BuildWith(cfg, slog.Default())
 }

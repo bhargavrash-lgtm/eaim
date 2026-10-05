@@ -196,7 +196,7 @@ func TestUpsertAgentConfig_StoreLevelOrgScoping_RealDB(t *testing.T) {
 	q := store.New(env.pool)
 	params := func(org, agent uuid.UUID) store.UpsertAgentConfigParams {
 		return store.UpsertAgentConfigParams{OrgID: org, AgentID: agent, ScanIntervalSeconds: 61,
-			ModelScanPaths: []string{"/attacker"}, MaxReportSizeBytes: 1048576, EnabledScanners: []string{"browser"}}
+			ModelScanPaths: []string{"/attacker"}, MaxReportSizeBytes: 1048576, EnabledScanners: []string{"browser"}, ModelFileSizeMB: 100}
 	}
 	for _, agent := range []uuid.UUID{withRow, noRow} {
 		if _, err := q.UpsertAgentConfig(ctx, params(orgA, agent)); !errors.Is(err, pgx.ErrNoRows) {

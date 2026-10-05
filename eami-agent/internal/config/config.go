@@ -15,6 +15,23 @@ type Config struct {
 	Agent     AgentConfig     `yaml:"agent"`
 	Collector CollectorConfig `yaml:"collector"`
 	Detection DetectionConfig `yaml:"detection"`
+
+	// FileLoaded reports whether a config file was actually read (B-293):
+	// it is how a report tells "local" config apart from built-in
+	// "defaults". Not a YAML key.
+	FileLoaded bool `yaml:"-"`
+}
+
+// AllScanners is every scanner name payload.Build gates on. A config that
+// doesn't list enabled_scanners at all gets this full list explicitly at
+// load time (B-293, decision D-a): an explicit list is the only meaning
+// there is, so an empty list means "no scanners", never "all". Keep in sync
+// with eami-api's store.AllScanners; new names ship server-side first,
+// agent second (CLAUDE.md release rule), or an agent-side addition runs
+// nowhere until the server lists it.
+var AllScanners = []string{
+	"ai_apps", "models", "mcp_servers", "cloud_clients", "network_activity", "browser",
+	"ai_processes", "gpu", "python_envs", "nodejs_ai",
 }
 
 // AgentConfig controls agent identity and scan cadence.
@@ -43,18 +60,16 @@ type CollectorConfig struct {
 type DetectionConfig struct {
 	ModelFileScanPaths []string `yaml:"model_file_scan_paths"`
 	MinModelSizeMB     int64    `yaml:"model_file_size_mb"`
-	// EnabledScanners is the set of scanner names that should run.
-	// An empty list means all scanners are enabled (default behaviour).
-	// Updated at runtime by remote config pull without agent restart.
+	// EnabledScanners is the exact set of scanner names that run. Leaving
+	// enabled_scanners out of the YAML gives every scanner (AllScanners,
+	// filled in by Load); an explicit empty list runs none (B-293). Remote
+	// config replaces it per scan cycle without an agent restart.
 	EnabledScanners []string `yaml:"enabled_scanners"`
 }
 
-// IsEnabled reports whether the named scanner should run.
-// An empty EnabledScanners list means every scanner is enabled.
+// IsEnabled reports whether the named scanner is in EnabledScanners. Plain
+// membership: an empty list enables nothing.
 func (d *DetectionConfig) IsEnabled(name string) bool {
-	if len(d.EnabledScanners) == 0 {
-		return true
-	}
 	for _, s := range d.EnabledScanners {
 		if s == name {
 			return true
@@ -90,6 +105,10 @@ func (c *Config) defaults() {
 	if c.Detection.MinModelSizeMB == 0 {
 		c.Detection.MinModelSizeMB = 100
 	}
+	// Absent (nil) only: an explicit `enabled_scanners: []` stays empty.
+	if c.Detection.EnabledScanners == nil {
+		c.Detection.EnabledScanners = append([]string(nil), AllScanners...)
+	}
 }
 
 // Load reads the YAML file at path, applies defaults, then applies the
@@ -114,6 +133,7 @@ func LoadWithRegistry(path string, reg RegistryReader) (*Config, error) {
 		if decErr := dec.Decode(cfg); decErr != nil {
 			return nil, fmt.Errorf("config: decode %s: %w", path, decErr)
 		}
+		cfg.FileLoaded = true
 	}
 
 	cfg.defaults()

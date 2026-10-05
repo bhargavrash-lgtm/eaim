@@ -2,13 +2,36 @@
 # Updated by: Claude Code (after every task) AND the PM chat (after every
 # planning decision). Read by both at the start of every session, before
 # anything else.
-ACTIVE AGENT: Code — item 8a (agent applies remote config correctly): Part 0 + Part A investigation — started 2026-10-05
+ACTIVE AGENT: none
 STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing index and order for the whole AI ITAM program. It carries the same standing weight as `MULTI_AGENT_PROTOCOL.md`.
 - Before building anything in the program, read it and confirm that the next unchecked item matches what you're about to build.
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-05, newest) — Item 8a (B-293): Part 0 done, Part A reported, awaiting approval
+## Active decision thread (2026-10-05, newest) — B-293 (item 8a) DONE: the agent applies remote config correctly
+
+- **Built** (D-a to D-g approved with founder guards):
+  - A full-config wire format with a content-hash `config_version`.
+  - Replace semantics only for a complete, hash-verified versioned response; older servers are merged exactly as before.
+  - Last-known-good persisted per OS, outside the admin's YAML, with chain-wide ownership, ACL and reparse checks.
+  - A fetch with a 10 s cap before every scan, including the first after a restart.
+  - Per-scan config snapshots.
+  - `config_version`, `config_source` and `config_error` in every report, plus four detail-only Endpoint fields.
+  - Agent bounds with specific reason codes (a B-277 slice), including a new `path_network` code.
+  - `max_report_size_bytes` enforced with a fixed drop order and `too_large`.
+  - `model_file_size_mb` remote (migration 000027, with rollback).
+  - Agent 1.3.1.
+- **Reviews:** the security review found H-1 (a Windows junction or squat on the state-dir parent), M-1, M-2 (UNC paths) and L-1; the code review found M2 and L1–L6. **All fixed and re-verified live on 1.3.1.**
+  - Code-review M1 is covered by a pre-deploy check (0 rows here).
+  - L-2 is logged on B-276, and L-3 in NOTES.
+- **Evidence:** `B-293_VERIFICATION.md`, covering live tests a–f on the WSL packaged agent, the browser check for "all Disabled" (D-a), the size cap and remote model size, and the tampered and untrusted state files.
+- **Rollout reality:** agents older than 1.3.0 keep merging (they can't clear paths or re-enable scanners) and report no config fields until they update.
+- **Minted B-294** (Low): the MSI leaves the state folder, and a standard user who pre-creates `%ProgramData%\EAMI` disables persistence. The fix is MSI pre-creation with the DACL.
+  - The next B-ID is **B-295**.
+- **CLAUDE.md** gains the scanner release rule: server first, agent second.
+- **Next in sequence:** item 8 (B-269 presets: preset definition can start now; group assignment waits on item 6). Items 7 and 7a (convention lock, drift hand-off) are still open.
+
+## Active decision thread (2026-10-05) — Item 8a (B-293): Part 0 done, Part A reported, awaiting approval
 
 - **Part 0** (`a6f3b48`): item 8a was inserted before item 8, with dependency notes on items 8 and 9, and B-293 minted (confirmed free). The CLAUDE.md drift-row check the brief asked for was already in place (`c716547`).
 - **Part A** (`5fbb434`): `B-293_PART_A_INVESTIGATION.md`.
@@ -2911,6 +2934,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-05 by Claude Code — B-293 (item 8a) DONE: agent 1.3.1 applies remote config correctly (replace, persist, first-scan fetch, report-back, bounds, size cap, model size); both reviews' findings fixed; live tests a–f passed on the packaged agent; B-294 minted; scanner release rule in CLAUDE.md. Marker cleared.
+
+Prior entry:
 2026-10-05 by Claude Code — item 8a (B-293): Part 0 committed; Part A investigation reported (`B-293_PART_A_INVESTIGATION.md`), decisions D-a to D-g pending. No code. Marker still set (build awaits approval).
 
 Prior entry:

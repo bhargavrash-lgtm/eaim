@@ -3398,6 +3398,15 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 
 **Status:** QUEUED. Do not build until briefed.
 
+**Inputs ready from B-293 (2026-10-05):**
+- `GET /v1/endpoints/{id}` returns `applied_config_version`, `config_source`, `config_error` and `expected_config_version` (`API_CONTRACT_DRIFT.md` C19).
+- Points the view must render honestly (B-293 code review, Info):
+  - **applied can equal expected while a listed scanner isn't running.** An agent older than a scanner name ignores that name (D-b) but still reports the server's version. Show the endpoint's `scanner_status` next to the version.
+  - `config_error` is the **last** rejection, so it can be set while the applied config is still a good last-known-good one.
+  - Agents older than 1.3.0 report none of these fields (`null`, "not known"); they also can't clear paths or re-enable scanners (merge semantics) until they update.
+  - `AgentConfigPanel` still requires at least one scanner and one path (`min(1)`), so the UI can't express `[]` yet, which the API now accepts. If the API sets `[]`, the form blocks saving other fields until something is ticked. The preset editor (B-269) is where `[]` becomes expressible.
+
+
 ### B-271 — Linking an endpoint silently disables 4 of 10 scanners (default `agent_configs` row lists only 6) — **DONE, 2026-09-30** (evidence: `B-271_VERIFICATION.md`)
 **Origin:** scanner capability audit (2026-09-30), recorded in `AI_LLM_SERVICE_MAPPING_DESIGN.md` §0. Minted at founder direction 2026-09-30. B-271–B-273 were confirmed free against BACKLOG.md directly: the counter read B-271 and no B-271+ reference existed anywhere in the repo's docs.
 
@@ -3602,6 +3611,13 @@ Choose in the brief.
 - [ ] A unit test with an `httptest` server that redirects cross-host, asserting the key is never sent.
 - [ ] Check the native-messaging sender path too.
 
+**Raised by B-293 (security review L-2, 2026-10-05):**
+- Remote config is now **persisted**, so a config fetched through a redirect (an attacker-controlled host) would survive restarts. Its bounds still apply, and network paths are refused (`path_network`).
+- The fetch also still works over plain `http`, with `X-API-Key` attached.
+- Fix both in one place:
+  - `CheckRedirect` returning `http.ErrUseLastResponse` for the sender client, so config is never accepted from a redirect;
+  - warn at startup when the collector URL isn't `https`.
+
 **Dependencies:** none.
 
 ### B-277 — Remote agent config is unbounded: scan paths steer a root filesystem walk, no interval floor, no response size cap — **QUEUED, 2026-09-30 (Medium)**
@@ -3621,6 +3637,14 @@ Choose in the brief.
 - [ ] Unit tests for each bound.
 
 **Dependencies:** B-269 (the preset schema) and B-194 (the models scanner over-collection).
+
+**Partly done by B-293 (2026-10-05, decision D-g):**
+- The agent now enforces the interval range (60–86400) on every remote or saved config. It **rejects** an out-of-range value rather than clamping it, and keeps last-known-good.
+- The config response is capped at 64 KiB.
+- Paths are bounded: at most 32, each 1–1024 bytes, absolute, with no control characters. Scanner lists are capped at 32 names.
+- Each rejection has its own reason code (`interval_out_of_range`, `too_many_paths`, …), never a generic one.
+- The server validates the same bounds on PUT.
+- **Still open here:** the path **allowlist or local opt-in** (`/` is well-formed and still accepted, pinned by `TestParseResponse_RootPathIsHashValidAndInBounds`) and the **walk depth limit**, plus the doubled-backslash `C:\\Users` default.
 
 **Added 2026-09-30 (B-271):**
 - The baseline default for `model_scan_paths` stores the Windows entry as `C:\\Users`, with a doubled backslash, because the SQL literal is taken literally. The API serves it as-is; Windows tolerates it, so the walk still happens.
@@ -3915,7 +3939,7 @@ Choose in the brief.
 - **The spec drift stays with Architect-EAMI** (`API_CONTRACT_DRIFT.md` C15). Don't edit `openapi.yaml` here.
 **Severity:** Low–Medium. No security impact, but it hides whether alerting works at all. **Status:** QUEUED.
 
-### B-293 — Agent applies remote config correctly (master-sequence item 8a) — **QUEUED, 2026-10-05 — investigation (Part A) first, build after founder approval**
+### B-293 — Agent applies remote config correctly (master-sequence item 8a) — **DONE, 2026-10-05** (evidence: `B-293_VERIFICATION.md`)
 **Origin:** founder brief "Item 8a", 2026-10-05, from the scanner capability audit (2026-09-30, §1 and §4) and `DISCOVERY_ADMIN_INVESTIGATION.md` Part 1. Minted at founder direction 2026-10-05. B-293 was confirmed free against BACKLOG.md directly (the counter read B-293 and the number appeared nowhere else). A grep for open items covering remote-config replace, persist, first-scan fetch or reporting back found none. **B-277** (bounds) overlaps on validation only, and **B-278** item 4 (rewriting `agent.yaml` drops hand edits) constrains where state may be stored. Both are cross-referenced, not absorbed.
 **Why:** presets (B-269) are only real if the agent can apply them. Confirmed defects today:
 - remote config merges non-empty fields only, so it can never switch a scanner back on or clear a path;
@@ -3936,6 +3960,18 @@ Choose in the brief.
 
 **Out:** presets, Groups, new config fields beyond what Part A justifies, UI (the Endpoint Detail display is B-270). Unlinked endpoints still get no config (B-269's org default handles that).
 **Unblocks:** B-269 (preset content) and B-270 ("applied config"). No dependency on item 6.
-**Status:** QUEUED. **Part A done 2026-10-05** (`B-293_PART_A_INVESTIGATION.md`). Decisions D-a to D-g are awaiting the founder; no build before approval.
+**Status:** DONE 2026-10-05. Part A: `B-293_PART_A_INVESTIGATION.md`. All of D-a to D-g approved with founder guards (two consecutive 404s; a fixed drop order; specific reason codes). Built, reviewed and live-verified (tests a–f): `B-293_VERIFICATION.md`. **Rollout reality:** agents older than 1.3.0 keep merging (they can't clear paths or re-enable scanners) until they update.
 
-## Next B-ID: B-294
+### B-294 — Windows MSI uninstall leaves the agent's saved remote config (`%ProgramData%\EAMI\Agent`) — **QUEUED (Low), 2026-10-05**
+**Origin:** B-293 decision D-d (founder, 2026-10-05: accepted for 8a, Low follow-up minted). B-294 was confirmed free against BACKLOG.md directly (the counter read B-294 and the number appeared nowhere else), and a grep found no open MSI uninstall or ProgramData item.
+**Problem:**
+- B-293's agent keeps last-known-good remote config in `%ProgramData%\EAMI\Agent\remote-config.json`, under a protected DACL (SYSTEM, Administrators and the agent's own user only).
+- `installer/Product.wxs` doesn't know about the folder, so uninstalling the MSI leaves it behind.
+- It holds scanner config only (interval, scanner names, model paths, sizes), with no secrets and no collector key. The collector URL is stored only as a SHA-256 hash.
+- A reinstall pointed at the **same** collector and agent ID would pick it up as `config_source=persisted` until the first fetch. One pointed elsewhere ignores it (`state_stale`).
+- Linux and macOS: a `.deb` purge or `.rpm` erase removes `/var/lib/eami-agent` (`postremove.sh`). A macOS `.pkg` has no uninstaller at all (pre-existing).
+
+**Fix:** a `util:RemoveFolderEx` (WiX util extension) on uninstall only, not on upgrade, for `[CommonAppDataFolder]EAMI\Agent`. Verify on a disposable Windows VM, **not** this machine's installed MSI.
+**Severity:** Low. **Status:** QUEUED.
+
+## Next B-ID: B-295

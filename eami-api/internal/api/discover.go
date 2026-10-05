@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -63,6 +64,15 @@ type agentEndpointListItem struct {
 type agentEndpointDetail struct {
 	agentEndpointListItem
 	LatestReport json.RawMessage `json:"latest_report"`
+	// B-293: the config the agent reports running (from the latest report;
+	// null when the report predates these fields) and the config the server
+	// expects it to run (the linked governed agent's current config version;
+	// null when the endpoint isn't linked). A consumer compares the two;
+	// B-270 renders it.
+	AppliedConfigVersion  *string `json:"applied_config_version"`
+	ConfigSource          *string `json:"config_source"`
+	ConfigError           *string `json:"config_error"`
+	ExpectedConfigVersion *string `json:"expected_config_version"`
 }
 
 // ListAgentEndpoints handles GET /v1/endpoints.
@@ -160,9 +170,30 @@ func (s *Server) GetAgentEndpoint(w http.ResponseWriter, r *http.Request) {
 		item.WorkspaceID = &info.id
 		item.WorkspaceName = &info.name
 	}
+	applied := parseAppliedConfig(e.LatestReport)
 	resp := agentEndpointDetail{
 		agentEndpointListItem: item,
 		LatestReport:          e.LatestReport,
+		AppliedConfigVersion:  applied.Version,
+		ConfigSource:          applied.Source,
+		ConfigError:           applied.Error,
+	}
+	if gid := e.AgentEndpoint.GatewayAgentID; gid != nil {
+		cfg, err := s.queries.GetAgentConfig(r.Context(), *gid)
+		switch {
+		case err == nil:
+			v := cfg.Version()
+			resp.ExpectedConfigVersion = &v
+		case errors.Is(err, pgx.ErrNoRows):
+			// Same fallback the remote-config route serves (B-236).
+			v := store.AgentConfigDefaults.Version()
+			resp.ExpectedConfigVersion = &v
+		default:
+			// Never show "no expected config" for a transient failure.
+			slog.Error("get endpoint: expected config read failed", "org_id", uc.OrgID, "err", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to load endpoint")
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

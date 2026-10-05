@@ -176,3 +176,43 @@ func TestNoopRegistryReader(t *testing.T) {
 		t.Errorf("NoopRegistryReader.ReadString: want empty, got %q", val)
 	}
 }
+
+// B-293, decision D-a: a missing enabled_scanners key means every scanner,
+// set explicitly at load; an explicit empty list means none. Nothing reads
+// an empty list as "all" any more.
+func TestLoad_EnabledScannersAbsentVersusEmpty(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	absent, err := LoadWithRegistry(write("absent.yaml", "detection:\n  model_file_size_mb: 100\n"), NoopRegistryReader{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(absent.Detection.EnabledScanners) != len(AllScanners) || !absent.FileLoaded {
+		t.Fatalf("absent key: %v (FileLoaded %v)", absent.Detection.EnabledScanners, absent.FileLoaded)
+	}
+	empty, err := LoadWithRegistry(write("empty.yaml", "detection:\n  enabled_scanners: []\n"), NoopRegistryReader{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.Detection.EnabledScanners == nil || len(empty.Detection.EnabledScanners) != 0 {
+		t.Fatalf("explicit []: %#v", empty.Detection.EnabledScanners)
+	}
+	for _, name := range AllScanners {
+		if empty.Detection.IsEnabled(name) {
+			t.Fatalf("%s enabled under an explicit empty list", name)
+		}
+	}
+	noFile, err := LoadWithRegistry(filepath.Join(dir, "missing.yaml"), NoopRegistryReader{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if noFile.FileLoaded || len(noFile.Detection.EnabledScanners) != len(AllScanners) {
+		t.Fatalf("no file: FileLoaded %v, scanners %v", noFile.FileLoaded, noFile.Detection.EnabledScanners)
+	}
+}

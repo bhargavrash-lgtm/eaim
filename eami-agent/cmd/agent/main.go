@@ -22,6 +22,7 @@ import (
 	"github.com/eami/agent/internal/nmlauncher"
 	"github.com/eami/agent/internal/nmregister"
 	"github.com/eami/agent/internal/payload"
+	"github.com/eami/agent/internal/remoteconfig"
 	"github.com/eami/agent/internal/service"
 )
 
@@ -232,27 +233,53 @@ func runLoop(ctx context.Context, cfg *config.Config, log *slog.Logger) {
 		agentID = hostname
 	}
 
+	// B-293: the effective config is cfg (local YAML or defaults) with the
+	// remote config applied whole. Last-known-good remote config persists
+	// in a state file (never the admin's YAML) and is loaded before the
+	// first scan; with no collector there is nothing to persist.
+	var store *remoteconfig.Store
+	if cfg.Collector.URL != "" {
+		store = remoteconfig.DefaultStore()
+	}
+	mgr := remoteconfig.NewManager(cfg, store, remoteconfig.NewIdentity(agentID, cfg.Collector.URL), log)
+	mgr.LoadPersisted()
+
 	for {
-		report, err := payload.BuildWith(cfg, log)
+		// Fetch before every scan, the first one included, so a config
+		// change applies to the very next scan. FetchTimeout caps how long
+		// it can delay that scan; it runs before BuildWith, so it never
+		// eats into the scanners' own deadline (B-281).
+		if cfg.Collector.URL != "" {
+			fctx, cancel := context.WithTimeout(ctx, remoteconfig.FetchTimeout)
+			mgr.Apply(sender.FetchConfig(fctx, agentID))
+			cancel()
+			if ctx.Err() != nil {
+				return // shutting down: don't start a scan the service manager won't wait for
+			}
+		}
+		snap := mgr.Snapshot()
+		status := mgr.Status()
+
+		report, err := payload.BuildWith(snap, log)
 		if err != nil {
 			log.Error("scan error", "err", err)
 		} else {
+			report.ConfigVersion, report.ConfigSource, report.ConfigError = status.Version, status.Source, status.Error
+			if dropped := payload.EnforceMaxSize(report, status.MaxReportSize); len(dropped) > 0 {
+				log.Warn("report over max_report_size_bytes: scanner results dropped", "dropped", dropped)
+			}
 			log.Info("scan complete",
 				"ai_apps", len(report.AIApps),
 				"local_models", len(report.LocalModels),
 				"cloud_clients", len(report.CloudClients),
 				"active_connections", len(report.NetworkActivity.ActiveConnections),
 				"ai_processes", len(report.AIProcesses),
+				"config_source", status.Source,
 			)
 
 			if cfg.Collector.URL != "" {
 				if err := sender.Send(ctx, report); err != nil {
 					log.Warn("send failed", "err", err)
-				} else {
-					// Best-effort remote config poll after each successful send.
-					if err := sender.FetchConfig(ctx, agentID, cfg); err != nil {
-						log.Debug("remote config fetch", "err", err)
-					}
 				}
 			} else {
 				// Stdout mode — pretty-print for debugging.
@@ -265,7 +292,7 @@ func runLoop(ctx context.Context, cfg *config.Config, log *slog.Logger) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(time.Duration(cfg.Agent.IntervalSecs) * time.Second):
+		case <-time.After(time.Duration(snap.Agent.IntervalSecs) * time.Second):
 		}
 	}
 }

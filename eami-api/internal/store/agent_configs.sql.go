@@ -17,6 +17,9 @@ type AgentConfig struct {
 	MaxReportSizeBytes  int32
 	EnabledScanners     []string
 	UpdatedAt           time.Time
+	// ModelFileSizeMB is the models scanner's minimum file size (B-293,
+	// migration 000027). Default 100, the agent's own built-in default.
+	ModelFileSizeMB int32
 }
 
 // AllScanners is every scanner name eami-agent's payload.Build gates on
@@ -48,11 +51,12 @@ var AgentConfigDefaults = AgentConfig{
 	ModelScanPaths:      []string{"/home", "/Users", `C:\Users`},
 	MaxReportSizeBytes:  5242880,
 	EnabledScanners:     append([]string(nil), AllScanners...),
+	ModelFileSizeMB:     100,
 }
 
 const getAgentConfigSQL = `
 SELECT agent_id, scan_interval_seconds, model_scan_paths,
-       max_report_size_bytes, enabled_scanners, updated_at
+       max_report_size_bytes, enabled_scanners, updated_at, model_file_size_mb
 FROM agent_configs
 WHERE agent_id = $1`
 
@@ -63,7 +67,7 @@ func (q *Queries) GetAgentConfig(ctx context.Context, agentID uuid.UUID) (*Agent
 	var c AgentConfig
 	var id [16]byte
 	err := row.Scan(&id, &c.ScanIntervalSeconds, &c.ModelScanPaths,
-		&c.MaxReportSizeBytes, &c.EnabledScanners, &c.UpdatedAt)
+		&c.MaxReportSizeBytes, &c.EnabledScanners, &c.UpdatedAt, &c.ModelFileSizeMB)
 	if err != nil {
 		return nil, err
 	}
@@ -81,12 +85,13 @@ type UpsertAgentConfigParams struct {
 	ModelScanPaths      []string
 	MaxReportSizeBytes  int32
 	EnabledScanners     []string
+	ModelFileSizeMB     int32
 }
 
 const upsertAgentConfigSQL = `
 INSERT INTO agent_configs (agent_id, scan_interval_seconds, model_scan_paths,
-                           max_report_size_bytes, enabled_scanners, updated_at)
-SELECT $1, $2, $3, $4, $5, NOW()
+                           max_report_size_bytes, enabled_scanners, model_file_size_mb, updated_at)
+SELECT $1, $2, $3, $4, $5, $7, NOW()
 FROM gateway_agents
 WHERE id = $1 AND org_id = $6
 ON CONFLICT (agent_id) DO UPDATE SET
@@ -94,9 +99,10 @@ ON CONFLICT (agent_id) DO UPDATE SET
     model_scan_paths      = EXCLUDED.model_scan_paths,
     max_report_size_bytes = EXCLUDED.max_report_size_bytes,
     enabled_scanners      = EXCLUDED.enabled_scanners,
+    model_file_size_mb    = EXCLUDED.model_file_size_mb,
     updated_at            = NOW()
 RETURNING agent_id, scan_interval_seconds, model_scan_paths,
-          max_report_size_bytes, enabled_scanners, updated_at`
+          max_report_size_bytes, enabled_scanners, updated_at, model_file_size_mb`
 
 // UpsertAgentConfig creates or fully replaces an agent's config row, but only
 // when the agent belongs to p.OrgID. For any other org's agent the INSERT's
@@ -109,11 +115,12 @@ func (q *Queries) UpsertAgentConfig(ctx context.Context, p UpsertAgentConfigPara
 		p.MaxReportSizeBytes,
 		p.EnabledScanners,
 		toPgtypeUUID(p.OrgID),
+		p.ModelFileSizeMB,
 	)
 	var c AgentConfig
 	var id [16]byte
 	err := row.Scan(&id, &c.ScanIntervalSeconds, &c.ModelScanPaths,
-		&c.MaxReportSizeBytes, &c.EnabledScanners, &c.UpdatedAt)
+		&c.MaxReportSizeBytes, &c.EnabledScanners, &c.UpdatedAt, &c.ModelFileSizeMB)
 	if err != nil {
 		return nil, err
 	}

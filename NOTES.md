@@ -138,3 +138,14 @@ Found by the B-236 reviews. They predate B-236 and sit outside its diff. At foun
 
 - Every drift note above (and in BACKLOG.md and the verification files) is consolidated, re-checked against the current spec, into **`API_CONTRACT_DRIFT.md`**, plus a generated router-vs-spec route diff.
 - New drift goes there, not here (`API_CONVENTION.md` §7, §9). The entries above are kept as history.
+
+
+## 2026-10-05 — B-293 review follow-ups (not fixed; out of scope or pre-existing)
+
+- **`PUT /v1/gateway/agents/{id}/config` echoes an unknown scanner name** in its 400 (`unknown scanner %q`, from B-271). `%q` escapes it and only the caller sees it, but it misses the "no echo" standard that all of B-293's new messages follow. Fix with a fixed message when that handler is next touched (security review L-3).
+- **Changing the hash scheme needs a release rule too** (code review, Info).
+  - A future `c2:` canonical form would make every older agent reject every config (`version_mismatch`).
+  - So the server must keep serving `c1` until the fleet has upgraded, mirroring the scanner release rule in CLAUDE.md.
+  - Add it to that rule if a `c2` is ever planned.
+- **Non-root runs log `state_write_failed` every cycle.** On a developer machine, the agent run interactively as a normal user can't write `/var/lib`, `/Library/...` or a SYSTEM-protected `%ProgramData%` folder. That is correct, but noisy (code review, Info).
+- **The persistence pre-check must be run before deploying B-293 anywhere with existing data.** It finds `agent_configs` rows the new agent would reject, for example old relative or `~` paths, which used to pass because the PUT only checked "non-empty". The query is in `B-293_VERIFICATION.md` §6. It found 0 rows on the dev DB (code review M1).

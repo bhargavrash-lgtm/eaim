@@ -623,6 +623,11 @@ type AgentConfigResp struct {
 	MaxReportSizeBytes  int32    `json:"max_report_size_bytes"`
 	EnabledScanners     []string `json:"enabled_scanners"`
 	UpdatedAt           string   `json:"updated_at"`
+	// B-293: the full effective config always carries every field ([] means
+	// empty, never "unchanged"), plus its content-hash version. The agent
+	// replaces its config only from a response that carries config_version.
+	ModelFileSizeMB int32  `json:"model_file_size_mb"`
+	ConfigVersion   string `json:"config_version"`
 }
 
 // AgentConfigUpdateRequest is the PUT body for config updates.
@@ -631,6 +636,7 @@ type AgentConfigUpdateRequest struct {
 	ModelScanPaths      []string `json:"model_scan_paths"`
 	MaxReportSizeBytes  *int32   `json:"max_report_size_bytes"`
 	EnabledScanners     []string `json:"enabled_scanners"`
+	ModelFileSizeMB     *int32   `json:"model_file_size_mb"`
 }
 
 // GetAgentConfig handles GET /v1/gateway/agents/{agentId}/config
@@ -709,12 +715,20 @@ func (s *Server) UpdateAgentConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if len(req.ModelScanPaths) == 0 && req.ModelScanPaths != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "model_scan_paths must have at least 1 entry")
+	// B-293: [] is a real value for both lists (no extra model paths; no
+	// scanners at all, decision D-a), so only absent (nil) means "unchanged".
+	// The bounds are the agent's own (store.AgentConfigLimits), so the server
+	// never serves a config the agent would reject.
+	if req.ModelFileSizeMB != nil && (*req.ModelFileSizeMB < store.MinModelFileSizeMB || *req.ModelFileSizeMB > store.MaxModelFileSizeMB) {
+		writeError(w, http.StatusBadRequest, "bad_request", "model_file_size_mb must be 1–100000")
 		return
 	}
-	if len(req.EnabledScanners) == 0 && req.EnabledScanners != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "enabled_scanners must have at least 1 entry")
+	if msg := store.ValidateModelScanPaths(req.ModelScanPaths); msg != "" {
+		writeError(w, http.StatusBadRequest, "bad_request", msg)
+		return
+	}
+	if len(req.EnabledScanners) > store.MaxEnabledScanners {
+		writeError(w, http.StatusBadRequest, "bad_request", "enabled_scanners has too many entries")
 		return
 	}
 	// B-271: the agent matches scanner names exactly, so an unknown or
@@ -764,6 +778,7 @@ func (s *Server) UpdateAgentConfig(w http.ResponseWriter, r *http.Request) {
 			ModelScanPaths:      existing.ModelScanPaths,
 			MaxReportSizeBytes:  existing.MaxReportSizeBytes,
 			EnabledScanners:     existing.EnabledScanners,
+			ModelFileSizeMB:     existing.ModelFileSizeMB,
 		}
 		if req.ScanIntervalSeconds != nil {
 			p.ScanIntervalSeconds = *req.ScanIntervalSeconds
@@ -776,6 +791,9 @@ func (s *Server) UpdateAgentConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.EnabledScanners != nil {
 			p.EnabledScanners = req.EnabledScanners
+		}
+		if req.ModelFileSizeMB != nil {
+			p.ModelFileSizeMB = *req.ModelFileSizeMB
 		}
 		// The upsert is itself org-scoped (defense in depth): ErrNoRows here
 		// means the agent is not this org's, e.g. deleted since the check.
@@ -812,16 +830,29 @@ func (s *Server) UpdateAgentConfig(w http.ResponseWriter, r *http.Request) {
 	if req.EnabledScanners != nil {
 		d.EnabledScanners = req.EnabledScanners
 	}
+	if req.ModelFileSizeMB != nil {
+		d.ModelFileSizeMB = *req.ModelFileSizeMB
+	}
 	writeJSON(w, http.StatusOK, agentConfigToResp(d))
 }
 
 func agentConfigToResp(c store.AgentConfig) AgentConfigResp {
+	// Never null on the wire: an empty list is a real value (B-293).
+	paths, scanners := c.ModelScanPaths, c.EnabledScanners
+	if paths == nil {
+		paths = []string{}
+	}
+	if scanners == nil {
+		scanners = []string{}
+	}
 	return AgentConfigResp{
 		AgentID:             c.AgentID.String(),
 		ScanIntervalSeconds: c.ScanIntervalSeconds,
-		ModelScanPaths:      c.ModelScanPaths,
+		ModelScanPaths:      paths,
 		MaxReportSizeBytes:  c.MaxReportSizeBytes,
-		EnabledScanners:     c.EnabledScanners,
+		EnabledScanners:     scanners,
 		UpdatedAt:           c.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+		ModelFileSizeMB:     c.ModelFileSizeMB,
+		ConfigVersion:       c.Version(),
 	}
 }

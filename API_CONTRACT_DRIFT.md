@@ -12,7 +12,7 @@
 **Counts:** 118 eami-api routes vs 71 documented operations.
 - §A: 3 operations are documented but don't exist as documented.
 - §B: **54 routes are served but undocumented** (53 plus `/health`).
-- §C: 17 field, parameter or response mismatches on documented routes.
+- §C: 20 field, parameter or response mismatches (C18–C20 added by B-293; C18 sits on routes that are themselves undocumented, §B).
 
 ---
 
@@ -55,7 +55,7 @@ Each group's origin, where one is recorded:
 - **Reorder:** the `PUT` alias is undocumented; `POST` is documented (see C10).
 - **`GET /v1/memory/episodes/search`:** see A3.
 
-## C. Field, parameter and response mismatches on documented routes (17)
+## C. Field, parameter and response mismatches on documented routes (20)
 
 | # | Route / schema | Drift | Source | Tracked |
 |---|---|---|---|---|
@@ -76,6 +76,9 @@ Each group's origin, where one is recorded:
 | C15 | `POST /v1/settings/notifications/test` | Spec and UI expect `{success, error}`; the handler returns `{sent, reason}`, so the UI shows every result as an error. **This is a user-visible bug, not just a documentation gap.** | B-238 review I1 | **B-292** (UI/handler fix); the spec half stays here for Architect-EAMI |
 | C16 | `GET /v1/audit/export` | Real optional filters (`agent_name`, `tool_name`, `decision`, RFC3339 `from`/`to`) and the bounded-error responses are undocumented | B-221 | **B-222** |
 | C17 | All routes | **No per-route role requirements are documented.** B-253 made several routes, and some PATCH fields, admin-only. | B-253 (NOTES 2026-09-29) | here |
+| C18 | `GET /v1/agents/{agent_id}/config` (service key), `GET` and `PUT /v1/gateway/agents/{agentId}/config` | B-293: every response carries the **full** config, with `[]` meaning empty and never `null`, plus `config_version` (`c1:` + sha256 of the canonical JSON, a content hash) and `model_file_size_mb` (1–100000, default 100). PUT accepts `[]` for `model_scan_paths` and `enabled_scanners` (`[]` = no scanners); an absent field still means unchanged. New 400s: `model_file_size_mb` out of range; paths: more than 32, empty, over 1024 bytes, control characters, not absolute (POSIX `/`, `X:\` or `X:/`), or a network/UNC/device path (`\\host\x`, `//host/x`, `\\?\…`); more than 32 scanner names. Responses stay well under the agent's 256 KiB cap. The canonical form is specified in `B-293_VERIFICATION.md`. | B-293 | here |
+| C19 | `Endpoint` detail (`GET /v1/endpoints/{endpointId}`) | B-293: new nullable `applied_config_version`, `config_source` (`remote`/`persisted`/`local`/`defaults`), `config_error` (a fixed reason-code set, else `unrecognised`), and `expected_config_version` (null when unlinked). Null on reports from older agents. **New failure status:** the route now returns 500 (a fixed message) when the linked agent's config can't be read, rather than silently showing no expected config. | B-293 | here |
+| C20 | `POST /v1/reports` / collector ingest report payload | B-293: the report gains `config_version`, `config_source` and optional `config_error`; `scanner_errors` gains the code `too_large` (a section dropped to respect `max_report_size_bytes`). Extends C8. | B-293 | here |
 
 **Unspecified older entries:** B-217 recorded "two changed response shapes" for the CMDB list without naming them. They are superseded by C1–C5 above, which describe the current shape.
 

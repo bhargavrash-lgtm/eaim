@@ -64,3 +64,6 @@ contents:
 scripts:
   postinstall: ./postinstall.sh
   preremove: ./preremove.sh
+  # Removes the saved remote config (/var/lib/eami-agent) on purge/erase
+  # only, never on upgrade (B-293).
+  postremove: ./postremove.sh

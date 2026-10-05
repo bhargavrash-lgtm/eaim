@@ -592,7 +592,10 @@ CREATE TABLE IF NOT EXISTS agent_configs (
     max_report_size_bytes INT          NOT NULL DEFAULT 5242880,
     -- All 10 scanners the agent gates on (B-271, migration 000025).
     enabled_scanners      TEXT[]       NOT NULL DEFAULT ARRAY['ai_apps','models','mcp_servers','cloud_clients','network_activity','browser','ai_processes','gpu','python_envs','nodejs_ai'],
-    updated_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    updated_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    -- Remotely settable minimum model file size (B-293, migration 000027).
+    model_file_size_mb    INT          NOT NULL DEFAULT 100
+        CONSTRAINT agent_configs_model_file_size_mb_range CHECK (model_file_size_mb BETWEEN 1 AND 100000)
 );
 
 CREATE OR REPLACE FUNCTION create_default_agent_config()

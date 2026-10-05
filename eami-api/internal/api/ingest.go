@@ -380,7 +380,7 @@ func (s *Server) processPasteEventRelayItem(ctx context.Context, orgID uuid.UUID
 
 // scannerFailureReasons are the reason codes eami-agent sends in
 // scanner_errors (payload.Reason*).
-var scannerFailureReasons = map[string]bool{"timeout": true, "still_running": true, "panic": true, "error": true}
+var scannerFailureReasons = map[string]bool{"timeout": true, "still_running": true, "panic": true, "error": true, "too_large": true}
 
 // logScannerFailures writes one structured server-side log line per scanner
 // that failed in this report (B-285), so failures are queryable in the API's

@@ -15,7 +15,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/eami/agent/internal/config"
+	"github.com/eami/agent/internal/remoteconfig"
 )
 
 // Config holds sender connection settings, populated from eami-agent.yaml.
@@ -124,60 +124,31 @@ func (s *Sender) Send(ctx context.Context, report any) error {
 	return nil
 }
 
-// AgentConfigUpdate is the remote config payload returned by the collector
-// config proxy (GET /v1/agent-config/{agent_id}).
-type AgentConfigUpdate struct {
-	ScanIntervalSeconds int      `json:"scan_interval_seconds"`
-	ModelScanPaths      []string `json:"model_scan_paths"`
-	MaxReportSizeBytes  int      `json:"max_report_size_bytes"`
-	EnabledScanners     []string `json:"enabled_scanners"`
-}
-
-// FetchConfig polls the collector config proxy and applies any non-zero fields
-// to dst. A 404 (agent not yet registered) is silently ignored. All other
-// errors are returned but never fatal — callers should log and continue.
-func (s *Sender) FetchConfig(ctx context.Context, agentID string, dst *config.Config) error {
-	if s.cfg.URL == "" || agentID == "" {
-		return nil
-	}
-
+// FetchConfig polls the collector config proxy (GET /v1/agent-config/
+// {agent_id}) and returns what came back, unapplied: remoteconfig.Manager
+// parses, checks and applies it (B-293). The body is read through a cap, so
+// an oversized or endless response can't exhaust memory; ctx carries the
+// fetch timeout (remoteconfig.FetchTimeout).
+func (s *Sender) FetchConfig(ctx context.Context, agentID string) remoteconfig.FetchResult {
 	reqURL := s.cfg.URL + "/v1/agent-config/" + agentID
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return fmt.Errorf("fetchconfig: build request: %w", err)
+		return remoteconfig.FetchResult{Err: fmt.Errorf("fetchconfig: build request: %w", err)}
 	}
 	req.Header.Set("X-API-Key", s.cfg.APIKey)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("fetchconfig: get: %w", err)
+		return remoteconfig.FetchResult{Err: fmt.Errorf("fetchconfig: get: %w", err)}
 	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-	}()
+	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
-		return nil // agent not yet registered — not an error
+	body, err := io.ReadAll(io.LimitReader(resp.Body, remoteconfig.MaxResponseBytes+1))
+	if err != nil {
+		return remoteconfig.FetchResult{Status: resp.StatusCode, Err: fmt.Errorf("fetchconfig: read: %w", err)}
 	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("fetchconfig: status %d", resp.StatusCode)
+	if len(body) > remoteconfig.MaxResponseBytes {
+		return remoteconfig.FetchResult{Status: resp.StatusCode, TooLarge: true}
 	}
-
-	var update AgentConfigUpdate
-	if err := json.NewDecoder(resp.Body).Decode(&update); err != nil {
-		return fmt.Errorf("fetchconfig: decode: %w", err)
-	}
-
-	// Apply non-zero fields only — zero values mean "no change".
-	if update.ScanIntervalSeconds > 0 {
-		dst.Agent.IntervalSecs = update.ScanIntervalSeconds
-	}
-	if len(update.ModelScanPaths) > 0 {
-		dst.Detection.ModelFileScanPaths = update.ModelScanPaths
-	}
-	if len(update.EnabledScanners) > 0 {
-		dst.Detection.EnabledScanners = update.EnabledScanners
-	}
-	return nil
+	return remoteconfig.FetchResult{Status: resp.StatusCode, Body: body}
 }

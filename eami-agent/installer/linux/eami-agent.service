@@ -11,6 +11,11 @@ Type=simple
 # to its working directory, which is / under systemd, so without it the
 # agent never reads the /etc/eami/agent.yaml postinstall.sh writes.
 ExecStart=/usr/bin/eami-agent --config /etc/eami/agent.yaml
+# B-293: last-known-good remote config lives in /var/lib/eami-agent (root,
+# 0700), never in /etc/eami/agent.yaml. The agent creates and checks it
+# itself too; this just has systemd guarantee it before start.
+StateDirectory=eami-agent
+StateDirectoryMode=0700
 Restart=on-failure
 RestartSec=10
 # Cap restart attempts: if the service crashes 5 times in 5 minutes, stop trying
