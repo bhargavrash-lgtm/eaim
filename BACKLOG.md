@@ -3939,7 +3939,7 @@ Choose in the brief.
 - **The spec drift stays with Architect-EAMI** (`API_CONTRACT_DRIFT.md` C15). Don't edit `openapi.yaml` here.
 **Severity:** Low–Medium. No security impact, but it hides whether alerting works at all. **Status:** QUEUED.
 
-### B-293 — Agent applies remote config correctly (master-sequence item 8a) — **DONE, 2026-10-05** (evidence: `B-293_VERIFICATION.md`)
+### B-293 — Agent applies remote config correctly (master-sequence item 8a) — **DONE, 2026-10-05** — `50f6a90` (evidence: `B-293_VERIFICATION.md`)
 **Origin:** founder brief "Item 8a", 2026-10-05, from the scanner capability audit (2026-09-30, §1 and §4) and `DISCOVERY_ADMIN_INVESTIGATION.md` Part 1. Minted at founder direction 2026-10-05. B-293 was confirmed free against BACKLOG.md directly (the counter read B-293 and the number appeared nowhere else). A grep for open items covering remote-config replace, persist, first-scan fetch or reporting back found none. **B-277** (bounds) overlaps on validation only, and **B-278** item 4 (rewriting `agent.yaml` drops hand edits) constrains where state may be stored. Both are cross-referenced, not absorbed.
 **Why:** presets (B-269) are only real if the agent can apply them. Confirmed defects today:
 - remote config merges non-empty fields only, so it can never switch a scanner back on or clear a path;

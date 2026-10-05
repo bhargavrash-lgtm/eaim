@@ -106,10 +106,12 @@ anything.
 
 ## Phase 2 — Discovery admin design (build in this order, each satisfying items 6 and 7)
 
-- [ ] 8a. **B-293** — Agent applies remote config correctly: replace not
+- [x] 8a. **B-293** — Agent applies remote config correctly: replace not
       merge, persisted, fetched before first scan, applied config reported
       back. Prerequisite for B-269's preset content and for B-270's
       "applied config" display. No dependency on item 6 (Groups).
+      Done 2026-10-05 — `50f6a90` (agent 1.3.1; `B-293_VERIFICATION.md`).
+      Rollout: agents older than 1.3.0 keep merging until they update.
 - [ ] 8. **B-269** — Discovery presets, group-based assignment,
       multi-group precedence resolved before build.
       Splitting: preset DEFINITION (name, version, scanner content,
