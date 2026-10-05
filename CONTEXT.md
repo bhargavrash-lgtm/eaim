@@ -8,7 +8,14 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-05, newest) — B-293 (item 8a) DONE: the agent applies remote config correctly
+## Active decision thread (2026-10-05, newest) — B-293 follow-ups: D-c evidence, B-277 before presets, Windows gate
+
+- **D-c was already shown live** on 1.3.1 (`B-293_VERIFICATION.md` §4, steps c1/c2). §2 now points to it. No re-run was needed.
+- **Sequencing:** B-277's path allowlist and walk-depth limit must land before item 8's preset content, or inside B-269's first slice. Recorded under item 8 and on B-277.
+- **Gate:** live Windows service verification of persisted config is required before any Windows deployment relies on it. Recorded on B-293 and under item 8a.
+- Docs only.
+
+## Active decision thread (2026-10-05) — B-293 (item 8a) DONE: the agent applies remote config correctly
 
 - **Built** (D-a to D-g approved with founder guards):
   - A full-config wire format with a content-hash `config_version`.
@@ -2934,6 +2941,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-05 by Claude Code — B-293 follow-ups: D-c live evidence referenced; B-277 allowlist/depth sequenced before B-269 preset content; Windows live-service gate logged. Docs only. Marker cleared.
+
+Prior entry:
 2026-10-05 by Claude Code — B-293 (item 8a) DONE: agent 1.3.1 applies remote config correctly (replace, persist, first-scan fetch, report-back, bounds, size cap, model size); both reviews' findings fixed; live tests a–f passed on the packaged agent; B-294 minted; scanner release rule in CLAUDE.md. Marker cleared.
 
 Prior entry:

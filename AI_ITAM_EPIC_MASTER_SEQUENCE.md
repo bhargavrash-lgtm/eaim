@@ -112,6 +112,10 @@ anything.
       "applied config" display. No dependency on item 6 (Groups).
       Done 2026-10-05 — `50f6a90` (agent 1.3.1; `B-293_VERIFICATION.md`).
       Rollout: agents older than 1.3.0 keep merging until they update.
+      **Windows gate:** live verification of persisted config on a real
+      Windows service is required before any Windows deployment relies on
+      it; 8a's Windows path was verified by native unit tests only. Track
+      on B-293 / B-294 (disposable Windows VM).
 - [ ] 8. **B-269** — Discovery presets, group-based assignment,
       multi-group precedence resolved before build.
       Splitting: preset DEFINITION (name, version, scanner content,
@@ -121,6 +125,13 @@ anything.
       assignment before item 6 closes.
       **Depends on 8a (B-293):** a preset is only real if the agent can
       apply it (replace semantics, persistence, first-scan fetch).
+      **Sequencing (founder, 2026-10-05): B-277's path allowlist and
+      walk-depth limit must land before item 8's preset content, or inside
+      B-269's first slice.** Why:
+      - B-269 puts a UI on `model_scan_paths`;
+      - `/` is still accepted as a scan path (8a bounds only check shape);
+      - since 8a, remote config persists across restarts, so a bad root
+        walk would survive a restart too.
 - [ ] 9. **B-270** — Endpoint Detail read-only effective-config view.
       **Depends on 8a (B-293):** "last config actually applied" needs the
       agent to report the config it is running.

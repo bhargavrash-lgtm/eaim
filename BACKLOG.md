@@ -3638,6 +3638,11 @@ Choose in the brief.
 
 **Dependencies:** B-269 (the preset schema) and B-194 (the models scanner over-collection).
 
+**Sequencing (founder, 2026-10-05): the path allowlist / local opt-in and the walk-depth limit below must land before item 8's preset content (B-269), or inside B-269's first slice.** Why:
+- B-269 puts a UI on `model_scan_paths`.
+- `/` is still accepted (B-293's bounds check only the path's shape).
+- Since B-293, remote config persists across restarts, so a bad root walk would survive a restart.
+
 **Partly done by B-293 (2026-10-05, decision D-g):**
 - The agent now enforces the interval range (60–86400) on every remote or saved config. It **rejects** an out-of-range value rather than clamping it, and keeps last-known-good.
 - The config response is capped at 64 KiB.
@@ -3961,6 +3966,7 @@ Choose in the brief.
 **Out:** presets, Groups, new config fields beyond what Part A justifies, UI (the Endpoint Detail display is B-270). Unlinked endpoints still get no config (B-269's org default handles that).
 **Unblocks:** B-269 (preset content) and B-270 ("applied config"). No dependency on item 6.
 **Status:** DONE 2026-10-05. Part A: `B-293_PART_A_INVESTIGATION.md`. All of D-a to D-g approved with founder guards (two consecutive 404s; a fixed drop order; specific reason codes). Built, reviewed and live-verified (tests a–f): `B-293_VERIFICATION.md`. **Rollout reality:** agents older than 1.3.0 keep merging (they can't clear paths or re-enable scanners) until they update.
+**Windows gate (founder, 2026-10-05):** live verification of persisted config on a real **Windows service** (the SYSTEM agent writing, reloading after a restart and refusing a tampered or loosened `%ProgramData%\EAMI\Agent`) is required **before any Windows deployment relies on persisted config**. 8a's Windows path was verified by native unit tests only (DACL, re-secure, a real junction in the chain); the installed MSI on the dev machine was deliberately not touched. Do it on a disposable Windows VM, together with B-294's MSI pre-creation.
 
 ### B-294 — Windows MSI uninstall leaves the agent's saved remote config (`%ProgramData%\EAMI\Agent`) — **QUEUED (Low), 2026-10-05**
 **Origin:** B-293 decision D-d (founder, 2026-10-05: accepted for 8a, Low follow-up minted). B-294 was confirmed free against BACKLOG.md directly (the counter read B-294 and the number appeared nowhere else), and a grep found no open MSI uninstall or ProgramData item.

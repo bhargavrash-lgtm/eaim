@@ -98,6 +98,7 @@ It's implemented twice: `eami-api/internal/store/agent_config_version.go` and `e
 **Two consecutive 404s** (D-c, with the founder's guard):
 - One 404 changes nothing.
 - A second **consecutive** 404 deletes the saved config and reverts to local config. Any other response resets the count.
+- **Shown live on 1.3.1** (§4, the e/f table, steps c1 and c2): after the first 404 the saved config `c1:0a65…` was kept and the agent stayed `remote`; after the second consecutive 404 the agent logged `reverted to local config`, reported `config_source=local`, and the state file was gone.
 - It applies only to config tied to the current identity. A file for another identity was never loaded, so it is never deleted by this rule.
 
 **Fetch timing:** a fetch runs before every scan, including the first after a restart, capped at 10 s. It runs before `BuildWith`, so it never eats into the scanners' 30 s deadline (B-281). Each scan gets a private snapshot of the config, so a scanner still running from an earlier cycle keeps the parameters it started with.
