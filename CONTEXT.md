@@ -2,13 +2,28 @@
 # Updated by: Claude Code (after every task) AND the PM chat (after every
 # planning decision). Read by both at the start of every session, before
 # anything else.
-ACTIVE AGENT: Code — item 8 / B-269 (Discovery presets): Part 0 design record + Part A investigation — started 2026-10-05
+ACTIVE AGENT: none
 STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing index and order for the whole AI ITAM program. It carries the same standing weight as `MULTI_AGENT_PROTOCOL.md`.
 - Before building anything in the program, read it and confirm that the next unchecked item matches what you're about to build.
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-05, newest) — Item 8 / B-269: design recorded, Part A reported, awaiting approval
+## Active decision thread (2026-10-05, newest) — B-269: D1–D10 recorded; Slice 0 planned (no build)
+
+- **Part 0** (`9bc2672`):
+  - D1–D10 recorded in `DISCOVERY_PRESETS_DESIGN.md` §12, B-269's entry and under item 8.
+  - Slice order is now 0, 0b, 1–4.
+  - **B-295** minted (hostname collision merges two machines); the next B-ID is **B-296**.
+- **Slice 0 plan:** `B-269_SLICE0_PLAN.md`.
+  - The models scanner today: extra paths walk **any** file at or over the minimum size, labelled `lm_studio`, with no depth limit and no ctx check. That's the B-194 root cause.
+  - Proposed: an extension allowlist for extra paths, depth limit 8, ctx cancellation, `path_root` (agent) and `path_profile_parent` (server), `{code, field}` errors, shared `testdata/` fixtures.
+  - It's an agent change (1.3.2) with a rollout tail; old agents keep over-collecting until they update.
+- **Two points that change decisions:**
+  - D4's "where the existing key is stored" means the agent rewriting `agent.yaml` (forbidden), and on Windows `HKLM\SOFTWARE\EAMI\Agent` is readable by local users (pre-existing, unverified). Suggest the B-293 state directory.
+  - D9 would make the legacy `agent_configs` default row unsavable. Suggest an empty column default, with the rules applied only on path change.
+- Decisions S1–S7 are pending. Marker cleared at founder direction (plan only; the next brief re-sets it).
+
+## Active decision thread (2026-10-05) — Item 8 / B-269: design recorded, Part A reported, awaiting approval
 
 - **Part 0** (`2b0c887`):
   - `DISCOVERY_PRESETS_DESIGN.md` saved verbatim.
@@ -2961,6 +2976,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-05 by Claude Code — B-269: D1–D10 recorded (Part 0, `9bc2672`); B-295 minted; Slice 0 planned (`B-269_SLICE0_PLAN.md`), S1–S7 pending. No code. Marker cleared.
+
+Prior entry:
 2026-10-05 by Claude Code — B-269: design recorded (Part 0), Part A investigation reported (`B-269_PART_A_INVESTIGATION.md`), D1–D10 pending. No code. Marker still set (build awaits approval).
 
 Prior entry:
