@@ -115,3 +115,24 @@ Part A (`B-269_PART_A_INVESTIGATION.md`) was approved, with D1–D10 as follows.
   - The codes are added to `API_CONTRACT_DRIFT.md`.
 - **Minted: B-295.** A hostname collision merges two machines into one endpoint.
 - **Slice order is now 0, 0b, 1, 2, 3, 4.** **Slice 0** is B-277's path allowlist and depth limit, **plus the B-194 file-type filter**. Its plan is `B-269_SLICE0_PLAN.md`.
+
+### Slice 0 decisions S1–S7 (founder, 2026-10-05), and the D4 correction
+
+**D4 correction (supersedes D4's "stored where the existing key is stored"):**
+- The minted per-endpoint credential does **NOT** go in the existing key field (MSI property / registry value, `EAMI_COLLECTOR_API_KEY`) or in the admin's YAML (`/etc/eami/agent.yaml`). The agent never rewrites the YAML (B-278 #4, B-293).
+- It goes in its **own credential file in the B-293 state directory**:
+  - the same ancestor-chain and junction/symlink checks as the state file;
+  - mode **0600** (Unix) or a **restricted protected ACL** (Windows: SYSTEM, Administrators, the agent's own user);
+  - an **atomic write**.
+- The agent **never logs it, reports it, or returns it in any API response.**
+- Windows enrollment stays under the 8a live-service gate.
+
+**S1–S7:**
+- **S1:** keep `.bin` in the extra-path allowlist. Editor help text must say that **`.bin` can match non-model files**.
+- **S2:** a new `source` value, **`scan_path`** ("Configured path"), for extra-path hits. **Every** consumer of `source` must handle it: the UI label map, Lineage, CMDB queries and Endpoint Detail. The orphaned-link check applies.
+- **S3:** walk depth limit **8**. On a hit, record a short **`depth_limited`** reason. **Never silent.**
+- **S4:** **empty** default model paths for newly created agents. Follow-up minted (**B-296**) to clean stored configs still carrying `/home`, `/Users`, `C:\Users`, using the `B-269_PART_A_INVESTIGATION.md` / `B-293_VERIFICATION.md` §6 query.
+- **S5:** the new path rules apply on the old Configure route **only when the paths change**. Legacy paths stay accepted and **flagged**.
+- **S6:** see the D4 correction above.
+- **S7:** verify on a **disposable VM** whether `HKLM\SOFTWARE\EAMI\Agent` (which holds the collector key) is readable by local users. The consequence is recorded on B-293: if it is, **a standard user can forge reports as that agent**. If confirmed, it is rated **Medium** and minted separately.
+- **Untouched by Slice 0:** B-282 (blank agent version) and B-294 (MSI state folder).

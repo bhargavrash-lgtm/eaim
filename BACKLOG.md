@@ -4023,6 +4023,12 @@ Choose in the brief.
 **Out:** presets, Groups, new config fields beyond what Part A justifies, UI (the Endpoint Detail display is B-270). Unlinked endpoints still get no config (B-269's org default handles that).
 **Unblocks:** B-269 (preset content) and B-270 ("applied config"). No dependency on item 6.
 **Status:** DONE 2026-10-05. Part A: `B-293_PART_A_INVESTIGATION.md`. All of D-a to D-g approved with founder guards (two consecutive 404s; a fixed drop order; specific reason codes). Built, reviewed and live-verified (tests a–f): `B-293_VERIFICATION.md`. **Rollout reality:** agents older than 1.3.0 keep merging (they can't clear paths or re-enable scanners) until they update.
+**S7 (founder, 2026-10-05): is the collector key readable by local users?**
+- Windows keeps the collector key (`COLLECTOR_API_KEY`) in `HKLM\SOFTWARE\EAMI\Agent`, and the default `HKLM\SOFTWARE` ACL grants Users **read**.
+- **If that holds for this key, a standard user can forge reports as that agent** (impersonate the endpoint to the collector).
+- To be verified on a **disposable Windows VM**, not the dev machine's installed MSI. **If confirmed, rated Medium and minted separately.**
+- Not yet verified: no VM was available in the session that recorded this.
+
 **Windows gate (founder, 2026-10-05):** live verification of persisted config on a real **Windows service** (the SYSTEM agent writing, reloading after a restart and refusing a tampered or loosened `%ProgramData%\EAMI\Agent`) is required **before any Windows deployment relies on persisted config**. 8a's Windows path was verified by native unit tests only (DACL, re-secure, a real junction in the chain); the installed MSI on the dev machine was deliberately not touched. Do it on a disposable Windows VM, together with B-294's MSI pre-creation.
 
 ### B-294 — Windows MSI uninstall leaves the agent's saved remote config (`%ProgramData%\EAMI\Agent`) — **QUEUED (Low), 2026-10-05**
@@ -4053,4 +4059,19 @@ Choose in the brief.
 **Endpoints already merged can't be un-merged** (founder, 2026-10-05). Their history interleaves two machines, and nothing in the stored reports reliably separates them.
 **Severity:** Medium (wrong inventory, silent). **Status:** QUEUED; fixed by B-269 Slice 3.
 
-## Next B-ID: B-296
+### B-296 — Clean stored agent configs still carrying the whole-profile default paths (`/home`, `/Users`, `C:\Users`) — **QUEUED (Low–Medium), 2026-10-05**
+**Origin:** B-269 Slice 0 decision S4 (founder, 2026-10-05). Minted at founder direction. B-296 was confirmed free against BACKLOG.md directly (the counter read B-296 and the number appeared nowhere else). A grep found no open item to clean stored paths.
+**Problem:**
+- Slice 0 makes **new** agents default to **empty** model paths, and makes the server reject whole-profile parents on any **change**.
+- But stored `agent_configs` rows, and any presets migrated from them (B-269 D8), keep `/home`, `/Users`, `C:\Users` (plus the doubled-backslash form). That is the B-194 over-collection default.
+- On 1.3.2+ agents the file-type filter and depth limit shrink what this collects. On older agents, nothing changes until they update. Agents older than 1.3.0 can't even have paths removed remotely.
+
+**Fix:**
+- Find the rows with the §6 query (`B-293_VERIFICATION.md` / `B-269_PART_A_INVESTIGATION.md`).
+- Decide per row (or by policy) whether to clear or replace the paths.
+- Do it through the normal config route or preset publish, so it is audited (Slice 0b).
+- Never by silent bulk SQL.
+
+**Status:** QUEUED. **Dependencies:** B-269 Slice 0b (audit) and Slice 1 (presets).
+
+## Next B-ID: B-297
