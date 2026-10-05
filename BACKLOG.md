@@ -3426,7 +3426,7 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 
 **Deferred:** group-based assignment (item 6), canary or percentage rollout, scheduled publish, per-endpoint overrides, two-person publish approval, and reusing the versioning pattern for probe settings (item 12; reuse the approach, don't abstract until the second use).
 
-**Status:** QUEUED. Design recorded 2026-10-05; Part A investigation next. **No build until the founder approves Part A.**
+**Status:** QUEUED. Design recorded 2026-10-05. **Part A done 2026-10-05** (`B-269_PART_A_INVESTIGATION.md`): 12 conflicts flagged, decisions D1–D10 awaiting the founder. **No build until the founder approves Part A.**
 
 ### B-270 — Read-only effective-config view on Endpoint Detail (Layer 3) — **QUEUED, 2026-09-30 — build order item 2 (with B-252 C2)**
 **Origin:** `DISCOVERY_ADMIN_INVESTIGATION.md` Part 1B(d). Founder-approved build order, 2026-09-30. Minted at founder direction 2026-09-30. B-270 was confirmed free against BACKLOG.md directly: the counter read B-269, and B-269 and B-270 were referenced nowhere. A grep for open items covering presets, effective config or enrollment keys found only B-267's own forward references to this work.

@@ -8,7 +8,27 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-05, newest) — B-293 follow-ups: D-c evidence, B-277 before presets, Windows gate
+## Active decision thread (2026-10-05, newest) — Item 8 / B-269: design recorded, Part A reported, awaiting approval
+
+- **Part 0** (`2b0c887`):
+  - `DISCOVERY_PRESETS_DESIGN.md` saved verbatim.
+  - B-269's decisions and four slices recorded, and the slices added under item 8.
+  - The design supersedes B-269's 2026-09-30 sketch: the page is Admin › Discovery Hub › Agent-Based; no assignment means no config.
+- **Part A** (`9359c4a`): `B-269_PART_A_INVESTIGATION.md`. 12 conflicts are flagged; the key ones:
+  - **7a gate open** (no acknowledgement recorded) before item 8 builds.
+  - **No admin-write audit trail** (B-224 uninvestigated).
+  - Ingest and config are **single-org** (`GetDefaultOrgID`, B-243).
+  - The collector mints keys **CLI-only**, per self-asserted hostname (collisions).
+  - **Configure** would edit a table nothing reads from Slice 1 until Slice 4.
+  - `agent_version` is blank (B-282), so the impact panel uses the presence of `config_version`.
+  - Rollout from latest reports de-TOASTs whole reports and won't scale, so denormalize onto `endpoints`.
+  - 11 of 13 `agent_configs` rows have no linked endpoint.
+  - The migrated defaults (`/home`, `/Users`, `C:\Users`) aren't "roots".
+  - The API returns messages, not reason codes.
+- Migration confirmed **no behaviour change** for the 2 linked endpoints: identical content and hash, and both run pre-1.3.0 agents.
+- **Decisions D1–D10 pending. The marker stays set**: the build is part of this brief, awaiting approval.
+
+## Active decision thread (2026-10-05) — B-293 follow-ups: D-c evidence, B-277 before presets, Windows gate
 
 - **D-c was already shown live** on 1.3.1 (`B-293_VERIFICATION.md` §4, steps c1/c2). §2 now points to it. No re-run was needed.
 - **Sequencing:** B-277's path allowlist and walk-depth limit must land before item 8's preset content, or inside B-269's first slice. Recorded under item 8 and on B-277.
@@ -2941,6 +2961,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-05 by Claude Code — B-269: design recorded (Part 0), Part A investigation reported (`B-269_PART_A_INVESTIGATION.md`), D1–D10 pending. No code. Marker still set (build awaits approval).
+
+Prior entry:
 2026-10-05 by Claude Code — B-293 follow-ups: D-c live evidence referenced; B-277 allowlist/depth sequenced before B-269 preset content; Windows live-service gate logged. Docs only. Marker cleared.
 
 Prior entry:
