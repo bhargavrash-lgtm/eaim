@@ -75,3 +75,43 @@ Presets CRUD with rollout summary; draft GET/PUT; publish; versions list; revert
 
 ## 11. DEFERRED
 Group-based assignment (item 6), canary or percentage rollout, scheduled publish, per-endpoint overrides, two-person publish approval, reusing the versioning pattern for probe settings (item 12): reuse the approach, do not abstract until the second use.
+
+---
+
+## 12. FOUNDER DECISIONS ON PART A (2026-10-05)
+
+Part A (`B-269_PART_A_INVESTIGATION.md`) was approved, with D1–D10 as follows. Where these differ from §1–§11, they win.
+
+- **D1, the 7a gate:** acknowledgement of the drift hand-off is **waived for Slices 0–1** and **required before Slice 2**. The hand-off itself is the founder's action.
+- **D2, admin audit:** a new **Slice 0b**, before Slice 1. It is a **minimal, generic, append-only admin audit trail**:
+  - fields: org, actor, action code, target, change summary, time;
+  - wired **only** to presets, enrollment keys and assignment;
+  - it **never records key values or secrets**;
+  - it reuses the existing hash chain if that's cheap; otherwise the docs say plainly that it is **not tamper-evident**.
+  - B-224 adopts the rest later.
+- **D3, org binding:** single-org through Slice 3. **Key issuance is refused for any org other than the default one until B-243 is fixed**, with a test.
+- **D4, endpoint identity** (Slice 3; **security review required**):
+  - a **server-issued endpoint identity**;
+  - reports are attributed by the **minted credential**, not by the ID in the payload;
+  - the credential is stored where the existing key is stored, with the same permissions.
+  - **Endpoints already merged by a hostname collision can't be un-merged** (B-295).
+- **D5, enrollment key:** the `eami_e_` prefix in the **existing key field**. It is accepted **only on the exchange route** and **rejected for ingest**.
+- **D6, Configure:** **disable** Agent Detail's Configure **in Slice 1**, with a message pointing at presets. This is a **deliberate removal of a reachable action**, and the Slice 1 commit says so.
+- **D7, rollout data:**
+  - The latest config fields are stored **on the endpoint row**, in the **same transaction as the report insert**.
+  - They are updated **only if the report is the latest by receive time** (B-284).
+  - They are **backfilled in the migration**.
+  - A **stored-versus-computed equality test** checks them.
+- **D8, migration:**
+  - Migrate **only rows with linked endpoints**, plus a **Standard** preset in **every** org.
+  - Migrated presets **keep today's behaviour**, flagged **"needs review"** with the B-194 warning.
+  - **New presets never default to those paths.**
+- **D9, path rules:**
+  - **Server-side:** reject relative paths, UNC paths, **filesystem roots** and **whole-profile parents** (`/home`, `/Users`, `C:\Users`).
+  - **Agent-side:** a **fixed walk-depth limit** and **true-root rejection**.
+- **D10, error codes:**
+  - **Stable codes in a JSON error body**, with **one shared fixture file** for both Go modules.
+  - A code may name a field from a fixed list; it **never echoes a value**.
+  - The codes are added to `API_CONTRACT_DRIFT.md`.
+- **Minted: B-295.** A hostname collision merges two machines into one endpoint.
+- **Slice order is now 0, 0b, 1, 2, 3, 4.** **Slice 0** is B-277's path allowlist and depth limit, **plus the B-194 file-type filter**. Its plan is `B-269_SLICE0_PLAN.md`.

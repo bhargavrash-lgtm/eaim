@@ -3417,8 +3417,21 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
   - All mutations audited through the existing trail.
   - Publish and key issuance are step-up (B-231) candidates.
 
-**Slices (each shippable, in order; tick item 8 only when all four are done):**
-- [ ] **Slice 0 (prerequisite):** B-277's path allowlist and walk-depth limit.
+**Founder decisions on Part A (2026-10-05):** D1–D10 are recorded in `DISCOVERY_PRESETS_DESIGN.md` §12. In short:
+- D1: the 7a acknowledgement is waived for Slices 0–1, required before Slice 2.
+- D2: a new Slice 0b, a minimal append-only admin audit trail for presets, keys and assignment.
+- D3: single-org through Slice 3; issuance refused for non-default orgs until B-243.
+- D4: a server-issued identity, with reports attributed by credential (Slice 3, security review).
+- D5: `eami_e_` accepted only on the exchange route.
+- D6: Configure disabled in Slice 1, a deliberate removal.
+- D7: the latest config fields are stored on the endpoint row.
+- D8: migrate only linked rows, plus Standard everywhere; "needs review" with the B-194 warning.
+- D9: server rejects relative, UNC, root and whole-profile-parent paths; the agent gets a depth limit and root rejection.
+- D10: stable JSON error codes with one shared fixture file.
+
+**Slices (each shippable, in order: 0, 0b, 1, 2, 3, 4; tick item 8 only when all are done):**
+- [ ] **Slice 0 (prerequisite):** B-277's path allowlist and walk-depth limit, **plus the B-194 file-type filter**. Plan: `B-269_SLICE0_PLAN.md`.
+- [ ] **Slice 0b:** a minimal, generic, append-only admin audit trail (D2), wired to presets, keys and assignment only.
 - [ ] **Slice 1 (backend):** schema, migration, endpoint-keyed config delivery, assignment, validation, API, tests. Highest risk.
 - [ ] **Slice 2 (UI):** preset list, editor, draft/publish/revert, rollout summary.
 - [ ] **Slice 3:** enrollment keys, deployments, package builder, bundles.
@@ -4024,4 +4037,20 @@ Choose in the brief.
 **Fix:** a `util:RemoveFolderEx` (WiX util extension) on uninstall only, not on upgrade, for `[CommonAppDataFolder]EAMI\Agent`. Verify on a disposable Windows VM, **not** this machine's installed MSI.
 **Severity:** Low. **Status:** QUEUED.
 
-## Next B-ID: B-295
+### B-295 — Hostname collision merges two machines into one endpoint — **QUEUED (Medium), 2026-10-05**
+**Origin:** B-269 Part A (`B-269_PART_A_INVESTIGATION.md` §1, E1/C4). Minted at founder direction 2026-10-05. B-295 was confirmed free against BACKLOG.md directly (the counter read B-295 and the number appeared nowhere else). A grep for "same hostname", "hostname collision", "collide" and "two machines" found no open item.
+**Problem:**
+- `endpoints` is unique on `(org_id, agent_id)`, and `agent_id` is **self-asserted** by the agent: its config `agent.id`, else the **hostname**.
+- Two machines with the same hostname (cloned images, `DESKTOP-XXXX` defaults, reused names) **silently write to one endpoint row**: interleaved reports, a wrong inventory, and "latest report" flipping between machines.
+- The collector's per-agent keys are also one active key per `agent_id`, so the second machine can't even get its own key.
+- With the legacy static fleet-wide key there is no binding at all.
+
+**Fix:** B-269 Slice 3 (decision D4):
+- enrollment issues a **server-side endpoint identity**;
+- reports are attributed by the **minted credential**, not the payload ID;
+- security review required.
+
+**Endpoints already merged can't be un-merged** (founder, 2026-10-05). Their history interleaves two machines, and nothing in the stored reports reliably separates them.
+**Severity:** Medium (wrong inventory, silent). **Status:** QUEUED; fixed by B-269 Slice 3.
+
+## Next B-ID: B-296

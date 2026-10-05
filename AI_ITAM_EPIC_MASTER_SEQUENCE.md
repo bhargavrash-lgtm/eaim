@@ -126,9 +126,15 @@ anything.
       **Depends on 8a (B-293):** a preset is only real if the agent can
       apply it (replace semantics, persistence, first-scan fetch).
       **Design (founder, 2026-10-05):** `DISCOVERY_PRESETS_DESIGN.md`.
-      Slices, each shippable, in order. Tick item 8 only when all four
+      Decisions D1–D10 (founder, 2026-10-05): design §12. Slices, each
+      shippable, in order 0, 0b, 1, 2, 3, 4. Tick item 8 only when all
       are done:
-      - [ ] Slice 0 (prerequisite): B-277 path allowlist and depth limit.
+      - [ ] Slice 0 (prerequisite): B-277 path allowlist and depth limit,
+            plus the B-194 file-type filter (`B-269_SLICE0_PLAN.md`).
+      - [ ] Slice 0b: minimal append-only admin audit trail (D2), for
+            presets, keys and assignment only.
+      Gate: the 7a drift hand-off acknowledgement is waived for Slices
+      0–1 and **required before Slice 2** (D1).
       - [ ] Slice 1 (backend): schema, migration, endpoint-keyed config
             delivery, assignment, validation, API, tests.
       - [ ] Slice 2 (UI): preset list, editor, draft/publish/revert,
