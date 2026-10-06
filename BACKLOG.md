@@ -3442,7 +3442,7 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 
 **Slices (each shippable, in order: 0, 0b, 1, 2, 3, 4; tick item 8 only when all are done):**
 - [x] **Slice 0 (prerequisite): DONE 2026-10-06** — `5290482` (`B-269_SLICE0_VERIFICATION.md`; agent 1.3.2). B-277's path rules and walk-depth limit, **plus the B-194 file-type filter**. Plan: `B-269_SLICE0_PLAN.md`.
-- [ ] **Slice 0b:** a minimal, generic, append-only admin audit trail (D2), wired to presets, keys and assignment only.
+- [ ] **Slice 0b:** a minimal, generic, append-only admin audit trail (D2), wired to presets, keys and assignment only. **Part A done 2026-10-06** (`B-269_SLICE0B_PART_A_INVESTIGATION.md`): a separate `admin_audit_events` table with its own per-org hash chain (not `audit_log`), written in the change's own transaction under a per-org advisory lock, admin-only `GET /v1/audit/admin-events` (+ `/verify`). Decisions B0b-1..9 pending. Also found (proposed, not minted): `audit_log` has no partition after 2027-12 and no DEFAULT partition; the app DB role is a superuser, so `audit_log` append-only isn't enforced.
 - [ ] **Slice 1 (backend):** schema, migration, endpoint-keyed config delivery, assignment, validation, API, tests. Highest risk.
 - [ ] **Slice 2 (UI):** preset list, editor, draft/publish/revert, rollout summary.
 - [ ] **Slice 3:** enrollment keys, deployments, package builder, bundles.

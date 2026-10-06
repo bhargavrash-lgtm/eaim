@@ -8,7 +8,18 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-06, newest) — Path-rule authority recorded; B-297 gate minted; 1.3.2 release notes
+## Active decision thread (2026-10-06, newest) — B-269 Slice 0b Part A (admin audit trail): report, no build
+
+- **Report:** `B-269_SLICE0B_PART_A_INVESTIGATION.md`.
+- **Recommendation:** a new `admin_audit_events` table with its own **per-org** hash chain (per-org `seq`, org-specific genesis, length-prefixed hash covering every column). **Not** `audit_log`: its chain is single-writer (gateway mutex, unlocked global head), its hash doesn't cover a summary, and six readers would need filtering.
+- **Writes:** inside the change's transaction, under `pg_advisory_xact_lock(hashtextextended('admin_audit:'||org))`, with `UNIQUE(org_id, seq)` as backstop; fail closed.
+- **Summary:** field names, hashes, counts, codes and closed-enum values only; never key values, credentials, raw config, error text or admin free text.
+- **Read:** admin-only `GET /v1/audit/admin-events` and `/verify`. Not partitioned, never deleted, org FK RESTRICT, append-only triggers.
+- **Honest limit:** detects edits and interior deletions; not tail truncation or a full recompute by a DB admin.
+- **Pre-existing findings, proposed, not minted (next B-ID B-298):** F1 `audit_log` inserts fail from 2028-01-01 (no partitions after 2027-12, no DEFAULT, partition job only in the retired path); F2 `eami_app` is a superuser, so `audit_log`'s REVOKE never applied.
+- **Waiting on:** founder decisions B0b-1..9. Marker cleared.
+
+## Active decision thread (2026-10-06) — Path-rule authority recorded; B-297 gate minted; 1.3.2 release notes
 
 - **`DISCOVERY_PRESETS_DESIGN.md`:** server path rules are a first filter only; the agent is the authority on what it walks (it resolves links). The server can't resolve paths on a remote machine.
 - **Minted B-297** (unverified, gate; Medium if confirmed): the Windows agent key in `HKLM\SOFTWARE\EAMI\Agent` may be readable by local users, letting them forge reports. It's recorded beside the 8a Windows persistence gate, to be verified in the same disposable-VM session. The next B-ID is **B-298**.
@@ -3001,6 +3012,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-06 by Claude Code — B-269 Slice 0b Part A investigation (admin audit trail): report only, no code; decisions B0b-1..9 pending; F1/F2 proposed, not minted. Marker cleared.
+
+Prior entry:
 2026-10-06 by Claude Code — path-rule authority note; B-297 minted (HKLM key gate, unverified); agent 1.3.2 release notes. Docs only. Marker cleared.
 
 Prior entry:
