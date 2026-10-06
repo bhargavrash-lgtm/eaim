@@ -8,7 +8,16 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-06, newest) — B-300 agent identity: design record parked; Part A reported (no build)
+## Active decision thread (2026-10-06, newest) — B-301 CONFIRMED live (High); B-302 minted; fix planned (no code)
+
+- **Part 0** (`1e366de`): minted **B-301** (open MCP session keeps dispatching after suspension or revocation) and **B-302** (raw error text in gateway 401/403, Low-Medium); `AGENT_IDENTITY_DESIGN.md` Slice A split into A1 (liveness/revocation, B-301), A2 (owner as user link, visible "unowned"), A3 (signing keys, B-230); C5 recorded as an undecided Slice B constraint ("audit records the user" not to be claimed externally). Next B-ID **B-303**.
+- **Live test** (`B-301_LIVE_TEST_AND_FIX_PLAN.md`): on an already-open session, calls were **processed after suspension and after revoking key, token and status** (audit rows, downstream attempted); **node 2 accepted a token revoked on node 1**; token expiry does end the session. **B-301 is High, confirmed.**
+- **Fixture error disclosed:** the calls used a tool name without the `<tool>.<action>` separator, so the deny policy never matched and calls fell to the default allow; nothing left the machine only because the default forward target (`localhost:9000` in the container) has no listener. Rerun rule: prove the deny policy on the baseline first.
+- **Cleanup:** fixture admin soft-deleted, policy deleted, node 2 removed, agent C deleted; agents `b301-fixture-a` (revoked) and `-b` (suspended) remain, undeletable because of episode history; 3 keys revoked; audit rows stay.
+- **Fix plan:** per-call status + revoked-JTI check at `Dispatcher.Dispatch` (1.1 ms p50 / 2.1 ms p99 measured), `NOTIFY` session close across nodes, reload on reconnect, optional key-to-token revocation (founder decision), tests T1–T9 mutation-proven, B-302 folded in. **Awaiting approval; no code.**
+- Marker cleared.
+
+## Active decision thread (2026-10-06) — B-300 agent identity: design record parked; Part A reported (no build)
 
 - **Part 0** (`cc393bd`): `AGENT_IDENTITY_DESIGN.md` saved; **B-300** minted (epic, parked); listed under "Parked (not scheduled)" in the master sequence; cross-referenced from B-138, B-243, B-231, B-230, B-255. Roadmap: Horizon 1 next to B-138/B-231, not itself a numbered item.
 - **Part A** (`AGENT_IDENTITY_PART_A_INVESTIGATION.md`), read-only:
@@ -3064,6 +3073,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-06 by Claude Code — B-301 confirmed live (High), B-302 minted, Slice A split; fix plan written (no code). Marker cleared.
+
+Prior entry:
 2026-10-06 by Claude Code — B-300 (agent identity) design record parked and minted; Part A investigation reported (C1–C11; C2 open-session finding proposed for a B-ID). No code. Marker cleared.
 
 Prior entry:

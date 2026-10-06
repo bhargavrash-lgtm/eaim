@@ -4203,15 +4203,18 @@ Choose in the brief.
 
 **Minted from Part A (2026-10-06):** **B-301** (C2, open MCP session keeps dispatching after suspension; High pending live test) and **B-302** (C6, raw error text in gateway 401/403). Slice A split into A1/A2/A3 and C5 recorded as a Slice B constraint in `AGENT_IDENTITY_DESIGN.md`.
 
-### B-301 — A suspended or revoked governed agent's open MCP session keeps dispatching — **QUEUED, High (pending live test), 2026-10-06**
+### B-301 — A suspended or revoked governed agent's open MCP session keeps dispatching — **QUEUED, High (CONFIRMED live), 2026-10-06**
 **Origin:** B-300 Part A, conflict C2 (`AGENT_IDENTITY_PART_A_INVESTIGATION.md` §3). Minted at founder direction 2026-10-06; confirmed free against BACKLOG.md directly (the counter read B-301, and no file mentioned B-301).
 **Problem (code trace):**
 - `POST /v1/mcp/messages?sessionId=…` authenticates **by session ID only**. It doesn't re-validate the token or re-check the governed agent's status; it uses the agent record cached when the session opened (`internal/mcp/handler.go` `ServeMessages`, `sess.Agent`). The dispatcher doesn't check status either.
 - Suspending (`eami-api` `UpdateAgent`) changes `status` only: no gateway notification, no token revocation, no session close.
 - Revoking a token by JTI adds it to a per-process in-memory set checked only when a session opens; other gateway nodes see it only after a restart.
 - So a governed agent suspended by an operator (B-253's "operators contain") can keep dispatching tool calls on an already-open session until its token expires (up to 4 h).
-**Severity:** **High, pending the live test** (B-269/B-300 follow-up brief, Part 1).
-**Fix:** planned in the same brief (Part 2); Slice A1 of `AGENT_IDENTITY_DESIGN.md`.
+**Severity:** **High, confirmed live 2026-10-06** (`B-301_LIVE_TEST_AND_FIX_PLAN.md`):
+- calls on an already-open session were processed (audit rows written, downstream attempted) after suspension, and again after revoking the API key, the token and setting status revoked;
+- a second gateway node accepted a new session with a token revoked on node 1;
+- token expiry does end the session (404, nothing dispatched); new sessions are refused on the node that handled the change.
+**Fix plan (no build yet):** a per-call status and revoked-JTI check at `Dispatcher.Dispatch` (covers MCP and every workflow step; measured 1.1 ms p50, 2.1 ms p99), `NOTIFY`-driven session close on suspend and revoke across nodes, reload on reconnect, optional key-to-token revocation (founder decision), tests T1–T9 mutation-proven, B-302 folded in. Slice A1 of `AGENT_IDENTITY_DESIGN.md`.
 **Related:** B-300 (agent identity), B-253 (RBAC split: containment must be real), B-230 (revoked isn't terminal).
 **Status:** QUEUED.
 
