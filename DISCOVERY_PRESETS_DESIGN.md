@@ -136,3 +136,11 @@ Part A (`B-269_PART_A_INVESTIGATION.md`) was approved, with D1–D10 as follows.
 - **S6:** see the D4 correction above.
 - **S7:** verify on a **disposable VM** whether `HKLM\SOFTWARE\EAMI\Agent` (which holds the collector key) is readable by local users. The consequence is recorded on B-293: if it is, **a standard user can forge reports as that agent**. If confirmed, it is rated **Medium** and minted separately.
 - **Untouched by Slice 0:** B-282 (blank agent version) and B-294 (MSI state folder).
+
+### Path rules: who is the authority (founder, 2026-10-06)
+
+**Server-side path rules are a first filter only. The agent is the authority on what it walks.**
+- The server checks a path's *shape*: relative, UNC, roots, non-normal forms, whole-profile parents. That lets it refuse obviously bad config early, with a clear code for the admin.
+- **The server cannot resolve paths on a remote machine.** It can't know that `/srv/models` is a symlink to `/`, that a folder is a junction to `C:\Users`, or that a path is an NFS mount.
+- **The agent resolves links before walking** (B-269 Slice 0, `models.resolveScanRoot`) and refuses a target that is a root or a network share. It also enforces the depth limit, the file-type filter and the deadline on the machine itself.
+- **Design consequence for Slices 1–4:** never present a server-side "accepted" as a guarantee of what an endpoint will walk. The preset editor and impact panel describe paths as *requested*. What an endpoint actually did comes from its reports (`scanner_notes`, `config_error`).

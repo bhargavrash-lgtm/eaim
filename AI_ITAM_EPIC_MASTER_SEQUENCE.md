@@ -116,6 +116,11 @@ anything.
       Windows service is required before any Windows deployment relies on
       it; 8a's Windows path was verified by native unit tests only. Track
       on B-293 / B-294 (disposable Windows VM).
+      **Windows gate (B-297):** verify whether the agent key in
+      `HKLM\SOFTWARE\EAMI\Agent` is readable by local users (a standard
+      user could forge reports as that agent) before any Windows
+      deployment relies on the key. Unverified; same disposable-VM
+      session as the persistence gate above. Medium if confirmed.
 - [ ] 8. **B-269** — Discovery presets, group-based assignment,
       multi-group precedence resolved before build.
       Splitting: preset DEFINITION (name, version, scanner content,

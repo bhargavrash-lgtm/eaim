@@ -8,7 +8,14 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-06, newest) — B-269 Slice 0 DONE (agent 1.3.2)
+## Active decision thread (2026-10-06, newest) — Path-rule authority recorded; B-297 gate minted; 1.3.2 release notes
+
+- **`DISCOVERY_PRESETS_DESIGN.md`:** server path rules are a first filter only; the agent is the authority on what it walks (it resolves links). The server can't resolve paths on a remote machine.
+- **Minted B-297** (unverified, gate; Medium if confirmed): the Windows agent key in `HKLM\SOFTWARE\EAMI\Agent` may be readable by local users, letting them forge reports. It's recorded beside the 8a Windows persistence gate, to be verified in the same disposable-VM session. The next B-ID is **B-298**.
+- **Release notes for agent 1.3.2** in `CHANGELOG.md`: the model count may drop after upgrade. Also noted on B-296.
+- Docs only.
+
+## Active decision thread (2026-10-06) — B-269 Slice 0 DONE (agent 1.3.2)
 
 - **Decisions S1–S7** and the D4 correction were recorded first (`f0e0d32`); B-296 minted.
 - **Built:**
@@ -2994,6 +3001,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-06 by Claude Code — path-rule authority note; B-297 minted (HKLM key gate, unverified); agent 1.3.2 release notes. Docs only. Marker cleared.
+
+Prior entry:
 2026-10-06 by Claude Code — B-269 Slice 0 DONE (agent 1.3.2): B-277 path rules and depth limit, B-194 file-type filter; both reviews' Mediums fixed; live before/after verified on the packaged agent. Marker cleared.
 
 Prior entry:

@@ -5,6 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## eami-agent 1.3.2 — 2026-10-06 (B-269 Slice 0)
+
+### Changed
+- **Configured model scan paths count only model files.** The extensions are `.gguf`, `.ggml`, `.safetensors`, `.bin`, `.pt`, `.pth`, `.ckpt`, `.onnx`, `.tflite`, `.h5`, `.keras`, `.pb`, `.mlmodel` and `.llamafile`. Hits are labelled **"Configured path"** (they used to show as "LM Studio"). `.bin`, `.pb` and `.h5` can still match non-model files.
+- **Scans of configured paths go at most 8 folders deep**, and stop at the scan deadline. When the depth limit cuts a scan short, Endpoint Detail says so.
+- **Root paths are refused, and so are links that lead to a root or a network share.** A remote config containing one is refused whole, and the agent keeps its last good config.
+
+### Upgrade note
+- **After upgrading, an endpoint's model count may drop.** Large non-model files under configured paths (videos, disk images, archives) are no longer counted as models. That's the fix for over-collection (B-194), not lost data.
+- Endpoints still configured with whole-profile paths (`/home`, `/Users`, `C:\Users`) will see the biggest drop. Cleaning those configs is tracked as B-296.
+- Agents older than 1.3.0 can't have paths removed remotely, and keep listing any large file under their configured paths until they update.
+
+---
+
 ## v1.0.0 — 2026-07-01
 
 First customer release.

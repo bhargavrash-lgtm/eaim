@@ -4053,7 +4053,7 @@ Choose in the brief.
 **S7 (founder, 2026-10-05): is the collector key readable by local users?**
 - Windows keeps the collector key (`COLLECTOR_API_KEY`) in `HKLM\SOFTWARE\EAMI\Agent`, and the default `HKLM\SOFTWARE` ACL grants Users **read**.
 - **If that holds for this key, a standard user can forge reports as that agent** (impersonate the endpoint to the collector).
-- To be verified on a **disposable Windows VM**, not the dev machine's installed MSI. **If confirmed, rated Medium and minted separately.**
+- To be verified on a **disposable Windows VM**, not the dev machine's installed MSI. **Minted as B-297** (unverified, gate; Medium if confirmed), to be verified in the same VM session as the Windows gate below.
 - Not yet verified: no VM was available in the session that recorded this.
 
 **Windows gate (founder, 2026-10-05):** live verification of persisted config on a real **Windows service** (the SYSTEM agent writing, reloading after a restart and refusing a tampered or loosened `%ProgramData%\EAMI\Agent`) is required **before any Windows deployment relies on persisted config**. 8a's Windows path was verified by native unit tests only (DACL, re-secure, a real junction in the chain); the installed MSI on the dev machine was deliberately not touched. Do it on a disposable Windows VM, together with B-294's MSI pre-creation.
@@ -4101,4 +4101,30 @@ Choose in the brief.
 
 **Status:** QUEUED. **Dependencies:** B-269 Slice 0b (audit) and Slice 1 (presets).
 
-## Next B-ID: B-297
+**Release note (agent 1.3.2, B-269 Slice 0):**
+- After an endpoint upgrades to 1.3.2, its **model count may drop**. Large non-model files under configured paths (videos, disk images, archives) are no longer counted; only model file types are.
+- That's the B-194 fix, not data loss.
+- Rows still carrying `/home`, `/Users`, `C:\Users` show the biggest drop. Cleaning them (this item) reduces what 1.3.2 even has to walk.
+- See `CHANGELOG.md` → eami-agent 1.3.2.
+
+### B-297 — Windows agent's collector key in `HKLM\SOFTWARE\EAMI\Agent` possibly readable by local users: a standard user could forge reports as that agent — **UNVERIFIED, GATE (Medium if confirmed), 2026-10-06**
+**Origin:** B-269 Slice 0 plan (S7). Minted at founder direction 2026-10-06. B-297 was confirmed free against BACKLOG.md directly (the counter read B-297; the only related text was S7's unnumbered note on B-293), and a grep found no open item for the registry key's readability.
+**Problem (suspected, not verified):**
+- The MSI writes the collector key (`COLLECTOR_API_KEY`) to `HKLM\SOFTWARE\EAMI\Agent`.
+- The default `HKLM\SOFTWARE` ACL grants **BUILTIN\Users read**, and `Product.wxs` sets no explicit permissions on the key.
+- If the key inherits that, **any local user can read it** and send reports to the collector as that agent (`X-API-Key`): forging what that endpoint "found", or hiding what it really runs.
+- The per-agent key binding (B-073) doesn't help, because the attacker holds the real key.
+
+**Verification (the gate):**
+- On a **disposable Windows VM** (not the dev machine's installed MSI), install the MSI with a test key and check, as a **standard user**, `Get-Acl HKLM:\SOFTWARE\EAMI\Agent` and a direct read of `CollectorAPIKey`.
+- **Same VM session as the 8a Windows persistence gate** (B-293) and B-294.
+
+**If confirmed:**
+- Rated **Medium**.
+- Fix: an explicit restricted ACL on the key in `Product.wxs` (SYSTEM and Administrators only), or move the key to a protected file like the B-293 state store. Then re-verify on the VM.
+- The minted per-endpoint credential (D4 correction) already goes in its own protected file, never the registry.
+
+**Pre-deployment gate:** no Windows deployment relies on the agent key's confidentiality until this is verified (and fixed if confirmed). Recorded next to the 8a persistence gate in the master sequence.
+**Status:** UNVERIFIED, GATE.
+
+## Next B-ID: B-298
