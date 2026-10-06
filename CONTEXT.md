@@ -8,7 +8,16 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-06, newest) — Architect-EAMI gap closed: the founder holds the role
+## Active decision thread (2026-10-06, newest) — Item 7a DONE: TASK-071 acknowledged by the founder
+
+- **TASK-071 acknowledged 2026-10-06** by the founder, acting in the Architect-EAMI role, recorded word for word in its Acknowledgement section; first acceptance box ticked. The first-batch date is still the literal placeholder `<FIRST-BATCH-DATE>`.
+- **Scope:** the drift list **as of `55600e7` only** (§A, the undocumented routes, the mismatches, and C24). **Routes added later need their own acknowledgement** under the `API_CONVENTION.md` rule.
+- **Item 7a ticked**; gate met for B-269 Slice 2 (D1). No other item ticked.
+- C24 is inside this acknowledgement, which satisfies the condition on Slice 0b's grandfathered tick.
+- `api/openapi.yaml` not edited; the first batch (§A) is a separate brief.
+- Docs only. Marker cleared.
+
+## Active decision thread (2026-10-06) — Architect-EAMI gap closed: the founder holds the role
 
 - **`BOUNDARIES.md`:** "Current reality" note under Architect-EAMI. It is a role with no running agent; as of 2026-10-06 the founder holds it. Requests go in `tasks/` and are acknowledged by the founder. The original role definition is kept.
 - **TASK-071:** an Acknowledgement section with the draft line, `55600e7` filled in as the drift list's state, and `<date>` placeholders **left for the founder**.
@@ -33,7 +42,7 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - **Proof:** 15 tests in throwaway databases, 15 of 15 deliberate breakages caught; suite 631/0; live: up/down/up on the real database after a backup, 22 of 22 route checks, TRUNCATE refused, fixtures soft-deleted, trail empty.
 - **Reviews:** security (no Critical/High) and code (no High); every actionable finding fixed; security M1 recorded on B-299.
 - **Gateway trace:** after 2028-01-01, tool calls go through **unaudited** → **B-298 High**. **B-299** (superuser app role, Medium-High) minted. Next B-ID **B-300**.
-- **Item 7a:** the drift list was handed to Architect-EAMI as `tasks/TASK-071-openapi-drift-handoff.md` (`a75e5b5`); **acknowledgement not yet received**, required before Slice 2 (D1).
+- **Item 7a:** the drift list was handed to Architect-EAMI as `tasks/TASK-071-openapi-drift-handoff.md` (`a75e5b5`); **acknowledged 2026-10-06 by the founder in the Architect-EAMI role** (covers the list as of `55600e7` only; later routes need their own acknowledgement). Gate met for Slice 2.
 - **For Slice 1:** use `RunAudited` with `uc.OrgID`; handler tests must use throwaway databases (an org with audit events can't be deleted).
 - **Next:** Slice 1 (backend). Marker cleared.
 
@@ -95,7 +104,7 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
   - B-269's decisions and four slices recorded, and the slices added under item 8.
   - The design supersedes B-269's 2026-09-30 sketch: the page is Admin › Discovery Hub › Agent-Based; no assignment means no config.
 - **Part A** (`9359c4a`): `B-269_PART_A_INVESTIGATION.md`. 12 conflicts are flagged; the key ones:
-  - **7a gate open** (no acknowledgement recorded) before item 8 builds.
+  - **7a gate met:** acknowledged 2026-10-06 by the founder in the Architect-EAMI role (drift list as of `55600e7` only; routes added later need their own acknowledgement under the `API_CONVENTION.md` rule).
   - **No admin-write audit trail** (B-224 uninvestigated).
   - Ingest and config are **single-org** (`GetDefaultOrgID`, B-243).
   - The collector mints keys **CLI-only**, per self-asserted hostname (collisions).
@@ -3041,6 +3050,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-06 by Claude Code — TASK-071 acknowledged by the founder (Architect-EAMI role), drift list as of 55600e7; item 7a ticked, gate met for Slice 2. Docs only. Marker cleared.
+
+Prior entry:
 2026-10-06 by Claude Code — TASK-036 and TASK-051 marked superseded (founder). Docs only. Marker cleared.
 
 Prior entry:

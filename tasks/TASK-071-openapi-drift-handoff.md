@@ -41,16 +41,16 @@ is grandfathered on condition that C24 is acknowledged with the rest of this lis
 - `api/openapi.yaml` is Architect-EAMI's file (`BOUNDARIES.md`); Code records
   drift and does not edit the contract.
 
-## Acknowledgement (to be filled in by the founder)
+## Acknowledgement
 
-The draft below is left for the founder to complete and date. Until it is filled in, item 7a's gate is not met.
+> ACKNOWLEDGED 2026-10-06 by founder, acting in the Architect-EAMI role: drift list received as of 55600e7, scope accepted (sections A, undocumented routes, mismatches, and C24). Updates to api/openapi.yaml will be made in batches by a Code session under founder approval; first batch (section A) planned by <FIRST-BATCH-DATE>.
 
-> ACKNOWLEDGED <date> by founder, acting in the Architect-EAMI role: drift list received as of 55600e7, scope accepted (sections A, undocumented routes, mismatches, and C24). Updates to api/openapi.yaml will be made in batches by a Code session under founder approval; first batch (section A) planned by <date>.
+This acknowledgement covers the drift list **as of 55600e7 only**. Routes added later need their own acknowledgement under the `API_CONVENTION.md` rule (§10, founder decisions).
 
 `55600e7` is the latest commit that changed `API_CONTRACT_DRIFT.md` (B-269 Slice 0b, which added C24): 3 operations in §A, 56 undocumented routes in §B, 24 mismatches in §C.
 
 ## Acceptance criteria
-- [ ] Architect-EAMI acknowledges receipt, with a date for taking it, recorded
+- [x] Architect-EAMI acknowledges receipt, with a date for taking it, recorded
       on item 7a in `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (and in `CONTEXT.md`).
 - [ ] §A fixed first, then §B, then §C, in batches within the epic.
 - [ ] Each fixed row is deleted from `API_CONTRACT_DRIFT.md` in the same commit
