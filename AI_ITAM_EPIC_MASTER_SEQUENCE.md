@@ -154,6 +154,10 @@ anything.
             (`B-269_SLICE0B_VERIFICATION.md`). Tamper-evident against edits;
             cannot detect a database administrator (B-299). Found B-298
             (`audit_log` 2028 cliff, High).
+            **Ticked 2026-10-06, before the route-acknowledgement rule
+            existed. Drift row C24 acknowledgement pending (TASK-071).
+            Grandfathered once; Slice 1 and later follow the rule strictly.**
+            (The one explanation: `API_CONVENTION.md`, founder decisions.)
       Gate: the 7a drift hand-off acknowledgement is waived for Slices
       0–1 and **required before Slice 2** (D1).
       - [ ] Slice 1 (backend): schema, migration, endpoint-keyed config

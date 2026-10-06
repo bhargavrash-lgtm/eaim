@@ -91,5 +91,6 @@ These aren't settled yet. **B-269 Slice 1's plan proposes an answer for each, an
 
 - **`api/openapi.yaml` is updated by Architect-EAMI within the epic, in batches** (not OpenAPI-first before each build). The hand-off is `tasks/TASK-071-openapi-drift-handoff.md`.
 - **A Phase 2 slice that adds routes can't be ticked until its drift rows are acknowledged** by Architect-EAMI (recorded in §10).
+- **The one exception, not a precedent: B-269 Slice 0b.** Ticked 2026-10-06, before the route-acknowledgement rule existed. Drift row C24 acknowledgement pending (TASK-071). Grandfathered once; Slice 1 and later follow the rule strictly. C24 is on TASK-071's list, so one acknowledgement covers it. No other slice gets this exception.
 - **The deprecation-period length stays unset until B-137 has a design.**
 - **Still true:** B-137 is a scoping placeholder only, logged 2026-08-29, with no investigation and no design. The public-surface rules in §9 are therefore forward-looking.

@@ -14,7 +14,7 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - **New §11, "Not yet specified (to be settled from Slice 1's plan)":** pagination, envelope and meta, error body (D10), draft/publish and optimistic-lock responses, action and bulk routes, idempotency, ID/timestamp/naming, body-size limits (B-287), org always from the session. Slice 1's plan proposes each; §11 gets the approved answers before Slice 1 builds.
 - **Founder answers recorded:** `openapi.yaml` updated by Architect-EAMI within the epic, in batches; a Phase 2 slice that adds routes can't be ticked until its drift rows are acknowledged; deprecation length unset until B-137 has a design.
 - **Item 7 ticked** in the master sequence.
-- **Flag:** Slice 0b (ticked `b616e20`) added two routes (drift row C24) before this rule existed; Architect-EAMI hasn't acknowledged it (TASK-071 pending). Left ticked pending a founder call.
+- **Slice 0b (founder, 2026-10-06): stays ticked.** Ticked 2026-10-06, before the route-acknowledgement rule existed. Drift row C24 acknowledgement pending (TASK-071). Grandfathered once; Slice 1 and later follow the rule strictly. C24 added to TASK-071's list. The single explanation lives in `API_CONVENTION.md`'s founder decisions; it is not a precedent.
 - Docs only. Marker cleared.
 
 ## Active decision thread (2026-10-06) — B-269 Slice 0b DONE (admin audit trail); B-298 and B-299 minted; 7a handed
@@ -3032,6 +3032,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-06 by Claude Code — Slice 0b grandfathered once under the route-acknowledgement rule (C24 pending on TASK-071); note recorded in the master sequence, API_CONVENTION.md and here. Docs only. Marker cleared.
+
+Prior entry:
 2026-10-06 by Claude Code — item 7: API_CONVENTION.md locked v1 (principles 1-10), section 11 added (open until Slice 1's plan), founder answers recorded; item 7 ticked. Docs only. Marker cleared.
 
 Prior entry:

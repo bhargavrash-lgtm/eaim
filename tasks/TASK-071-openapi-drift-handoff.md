@@ -26,6 +26,11 @@ growing until you take it.
 The acknowledgement is required before Slice 2 of the presets work,
 which builds UI on the new routes.
 
+**Includes row C24** (`GET /v1/audit/admin-events` and `.../verify`, added by
+B-269 Slice 0b on 2026-10-06, after this task was filed). One acknowledgement
+covers it: Slice 0b was ticked before the route-acknowledgement rule existed and
+is grandfathered on condition that C24 is acknowledged with the rest of this list.
+
 ## Context
 
 - Master sequence item 7a (`AI_ITAM_EPIC_MASTER_SEQUENCE.md`): the gate is
