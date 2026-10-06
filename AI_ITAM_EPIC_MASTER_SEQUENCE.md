@@ -211,5 +211,13 @@ anything.
 
 ---
 
+## Parked (not scheduled)
+
+Design records kept for later. Nothing here is in a phase or the active sequence.
+
+- **B-300** (`AGENT_IDENTITY_DESIGN.md`): Agent identity: federate with the customer's IdP plus a built-in fallback issuer. Design record only. Not in the active sequence.
+
+---
+
 **One active thread at a time, in this exact order. Nothing new gets
 introduced outside this file until the current item closes.**

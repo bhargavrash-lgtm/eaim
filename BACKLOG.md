@@ -1535,6 +1535,8 @@ No schema/migration work (`policies.org_id` has existed since the original schem
 **Dependencies:** none blocking investigation start. Touches `eami-api`'s existing auth/session issuance path (not yet identified precisely — needs investigation, not assumed).
 **Status:** logged 2026-08-29. Discussed, never investigated, never previously logged in the repo. B-ID confirmed free (counter stood at B-138, no collision) before minting.
 
+**Cross-reference (2026-10-06): B-300, agent identity** (`AGENT_IDENTITY_DESIGN.md`). Its delegation slice needs the user token from the customer's IdP, which is this item (design §7, slice C).
+
 ### B-139 — EPIC: Agentless discovery — **logged, investigation not started**
 **Objective:** network-level shadow-AI detection that doesn't require an installed endpoint agent — extending shadow-AI visibility to unmanaged/BYOD devices the current `eami-agent`-based approach structurally cannot reach (the endpoint agent, per its own design, only ever sees what's installed on a machine it's deployed to). One of the four original strategic epics discussed early in this session, alongside the VM appliance (B-053, DONE), IdP/SSO (B-138), and the third-party public API (B-137).
 **Explicitly flagged as the largest and least-precedented of the four, per the user's own framing:** unlike the other three (which each extend an existing, already-built surface — `api_keys` for B-137, `sso_provider`/`sso_subject` columns for B-138, the VM appliance's own existing infra), this is a genuinely new component category with no equivalent already in the codebase — likely network-level traffic inspection/DNS monitoring/proxy-based detection (mechanism not yet decided, needs real investigation before any design commitment), a materially different technical surface from the endpoint-agent's current file-system/process-scan-based detection model (12 detection domains, per `ARCHITECTURE.md`).
@@ -2527,6 +2529,8 @@ For example, `GET /v1/audit?page=4294967297&per_page=100` wraps the offset to 0 
 - Add real-Postgres transition tests.
 **Status:** QUEUED.
 
+**Cross-reference (2026-10-06): B-300, agent identity** (`AGENT_IDENTITY_DESIGN.md`). The design's lifecycle requires this fixed so a revoked governed agent can't return (design §5).
+
 ### B-231 — Step-up authentication for sensitive actions — **QUEUED, 2026-09-27**
 **Origin:** `IA_CONSOLIDATION_INVESTIGATION.md` Part C, which was previously only a proposal with no record. Minted at founder direction with the same free-ID check. **Roadmap:** intended placement is Horizon 1, per the founder. **`rheoARC_Roadmap_Enterprise_AI_Platform.md` has no step-up entry yet** (0 matches, checked 2026-09-27). That is flagged here rather than edited.
 **Evidence summary** (from the investigation):
@@ -2553,6 +2557,8 @@ For example, `GET /v1/audit?page=4294967297&per_page=100` wraps the offset to 0 
 
 **Explicitly not built** by the Agent Detail Actions tab, which keeps today's authentication unchanged.
 **Status:** QUEUED.
+
+**Cross-reference (2026-10-06): B-300, agent identity** (`AGENT_IDENTITY_DESIGN.md`). Key creation, rotation and owner changes are among the governed-agent admin actions the design routes through the admin audit trail; step-up applies to the sensitive ones.
 
 ### B-232 — Cross-org overwrite of agent scanner config via `PUT /v1/gateway/agents/{id}/config` (H-1, High) — **DONE, 2026-09-27**
 **Origin:** H-1 from the Agent Detail Actions-tab security review. The founder issued an urgent dedicated brief. The ID was confirmed free against BACKLOG.md directly: the counter read B-232, and no open item overlapped.
@@ -2833,6 +2839,8 @@ Choices, for the founder:
 - Tests: a key for org A cannot write to org B.
 **Status:** QUEUED.
 
+**Cross-reference (2026-10-06): B-300, agent identity** (`AGENT_IDENTITY_DESIGN.md`). Static keys become bootstrap secrets only, with short-lived credentials (design §3); the per-component scoping here is part of that picture.
+
 ### B-244 — Approvals can be "approved" after they expire or are orphaned — the audit trail records decisions for actions that never ran — **QUEUED (High, audit integrity), 2026-09-27**
 **Origin:** found by the B-241 security review (L1). Minted at founder direction 2026-09-27, with explicit instruction to log it with real severity. The ID was confirmed free against BACKLOG.md directly: the counter read B-244, and a grep found no open item covering approval expiry or orphaning.
 
@@ -3103,6 +3111,8 @@ Part A was done 2026-09-28: `RBAC_SPLIT_PART_A.md` (route inventory, in-handler 
 
 **Fix:** edit-in-place on Agent Detail, built as part of **B-252 C7**. Apply B-253's role split: scope and risk edits stay admin + operator unless the founder says otherwise.
 **Status:** QUEUED, folded into C7.
+
+**Cross-reference (2026-10-06): B-300, agent identity** (`AGENT_IDENTITY_DESIGN.md`). The design adds owner (a user link), backup owner, review date, expiry, mode and credential type to the governed-agent record (design §4); the edit surface here is where they'd be changed.
 
 ### B-256 — Tool form: OAuth 2 / Basic auth have no credential input; connection test can falsely report failure — **QUEUED (Medium), 2026-09-28 — partly folds into B-252 C5**
 **Origin:** `IA_CONSOLIDATION_INVESTIGATION.md` D1. Minted at founder direction 2026-09-28. B-256 was confirmed free against BACKLOG.md directly: the counter read B-252, and B-252 to B-257 were unused. A grep found no open item overlapping this scope (see the per-item notes where an adjacent item exists).
@@ -4172,4 +4182,12 @@ Choose in the brief.
 **Severity:** Medium-High.
 **Status:** QUEUED.
 
-## Next B-ID: B-300
+### B-300 — EPIC: Agent identity — federate with the customer's IdP, plus a built-in fallback issuer — **PARKED (design record only), 2026-10-06**
+**Origin:** founder design brief, 2026-10-06. Minted at founder direction; confirmed free against BACKLOG.md directly (the counter read B-300, and no file in the repo mentioned B-300).
+**Record:** `AGENT_IDENTITY_DESIGN.md`. Part A (read-only): `AGENT_IDENTITY_PART_A_INVESTIGATION.md`.
+**Summary:** federate governed-agent identity with the customer's IdP (Okta, Entra, any OIDC provider) and keep a built-in fallback issuer for customers with no IdP. Every governed agent has an accountable human owner. Autonomous and delegated modes; delegated authority is the intersection of the agent's scope and the user's rights. Proposed slices A (accountability and lifecycle), B (delegation on the built-in issuer), C (federation, user side depends on B-138).
+**Roadmap:** Horizon 1, next to B-138 and B-231; not itself a numbered roadmap item.
+**Related:** B-138, B-243, B-231, B-230, B-255, B-295, B-269 Slice 0b.
+**Status:** PARKED: listed under "Parked (not scheduled)" in the master sequence. Not in the active sequence; no build.
+
+## Next B-ID: B-301
