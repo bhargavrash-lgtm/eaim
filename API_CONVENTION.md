@@ -1,6 +1,6 @@
 # EAMI API convention
 
-**Status: DRAFT — awaiting founder lock.** Master-sequence item 7 (`AI_ITAM_EPIC_MASTER_SEQUENCE.md`). Drafted 2026-10-05 by Claude Code. Until the founder locks it, Phase 2 (item 8 onward) treats it as the working default, not as settled.
+**Status: LOCKED v1 (principles 1-10), 2026-10-06; section 11 open.** Master-sequence item 7 (`AI_ITAM_EPIC_MASTER_SEQUENCE.md`). Drafted 2026-10-05 by Claude Code; locked by the founder 2026-10-06. Principles 1–10 are settled for every Phase 2 item. Section 11 is open and closes with B-269 Slice 1's plan.
 
 **Scope:** every `eami-api` route a UI, an agent or a future external consumer reads or writes. It applies the master sequence's standing rule: *every new data type gets a real, general, filterable, versioned endpoint, not a narrow one built only for the screen that needs it now.* The reference shape is `GET /v1/cmdb/assets` (`data`, `meta`, `counts`; `page`/`per_page`; server-side filters).
 
@@ -66,12 +66,30 @@
   - Each row names the route or schema, the drift, its source (B-ID) and its tracking ID.
   - A commit that removes drift (Architect-EAMI fixed the spec) deletes the row in the same commit.
 - **Reviewers check it.** Every mandatory code-review pass on a change that touches `eami-api/internal/api/router.go`, a handler's request or response types, or a store type serialised to JSON confirms that the matching `API_CONTRACT_DRIFT.md` row exists. A missing row is a review finding, the same as a missing test.
+- **Ticking (founder, at lock):** a Phase 2 slice that adds routes can't be ticked in the master sequence until Architect-EAMI has acknowledged its drift rows.
 - Why: before this rule, drift was logged ad hoc in NOTES.md, BACKLOG.md and verification files, and the spec fell 54 routes behind without anyone tracking it.
 
 ---
 
-## Open for the founder at lock time
+## 11. Not yet specified (to be settled from Slice 1's plan)
 
-- **OpenAPI-first or same-epic:** does an additive change need `api/openapi.yaml` updated *before* the build (strict), or within the same epic (as done in B-252 C1/C2)? Note that `API_CONTRACT_DRIFT.md` shows the same-epic practice has, in reality, meant "not updated at all" for 50+ routes.
-- **The deprecation-period length** (deferred to B-137 by design).
-- **B-137's state:** a scoping placeholder only, logged 2026-08-29, with no investigation and no design (see the report for this draft). The public-surface rules in §9 are therefore forward-looking.
+These aren't settled yet. **B-269 Slice 1's plan proposes an answer for each, and this section gets the approved answers before Slice 1 builds.** Until then, no route should treat any of them as decided.
+
+- **Pagination:** defaults, maximums, and what happens on overflow (too-large `page`, `per_page` out of range: clamp or 400). Today routes differ (some clamp through `pagination()`, the admin audit route returns a 400).
+- **Response envelope and meta fields:** `data`, `meta` (`total`, `page`, `per_page`), `counts`; which are always present; the shape of single-object responses.
+- **Error body:** `{code, field, message}`, with stable codes and a `field` from a fixed list, **never echoing a submitted value** (D10).
+- **Draft/publish and optimistic locking:** the status code and body for a version conflict (a second admin editing the same draft), and for publish, revert and archive.
+- **Action and bulk routes:** how non-CRUD actions (publish, revert, archive, revoke) and bulk operations (bulk adopt) are shaped, and how a bulk operation reports partial results.
+- **Idempotency:** which writes are idempotent, and whether retried creates and actions use an idempotency key.
+- **IDs, timestamps and naming:** ID format, timestamp format and time zone, and field and route naming (case, plurals, verbs).
+- **Body-size limits:** a request-size cap for every write route (B-287).
+- **The org always comes from the session, never from a request parameter:** no route accepts an org ID in the path, query or body for scoping; a supplied one is rejected, not honoured.
+
+---
+
+## Founder decisions at lock (2026-10-06)
+
+- **`api/openapi.yaml` is updated by Architect-EAMI within the epic, in batches** (not OpenAPI-first before each build). The hand-off is `tasks/TASK-071-openapi-drift-handoff.md`.
+- **A Phase 2 slice that adds routes can't be ticked until its drift rows are acknowledged** by Architect-EAMI (recorded in §10).
+- **The deprecation-period length stays unset until B-137 has a design.**
+- **Still true:** B-137 is a scoping placeholder only, logged 2026-08-29, with no investigation and no design. The public-surface rules in §9 are therefore forward-looking.

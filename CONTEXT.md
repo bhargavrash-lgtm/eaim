@@ -8,7 +8,16 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-06, newest) — B-269 Slice 0b DONE (admin audit trail); B-298 and B-299 minted; 7a handed
+## Active decision thread (2026-10-06, newest) — Item 7: API convention LOCKED v1; section 11 open
+
+- **`API_CONVENTION.md`:** status "LOCKED v1 (principles 1-10), 2026-10-06; section 11 open." The file's principles 5 and 6 and the 1–10 numbering were already intact; the damage the founder saw was a copy artifact.
+- **New §11, "Not yet specified (to be settled from Slice 1's plan)":** pagination, envelope and meta, error body (D10), draft/publish and optimistic-lock responses, action and bulk routes, idempotency, ID/timestamp/naming, body-size limits (B-287), org always from the session. Slice 1's plan proposes each; §11 gets the approved answers before Slice 1 builds.
+- **Founder answers recorded:** `openapi.yaml` updated by Architect-EAMI within the epic, in batches; a Phase 2 slice that adds routes can't be ticked until its drift rows are acknowledged; deprecation length unset until B-137 has a design.
+- **Item 7 ticked** in the master sequence.
+- **Flag:** Slice 0b (ticked `b616e20`) added two routes (drift row C24) before this rule existed; Architect-EAMI hasn't acknowledged it (TASK-071 pending). Left ticked pending a founder call.
+- Docs only. Marker cleared.
+
+## Active decision thread (2026-10-06) — B-269 Slice 0b DONE (admin audit trail); B-298 and B-299 minted; 7a handed
 
 - **Built** (`B-269_SLICE0B_VERIFICATION.md`): `admin_audit_events` (migration 000029) with its own hash chain per org; `store.RunAudited(ctx, uc.OrgID, change)` writes the change and its event in one transaction and fails closed (500 `audit_write_failed`); admin-only `GET /v1/audit/admin-events` and `/verify`. Codes registered for presets, assignment and enrollment keys only. No UI, no wiring.
 - **Guarantee, plainly:** detects edits, interior deletions, reordering, forged rows and cross-org moves; **cannot detect a database administrator** who deletes the newest events or recomputes the chain (asserted in tests). The app role is a superuser (B-299), so the triggers only stop app bugs.
@@ -3023,6 +3032,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-06 by Claude Code — item 7: API_CONVENTION.md locked v1 (principles 1-10), section 11 added (open until Slice 1's plan), founder answers recorded; item 7 ticked. Docs only. Marker cleared.
+
+Prior entry:
 2026-10-06 by Claude Code — B-269 Slice 0b DONE (admin audit trail, migration 000029); B-298 (High) and B-299 minted; drift list handed to Architect-EAMI (TASK-071, ack pending). Marker cleared.
 
 Prior entry:
