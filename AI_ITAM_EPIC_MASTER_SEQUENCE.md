@@ -166,6 +166,8 @@ anything.
             delivery, assignment, validation, API, tests.
       - [ ] Slice 2 (UI): preset list, editor, draft/publish/revert,
             rollout summary.
+            Requires TASK-071 section A (the documented operations that don't
+            exist) to be fixed in api/openapi.yaml first.
       - [ ] Slice 3: enrollment keys, deployments, package builder,
             bundles.
       - [ ] Slice 4: bulk adopt and unmanaged strip, then B-270 and

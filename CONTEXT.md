@@ -10,7 +10,7 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 
 ## Active decision thread (2026-10-06, newest) — Item 7a DONE: TASK-071 acknowledged by the founder
 
-- **TASK-071 acknowledged 2026-10-06** by the founder, acting in the Architect-EAMI role, recorded word for word in its Acknowledgement section; first acceptance box ticked. The first-batch date is the placeholder `<DATE OR "when ...">`; the founder supplies the exact text.
+- **TASK-071 acknowledged 2026-10-06** by the founder, acting in the Architect-EAMI role, recorded word for word in its Acknowledgement section; first acceptance box ticked. First batch (section A) is committed to be completed **before B-269 Slice 2 starts**; the master sequence's Slice 2 entry now requires it.
 - **Scope:** the drift list **as of `55600e7` only** (§A, the undocumented routes, the mismatches, and C24). **Routes added later need their own acknowledgement** under the `API_CONVENTION.md` rule.
 - **Item 7a ticked**; gate met for B-269 Slice 2 (D1). No other item ticked.
 - C24 is inside this acknowledgement. Drift row C24 was acknowledged 2026-10-06 via TASK-071. The one-time exception is closed.
@@ -3050,6 +3050,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-06 by Claude Code — TASK-071's first-batch placeholder replaced: section A to be completed before B-269 Slice 2 starts; Slice 2 entry now requires it. Docs only. Marker cleared.
+
+Prior entry:
 2026-10-06 by Claude Code — Slice 0b's one-time exception recorded as closed (C24 acknowledged via TASK-071) in the master sequence, API_CONVENTION.md, TASK-071 and here; TASK-071's first-batch placeholder changed for the founder to fill. Docs only. Marker cleared.
 
 Prior entry:
