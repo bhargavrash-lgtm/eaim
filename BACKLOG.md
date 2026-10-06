@@ -2531,6 +2531,8 @@ For example, `GET /v1/audit?page=4294967297&per_page=100` wraps the offset to 0 
 
 **Cross-reference (2026-10-06): B-300, agent identity** (`AGENT_IDENTITY_DESIGN.md`). The design's lifecycle requires this fixed so a revoked governed agent can't return (design §5).
 
+**Cross-reference (2026-10-06): B-301** (revoked or suspended agents' open sessions keep dispatching). B-230 is part of B-300 Slice A3.
+
 ### B-231 — Step-up authentication for sensitive actions — **QUEUED, 2026-09-27**
 **Origin:** `IA_CONSOLIDATION_INVESTIGATION.md` Part C, which was previously only a proposal with no record. Minted at founder direction with the same free-ID check. **Roadmap:** intended placement is Horizon 1, per the founder. **`rheoARC_Roadmap_Enterprise_AI_Platform.md` has no step-up entry yet** (0 matches, checked 2026-09-27). That is flagged here rather than edited.
 **Evidence summary** (from the investigation):
@@ -2628,6 +2630,8 @@ B-232 and B-233 already fixed the handlers they touched: `UpdateAgentConfig`, an
 - Consider a small `writeInternalError(w, msg, err)` helper so this can't recur.
 - Add a test that forces a DB error on one representative route and asserts the body is generic.
 **Status:** QUEUED.
+
+**Cross-reference (2026-10-06): B-302**, the same class in `eami-gateway`'s 401/403 bodies.
 
 ### B-235 — SPA HTML served without frame protection (clickjacking) — **QUEUED, 2026-09-27**
 **Origin:** M-1 from the Agent Detail Actions-tab security review (`AGENT_ACTIONS_TAB_VERIFICATION.md` §3b). Minted at founder direction, with the same free-ID check.
@@ -3074,6 +3078,8 @@ Choices, for the founder:
 - **Follow-ups:** `B-253_VERIFICATION.md` §6. Next: B-252 C0.
 
 Part A was done 2026-09-28: `RBAC_SPLIT_PART_A.md` (route inventory, in-handler splits for reactivate and tool credential/`base_url`, reliance, no credential material in reads, proposed groups, test plan, and open questions Q-A to Q-F). The build brief awaits those answers.
+
+**Cross-reference (2026-10-06): B-301.** Operators can suspend a governed agent to contain it, but an already-open MCP session keeps dispatching until its token expires (code trace; live test pending). Containment isn't complete until B-301 is fixed.
 
 ### B-254 — Policies can carry a "semantic rule" that silently never fires, with no warning — **DONE, 2026-09-28** (evidence: `B-254_VERIFICATION.md`)
 **Origin:** `IA_CONSOLIDATION_INVESTIGATION.md` D3. Minted at founder direction 2026-09-28. B-254 was confirmed free against BACKLOG.md directly: the counter read B-252, and B-252 to B-257 were unused. A grep found no open item overlapping this scope (see the per-item notes where an adjacent item exists).
@@ -4195,4 +4201,27 @@ Choose in the brief.
 
 **Status:** PARKED: listed under "Parked (not scheduled)" in the master sequence. Not in the active sequence; no build.
 
-## Next B-ID: B-301
+**Minted from Part A (2026-10-06):** **B-301** (C2, open MCP session keeps dispatching after suspension; High pending live test) and **B-302** (C6, raw error text in gateway 401/403). Slice A split into A1/A2/A3 and C5 recorded as a Slice B constraint in `AGENT_IDENTITY_DESIGN.md`.
+
+### B-301 — A suspended or revoked governed agent's open MCP session keeps dispatching — **QUEUED, High (pending live test), 2026-10-06**
+**Origin:** B-300 Part A, conflict C2 (`AGENT_IDENTITY_PART_A_INVESTIGATION.md` §3). Minted at founder direction 2026-10-06; confirmed free against BACKLOG.md directly (the counter read B-301, and no file mentioned B-301).
+**Problem (code trace):**
+- `POST /v1/mcp/messages?sessionId=…` authenticates **by session ID only**. It doesn't re-validate the token or re-check the governed agent's status; it uses the agent record cached when the session opened (`internal/mcp/handler.go` `ServeMessages`, `sess.Agent`). The dispatcher doesn't check status either.
+- Suspending (`eami-api` `UpdateAgent`) changes `status` only: no gateway notification, no token revocation, no session close.
+- Revoking a token by JTI adds it to a per-process in-memory set checked only when a session opens; other gateway nodes see it only after a restart.
+- So a governed agent suspended by an operator (B-253's "operators contain") can keep dispatching tool calls on an already-open session until its token expires (up to 4 h).
+**Severity:** **High, pending the live test** (B-269/B-300 follow-up brief, Part 1).
+**Fix:** planned in the same brief (Part 2); Slice A1 of `AGENT_IDENTITY_DESIGN.md`.
+**Related:** B-300 (agent identity), B-253 (RBAC split: containment must be real), B-230 (revoked isn't terminal).
+**Status:** QUEUED.
+
+### B-302 — Gateway 401/403 responses echo raw error text; distinct text can reveal whether a governed agent exists or is suspended — **QUEUED, Low-Medium, 2026-10-06**
+**Origin:** B-300 Part A, conflict C6. Minted at founder direction 2026-10-06; confirmed free against BACKLOG.md directly.
+**Problem:**
+- The MCP SSE handler and the workflow-run handler return `"unauthorized: " + err.Error()` / `"invalid bearer token: " + err.Error()` (JWT parse errors, and the JTI of a revoked token) and `"agent not registered or suspended: " + err.Error()`, whose wrapped text includes the agent name and `status=suspended`/`status=revoked`. `identity.Middleware` (unused) does the same.
+- Distinct texts let a token holder learn whether a governed agent exists and its status, and send raw error text across a trust boundary (the standing check).
+**Fix:** fixed messages with short reason codes; detail only in the local log.
+**Related:** B-234 (app-wide raw error text in eami-api 500s), B-300.
+**Status:** QUEUED.
+
+## Next B-ID: B-303

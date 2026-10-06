@@ -4,7 +4,7 @@
 **Recorded:** 2026-10-06 by Claude Code, from the founder's brief. The design below is saved as given.
 **Roadmap:** Horizon 1 (`rheoARC_Roadmap_Enterprise_AI_Platform.md`), next to B-138 (SSO/IdP) and B-231 (step-up authentication). Agent identity is not itself a numbered roadmap item.
 **Related:** B-138 (SSO/IdP), B-243 (global service key), B-231 (step-up), B-230 (status transitions), B-255 (agent edit surface), B-295 (discovery-agent identity), B-269 Slice 0b (admin audit trail).
-**Part A investigation:** `AGENT_IDENTITY_PART_A_INVESTIGATION.md`.
+**Part A investigation:** `AGENT_IDENTITY_PART_A_INVESTIGATION.md`. **Amended 2026-10-06 (founder):** Slice A split into A1/A2/A3; C5 added as a Slice B constraint (§8). Findings minted as B-301 and B-302.
 
 ---
 
@@ -43,8 +43,12 @@ Three kinds of identity: governed agent (an AI workload), discovery agent (softw
 - Admin actions (key created, rotated or revoked, owner changed) go through the admin audit trail (Slice 0b). Token issuance and failed authentication are high-volume and are NOT admin actions; where they are recorded is an open question, not decided here.
 
 ## 8. PROPOSED SLICES (not scheduled)
-- A: accountability and lifecycle (owner as a user link, expiry, revocation, key rotation, live-token invalidation). Serves every customer.
+- A: accountability and lifecycle. Serves every customer. **Split (founder, 2026-10-06):**
+  - **A1, liveness and revocation correctness**, including B-301 (C2): an open session re-checks the governed agent's status and token expiry on every call; suspend and revoke end live sessions; revocation reaches every gateway node.
+  - **A2, owner as a user link, and lifecycle:** owner and backup owner as user references, review date, expiry, recertification, owner-leaves handling. Existing governed agents with no matching user show a visible **"unowned"** state until an owner is set (no silent backfill).
+  - **A3, signing key handling:** key ID (`kid`), multiple keys, rotation with overlap, storage (protected at rest, backed up); and B-230 (revoked is terminal).
 - B: delegation on the built-in issuer.
+  - **Constraint C5 (undecided):** `audit_log` has no user or owner columns, and its hash covers fixed gateway fields only. Options: **a versioned hash scheme** (new rows hashed with a v2 formula that includes the user and owner, old rows verified with v1), or **a separate linked record** (a delegation record keyed to the audit row, with its own integrity). **Not decided. Until it is resolved, "audit records the user" must not be claimed externally.**
 - C: federation, with the user side depending on B-138.
 
 ## 9. DEFERRED
