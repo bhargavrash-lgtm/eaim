@@ -144,8 +144,11 @@ anything.
             `B-269_SLICE0_VERIFICATION.md`). Rollout: agents older than
             1.3.0 can't have paths removed remotely and keep listing any
             large file under their configured paths until they update.
-      - [ ] Slice 0b: minimal append-only admin audit trail (D2), for
-            presets, keys and assignment only.
+      - [x] Slice 0b: minimal append-only admin audit trail (D2), for
+            presets, keys and assignment only. Done 2026-10-06 — `55600e7`
+            (`B-269_SLICE0B_VERIFICATION.md`). Tamper-evident against edits;
+            cannot detect a database administrator (B-299). Found B-298
+            (`audit_log` 2028 cliff, High).
       Gate: the 7a drift hand-off acknowledgement is waived for Slices
       0–1 and **required before Slice 2** (D1).
       - [ ] Slice 1 (backend): schema, migration, endpoint-keyed config
