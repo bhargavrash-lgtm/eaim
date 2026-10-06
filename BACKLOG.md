@@ -2026,6 +2026,17 @@ B-164 also flagged one adjacent-but-unrelated dormant artifact so it isn't mista
 
 **Related note (2026-09-29, from B-253 Part A):** the raw endpoint report (`latest_report`, returned by `GET /v1/endpoints/{id}` and rendered in Discover's drawer) includes the **7-character prefix of discovered cloud-client API keys**. That is a prefix, not a usable secret, but it is the same "discovery collects more sensitive material than it needs" class as this item. Decide alongside the scanner fix whether to keep, shorten or drop the prefix. B-253 deliberately does **not** grant approvers endpoint reads.
 
+**Fixed for configured paths by B-269 Slice 0 (2026-10-06, agent 1.3.2; `B-269_SLICE0_VERIFICATION.md`):**
+- **Root cause confirmed in code:** configured scan paths had **no file-type filter**; any file at or over the size floor was reported, labelled `lm_studio`.
+- **Fix:** an extension allowlist for configured paths (`.gguf .ggml .safetensors .bin .pt .pth .ckpt .onnx .tflite .h5 .keras .pb .mlmodel .llamafile`). Hits are labelled `scan_path` ("Configured path").
+- **Data minimisation:** **metadata only** (name, path, size, mtime) leaves the machine. The scanner never reads or hashes file contents; the one exception is Hugging Face's `config.json` (`model_type` and `architecture`, 64 KiB cap), under its fixed cache path only.
+- **Live:** a `.iso`, `.mp4` and `.vmdk` under a configured path were reported by 1.3.1 and **not** by 1.3.2; `weights.gguf` is still found.
+
+**Remaining:**
+- **Re-enabling `models` on the demo endpoint is the founder's call.** That endpoint's config still excludes `models` (the 2026-09-19 mitigation). It should be done only once the endpoint runs 1.3.2+: older agents still over-collect.
+- **No magic-byte header checks.** Extension plus size floor only; `.bin`, `.pb` and `.h5` can match non-model files (S1; stated in the UI help text).
+- **Agents older than 1.3.2 keep over-collecting until they update.** Stored whole-profile paths are B-296.
+
 ### B-195 — Real paste-detection architecture fixes shipped; live browser→host connection failure investigated, **root cause NOT found** — closing out for next session with real leads
 **Found during:** live demo prep (2026-09-19), triggered by a task brief on paste-event ingestion architecture correctness after a live paste produced zero rows.
 
@@ -3430,7 +3441,7 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 - D10: stable JSON error codes with one shared fixture file.
 
 **Slices (each shippable, in order: 0, 0b, 1, 2, 3, 4; tick item 8 only when all are done):**
-- [ ] **Slice 0 (prerequisite):** B-277's path allowlist and walk-depth limit, **plus the B-194 file-type filter**. Plan: `B-269_SLICE0_PLAN.md` (2026-10-05; decisions S1–S7 pending).
+- [x] **Slice 0 (prerequisite): DONE 2026-10-06** (`B-269_SLICE0_VERIFICATION.md`; agent 1.3.2). B-277's path rules and walk-depth limit, **plus the B-194 file-type filter**. Plan: `B-269_SLICE0_PLAN.md`.
 - [ ] **Slice 0b:** a minimal, generic, append-only admin audit trail (D2), wired to presets, keys and assignment only.
 - [ ] **Slice 1 (backend):** schema, migration, endpoint-keyed config delivery, assignment, validation, API, tests. Highest risk.
 - [ ] **Slice 2 (UI):** preset list, editor, draft/publish/revert, rollout summary.
@@ -3688,10 +3699,10 @@ Choose in the brief.
 - Worst case: a compromised collector, or a mis-set collector URL; B-273's postinstall fix removed the easiest one, the `localhost:8888` fallback.
 
 **Acceptance criteria:**
-- [ ] The agent clamps the interval to 60–86400, matching the API.
-- [ ] Cap the config response with an `io.LimitReader`.
-- [ ] Restrict remote `model_scan_paths`, for example to an allowlist of roots set in local config, or with remote paths needing a local opt-in, and add a depth limit. Coordinate with B-269, since presets carry these fields, and with B-194, the extension filter.
-- [ ] Unit tests for each bound.
+- [x] The agent enforces the interval range 60–86400, matching the API (B-293; it rejects rather than clamps).
+- [x] The config response is capped with an `io.LimitReader` (B-293; 256 KiB).
+- [x] Restrict remote `model_scan_paths` (done by B-269 Slice 0, see below), for example to an allowlist of roots set in local config, or with remote paths needing a local opt-in, and add a depth limit. Coordinate with B-269, since presets carry these fields, and with B-194, the extension filter.
+- [x] Unit tests for each bound (shared fixture `testdata/agent_config_vectors.json`).
 
 **Dependencies:** B-269 (the preset schema) and B-194 (the models scanner over-collection).
 
@@ -3712,6 +3723,22 @@ Choose in the brief.
 - The baseline default for `model_scan_paths` stores the Windows entry as `C:\\Users`, with a doubled backslash, because the SQL literal is taken literally. The API serves it as-is; Windows tolerates it, so the walk still happens.
 - The Go default (`store.AgentConfigDefaults`) is `C:\Users`, so the two have drifted.
 - Fix it together with the path restriction.
+
+**Done by B-269 Slice 0 (2026-10-06; `B-269_SLICE0_VERIFICATION.md`):**
+- **Server path rules** (D9), as stable codes: relative, UNC/device, filesystem roots, non-normal forms (`.` or `..` parts, parts ending in a dot or space, a stray `:`), and whole-profile parents (`/home`, `/Users`, `X:\Users` and aliases). The profile-parent rule applies on the legacy route only when the paths change; legacy paths stay flagged (S5).
+- **Agent:**
+  - refuses roots and non-normal forms (`path_root`, `path_not_normalized`);
+  - **resolves configured paths through links** before walking, refusing a target that is the root or a network share (security review M-2);
+  - a **fixed walk depth of 8** (`depth_limited` noted, never silent);
+  - the walk **stops at the scan deadline**.
+- **Shared fixture** for both modules; live-verified on the packaged agent, before and after.
+- **Superseded:** the "allowlist of roots in local config / local opt-in" idea in the criteria above. The founder chose the server denylist plus agent root rejection (D9).
+
+**Still open:**
+- **Network filesystems that aren't UNC-shaped** (security review L-2): an NFS, CIFS or FUSE mount under a configured path, or a system-wide mapped drive, passes the path rules. A hung mount blocks inside a syscall that ctx can't interrupt (B-281's `still_running` bounds the pile-up). Possible fix: skip remote filesystem types (Linux `statfs`, Windows `GetDriveType` remote) with a `path_network` note.
+- Stored rows still carrying `/home`, `/Users`, `C:\Users`: **B-296**.
+
+**Status:** DONE for B-269 Slice 0's scope; the remote-filesystem item above remains.
 
 ### B-278 — Installer and config hygiene (grouped, lower severity): wrong quickstart, silent missing config, unescaped YAML values, rewrite drops hand edits — **QUEUED, 2026-09-30 (Low)**
 **Origin:** B-273's reviews and live verification (2026-09-30; `B-273_VERIFICATION.md` "Follow-ups"). Minted at founder direction 2026-09-30. B-274–B-279 were confirmed free against BACKLOG.md directly: the counter read B-274, nothing referenced B-274 or higher, and a heading grep for native messaging, paste, macOS, Jamf, redirect, remote config, quickstart, installer and command-line found no overlapping open item. Related items are cross-referenced below.

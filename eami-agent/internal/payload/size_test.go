@@ -1,10 +1,13 @@
 package payload
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/eami/agent/internal/config"
 	"github.com/eami/agent/internal/detection/ai_processes"
@@ -118,5 +121,21 @@ func TestEnforceMaxSize_SkipsEmptyAndFailedScanners(t *testing.T) {
 	}
 	if r.ScannerErrors["models"] != ReasonTimeout || r.ScannerStatus["python_envs"] != ScannerOK {
 		t.Fatalf("relabelled: %v %v", r.ScannerStatus, r.ScannerErrors)
+	}
+}
+
+// Code review M1 (B-269 Slice 0): a scanner that stops at the deadline and
+// returns the context's error is a timeout, not an error.
+func TestCollect_DeadlineErrorIsTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	var mu sync.Mutex
+	sp := scannerSpec{name: "t-deadline-err", enabled: true, fn: func(ctx context.Context, _ func(func())) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	status, reasons := collect(ctx, []scannerSpec{sp}, &mu, quiet)
+	if status["t-deadline-err"] != ScannerError || reasons["t-deadline-err"] != ReasonTimeout {
+		t.Fatalf("status %v reasons %v, want error/timeout", status, reasons)
 	}
 }

@@ -628,6 +628,10 @@ type AgentConfigResp struct {
 	// replaces its config only from a response that carries config_version.
 	ModelFileSizeMB int32  `json:"model_file_size_mb"`
 	ConfigVersion   string `json:"config_version"`
+	// PathWarnings lists the codes the stored model_scan_paths would fail
+	// under the full path rules (path_root, path_profile_parent): legacy
+	// paths stay accepted but flagged (B-269 Slice 0, S5). Never null.
+	PathWarnings []string `json:"path_warnings"`
 }
 
 // AgentConfigUpdateRequest is the PUT body for config updates.
@@ -703,41 +707,37 @@ func (s *Server) UpdateAgentConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
 		return
 	}
-	// Validate fields.
-	if req.ScanIntervalSeconds != nil && (*req.ScanIntervalSeconds < 60 || *req.ScanIntervalSeconds > 86400) {
-		writeError(w, http.StatusBadRequest, "bad_request", "scan_interval_seconds must be 60–86400")
+	// Validate fields. Every rejection is a stable code naming the field,
+	// with a fixed message: never the offending value (B-269 Slice 0, D10).
+	// [] is a real value for both lists (B-293), so only absent (nil) means
+	// "unchanged". The bounds are the agent's own (store.AgentConfigLimits),
+	// so the server never serves a config the agent would reject.
+	if req.ScanIntervalSeconds != nil && (*req.ScanIntervalSeconds < store.MinIntervalSeconds || *req.ScanIntervalSeconds > store.MaxIntervalSeconds) {
+		writeFieldError(w, store.CodeIntervalOutOfRange, "scan_interval_seconds")
 		return
 	}
-	if req.MaxReportSizeBytes != nil {
-		mb := *req.MaxReportSizeBytes
-		if mb < 1048576 || mb > 52428800 {
-			writeError(w, http.StatusBadRequest, "bad_request", "max_report_size_bytes must be 1MB–50MB")
-			return
-		}
+	if req.MaxReportSizeBytes != nil && (*req.MaxReportSizeBytes < store.MinReportSizeBytes || *req.MaxReportSizeBytes > store.MaxReportSizeBytes) {
+		writeFieldError(w, store.CodeReportSizeOutOfRange, "max_report_size_bytes")
+		return
 	}
-	// B-293: [] is a real value for both lists (no extra model paths; no
-	// scanners at all, decision D-a), so only absent (nil) means "unchanged".
-	// The bounds are the agent's own (store.AgentConfigLimits), so the server
-	// never serves a config the agent would reject.
 	if req.ModelFileSizeMB != nil && (*req.ModelFileSizeMB < store.MinModelFileSizeMB || *req.ModelFileSizeMB > store.MaxModelFileSizeMB) {
-		writeError(w, http.StatusBadRequest, "bad_request", "model_file_size_mb must be 1–100000")
+		writeFieldError(w, store.CodeModelSizeOutOfRange, "model_file_size_mb")
 		return
 	}
-	if msg := store.ValidateModelScanPaths(req.ModelScanPaths); msg != "" {
-		writeError(w, http.StatusBadRequest, "bad_request", msg)
+	if code := store.ValidateModelScanPaths(req.ModelScanPaths); code != "" {
+		writeFieldError(w, code, "model_scan_paths")
 		return
 	}
 	if len(req.EnabledScanners) > store.MaxEnabledScanners {
-		writeError(w, http.StatusBadRequest, "bad_request", "enabled_scanners has too many entries")
+		writeFieldError(w, store.CodeTooManyScanners, "enabled_scanners")
 		return
 	}
 	// B-271: the agent matches scanner names exactly, so an unknown or
 	// differently-cased name was never tolerated -- it silently disabled
-	// that scanner. Reject it instead.
+	// that scanner. Reject it (the name is no longer echoed back).
 	for _, name := range req.EnabledScanners {
 		if !store.IsKnownScanner(name) {
-			writeError(w, http.StatusBadRequest, "bad_request",
-				fmt.Sprintf("enabled_scanners: unknown scanner %q; valid: %s", name, strings.Join(store.AllScanners, ", ")))
+			writeFieldError(w, store.CodeUnknownScanner, "enabled_scanners")
 			return
 		}
 	}
@@ -770,6 +770,17 @@ func (s *Server) UpdateAgentConfig(w http.ResponseWriter, r *http.Request) {
 			d := store.AgentConfigDefaults
 			existing = &d
 			existing.AgentID = agentID
+		}
+		// S5: the stricter rules (no whole-profile parents such as /home)
+		// apply only when the paths themselves change, so a legacy row can
+		// still save its other fields; its stored paths stay accepted and are
+		// flagged (path_warnings). Checked after the ownership check, so
+		// another org's stored paths can't be probed.
+		if req.ModelScanPaths != nil && !sameStringSet(req.ModelScanPaths, existing.ModelScanPaths) {
+			if code := store.ValidateModelScanPathsFull(req.ModelScanPaths); code != "" {
+				writeFieldError(w, code, "model_scan_paths")
+				return
+			}
 		}
 		p := store.UpsertAgentConfigParams{
 			OrgID:               uc.OrgID,
@@ -816,6 +827,12 @@ func (s *Server) UpdateAgentConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "agent not found")
 		return
 	}
+	if req.ModelScanPaths != nil && !sameStringSet(req.ModelScanPaths, store.AgentConfigDefaults.ModelScanPaths) {
+		if code := store.ValidateModelScanPathsFull(req.ModelScanPaths); code != "" {
+			writeFieldError(w, code, "model_scan_paths")
+			return
+		}
+	}
 	d := store.AgentConfigDefaults
 	d.AgentID = agentID
 	if req.ScanIntervalSeconds != nil {
@@ -854,5 +871,53 @@ func agentConfigToResp(c store.AgentConfig) AgentConfigResp {
 		UpdatedAt:           c.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 		ModelFileSizeMB:     c.ModelFileSizeMB,
 		ConfigVersion:       c.Version(),
+		PathWarnings:        store.PathWarnings(paths),
 	}
+}
+
+// sameStringSet reports whether a and b hold the same strings, ignoring
+// order and duplicates (the order of model paths carries no meaning).
+func sameStringSet(a, b []string) bool {
+	in := func(xs []string) map[string]bool {
+		m := make(map[string]bool, len(xs))
+		for _, x := range xs {
+			m[x] = true
+		}
+		return m
+	}
+	ma, mb := in(a), in(b)
+	if len(ma) != len(mb) {
+		return false
+	}
+	for k := range ma {
+		if !mb[k] {
+			return false
+		}
+	}
+	return true
+}
+
+// configErrorMessages are the fixed, human-readable messages for each
+// validation code. They never include the submitted value.
+var configErrorMessages = map[string]string{
+	store.CodeIntervalOutOfRange:   "Scan interval must be between 60 and 86400 seconds.",
+	store.CodeReportSizeOutOfRange: "Maximum report size must be between 1 MB and 50 MB.",
+	store.CodeModelSizeOutOfRange:  "Minimum model size must be between 1 and 100000 MB.",
+	store.CodeTooManyPaths:         "At most 32 model scan paths are allowed.",
+	store.CodePathEmpty:            "Model scan paths can't be empty.",
+	store.CodePathTooLong:          "Each model scan path must be at most 1024 bytes.",
+	store.CodePathInvalidChars:     "Model scan paths can't contain control characters.",
+	store.CodePathNetwork:          "Model scan paths must be local paths, not network (UNC) paths.",
+	store.CodePathNotAbsolute:      "Model scan paths must be absolute paths.",
+	store.CodePathRoot:             "A filesystem root can't be a model scan path; choose a specific folder.",
+	store.CodePathNotNormalized:    "Model scan paths can't contain . or .. parts, or parts ending in a dot or a space.",
+	store.CodePathProfileParent:    "Whole-profile folders (/home, /Users, C:\\Users) can't be scan paths; choose specific folders inside them.",
+	store.CodeTooManyScanners:      "Too many scanner names.",
+	store.CodeUnknownScanner:       "Unknown scanner name; valid names: " + strings.Join(store.AllScanners, ", ") + ".",
+}
+
+// writeFieldError writes a 400 with a stable code, the field it refers to
+// and a fixed message (D10).
+func writeFieldError(w http.ResponseWriter, code, field string) {
+	writeJSON(w, http.StatusBadRequest, ErrorResponse{Code: code, Field: field, Message: configErrorMessages[code]})
 }

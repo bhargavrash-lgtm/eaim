@@ -127,7 +127,8 @@ CREATE TABLE endpoint_model_files (
     path        TEXT,
     size_mb     NUMERIC(10,2),
     format      TEXT,
-    source      TEXT CHECK (source IN ('ollama','lmstudio','huggingface','unknown')),
+    -- 'gpt4all' and 'scan_path' added by migration 000028 (B-269 Slice 0).
+    source      TEXT CONSTRAINT endpoint_model_files_source_check CHECK (source IN ('ollama','lmstudio','huggingface','unknown','gpt4all','scan_path')),
     detected_at TIMESTAMPTZ NOT NULL,
     report_id   UUID REFERENCES endpoint_reports(id) ON DELETE CASCADE
 );
@@ -588,7 +589,8 @@ CREATE INDEX idx_discovered_endpoints_source ON discovered_endpoints(org_id, sou
 CREATE TABLE IF NOT EXISTS agent_configs (
     agent_id              UUID PRIMARY KEY REFERENCES gateway_agents(id) ON DELETE CASCADE,
     scan_interval_seconds INT          NOT NULL DEFAULT 300,
-    model_scan_paths      TEXT[]       NOT NULL DEFAULT ARRAY['/home', '/Users', 'C:\\Users'],
+    -- Empty since migration 000028 (B-269 Slice 0, S4): no whole-profile default.
+    model_scan_paths      TEXT[]       NOT NULL DEFAULT '{}',
     max_report_size_bytes INT          NOT NULL DEFAULT 5242880,
     -- All 10 scanners the agent gates on (B-271, migration 000025).
     enabled_scanners      TEXT[]       NOT NULL DEFAULT ARRAY['ai_apps','models','mcp_servers','cloud_clients','network_activity','browser','ai_processes','gpu','python_envs','nodejs_ai'],

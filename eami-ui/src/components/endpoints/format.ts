@@ -24,3 +24,20 @@ export function formatRelativeTime(iso: string): string {
   if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`
   return `${Math.floor(secs / 86400)}d ago`
 }
+
+// Human labels for a local model's `source` (B-269 Slice 0, decision S2).
+// scan_path is a hit under a configured model scan path; older agents sent
+// those as lm_studio. Unknown values are shown as sent.
+const MODEL_SOURCE_LABEL: Record<string, string> = {
+  ollama: 'Ollama',
+  lm_studio: 'LM Studio',
+  lmstudio: 'LM Studio',
+  huggingface: 'Hugging Face',
+  gpt4all: 'GPT4All',
+  scan_path: 'Configured path',
+}
+
+export function formatModelSource(source: string | null | undefined): string {
+  if (!source) return '—'
+  return MODEL_SOURCE_LABEL[source] ?? source
+}

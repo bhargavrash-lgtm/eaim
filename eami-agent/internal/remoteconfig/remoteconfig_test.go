@@ -125,7 +125,7 @@ func TestParseResponse_RejectionReasons(t *testing.T) {
 		{"relative path (hash-valid)", withConfig(func(c *Config) { c.ModelScanPaths = []string{"models"} }), ReasonPathNotAbsolute},
 		{"control char (hash-valid)", withConfig(func(c *Config) { c.ModelScanPaths = []string{"/a\nb"} }), ReasonPathInvalidChars},
 		{"NUL (hash-valid)", withConfig(func(c *Config) { c.ModelScanPaths = []string{"/a\x00"} }), ReasonPathInvalidChars},
-		{"traversal (hash-valid)", withConfig(func(c *Config) { c.ModelScanPaths = []string{"../../etc"} }), ReasonPathNotAbsolute},
+		{"traversal (hash-valid)", withConfig(func(c *Config) { c.ModelScanPaths = []string{"../../etc"} }), ReasonPathNotNormalized},
 		{"UNC (hash-valid)", withConfig(func(c *Config) { c.ModelScanPaths = []string{`\\attacker\share`} }), ReasonPathNetwork},
 		{"// network (hash-valid)", withConfig(func(c *Config) { c.ModelScanPaths = []string{"//attacker/x"} }), ReasonPathNetwork},
 		{"device path (hash-valid)", withConfig(func(c *Config) { c.ModelScanPaths = []string{`\\?\C:\x`} }), ReasonPathNetwork},
@@ -139,14 +139,29 @@ func TestParseResponse_RejectionReasons(t *testing.T) {
 	}
 }
 
-func TestParseResponse_RootPathIsHashValidAndInBounds(t *testing.T) {
-	// "/" is well-formed: restricting which roots may be walked is B-277's
-	// path allowlist, deliberately not part of this slice. Pinned so the
-	// limitation stays visible.
+// B-269 Slice 0 closed the gap B-293 pinned here: a filesystem root, in any
+// form that cleans to one, is now refused (path_root) even when the config
+// is hash-valid, so last-known-good stays in force.
+func TestParseResponse_RootPathIsRefused(t *testing.T) {
+	for _, root := range []string{"/", `C:\`, "C:/", "c:", `D:\\`} {
+		c := validConfig()
+		c.ModelScanPaths = []string{"/srv/models", root}
+		if _, reason := ParseResponse(body(t, c, nil)); reason != ReasonPathRoot {
+			t.Errorf("%q: reason %q, want path_root", root, reason)
+		}
+	}
+	// Forms that only clean to a root are refused earlier, as not normal.
+	for _, p := range []string{"/.", "/..", "/./", `C:\..`, `D:\.\`} {
+		c := validConfig()
+		c.ModelScanPaths = []string{p}
+		if _, reason := ParseResponse(body(t, c, nil)); reason != ReasonPathNotNormalized {
+			t.Errorf("%q: reason %q, want path_not_normalized", p, reason)
+		}
+	}
 	c := validConfig()
-	c.ModelScanPaths = []string{"/"}
+	c.ModelScanPaths = []string{"/srv", `C:\Models`, "/home/alice/models"}
 	if _, reason := ParseResponse(body(t, c, nil)); reason != "" {
-		t.Fatalf("reason %q", reason)
+		t.Fatalf("non-root paths refused: %q", reason)
 	}
 }
 
@@ -169,7 +184,7 @@ func TestParseResponse_LegacyMergesNonEmptyOnly(t *testing.T) {
 	if _, reason := ParseResponse([]byte(fmt.Sprintf(legacy, 300, `,"config_version":null`))); reason != "" {
 		t.Fatalf("null config_version is unversioned: reason %q", reason)
 	}
-	if _, reason := ParseResponse([]byte(`{"config_version":null,"scan_interval_seconds":60,"enabled_scanners":[],"model_scan_paths":["../../etc"],"max_report_size_bytes":1}`)); reason != ReasonPathNotAbsolute {
+	if _, reason := ParseResponse([]byte(`{"config_version":null,"scan_interval_seconds":60,"enabled_scanners":[],"model_scan_paths":["../../etc"],"max_report_size_bytes":1}`)); reason != ReasonPathNotNormalized {
 		t.Fatalf("legacy path still bounds-checked: reason %q", reason)
 	}
 }

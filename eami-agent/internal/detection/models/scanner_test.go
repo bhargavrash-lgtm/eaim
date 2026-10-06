@@ -84,7 +84,7 @@ func TestScanHuggingFace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results, err := scanHuggingFace(dir, 100*1024*1024)
+	results, _, err := scanHuggingFace(context.Background(), dir, 100*1024*1024)
 	if err != nil {
 		t.Fatalf("scanHuggingFace: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestScanDir_SizeFilter(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "small.gguf"), small, 0o644)
 	os.WriteFile(filepath.Join(dir, "large.gguf"), large, 0o644)
 
-	results, err := scanDir(dir, ".gguf", SourceLMStudio, 100*1024*1024)
+	results, _, err := scanDir(context.Background(), dir, lmStudioExts, SourceLMStudio, 100*1024*1024)
 	if err != nil {
 		t.Fatal(err)
 	}

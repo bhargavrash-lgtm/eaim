@@ -48,7 +48,9 @@ func IsKnownScanner(name string) bool {
 // AgentConfigDefaults are the server-side defaults (match migration).
 var AgentConfigDefaults = AgentConfig{
 	ScanIntervalSeconds: 300,
-	ModelScanPaths:      []string{"/home", "/Users", `C:\Users`},
+	// Empty (B-269 Slice 0, S4): new agents no longer default to walking every
+	// user profile (the B-194 over-collection). Matches migration 000028.
+	ModelScanPaths:      []string{},
 	MaxReportSizeBytes:  5242880,
 	EnabledScanners:     append([]string(nil), AllScanners...),
 	ModelFileSizeMB:     100,

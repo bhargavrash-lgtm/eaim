@@ -15,6 +15,8 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+
+	"github.com/eami/agent/internal/scanpath"
 )
 
 // Config is the remotely controlled part of the agent's configuration.
@@ -53,6 +55,8 @@ const (
 	ReasonPathNotAbsolute      = "path_not_absolute"
 	ReasonPathInvalidChars     = "path_invalid_chars"
 	ReasonPathNetwork          = "path_network"
+	ReasonPathRoot             = "path_root"
+	ReasonPathNotNormalized    = "path_not_normalized"
 	ReasonTooManyScanners      = "too_many_scanners"
 	ReasonStateUntrusted       = "state_untrusted"
 	ReasonStateCorrupt         = "state_corrupt"
@@ -123,30 +127,11 @@ func (c Config) Version() string {
 	return VersionPrefix + hex.EncodeToString(sum[:])
 }
 
-// IsNetworkScanPath reports a UNC or device path (\\host\share, //host/x,
-// \\?\..., \\.\...). The SYSTEM agent walking one would authenticate to that
-// host as the machine account, so remote config may never point it there
-// (security review M-2). Matches eami-api's store.IsNetworkScanPath.
-func IsNetworkScanPath(p string) bool {
-	return len(p) >= 2 && (p[0] == '\\' || p[0] == '/') && (p[1] == '\\' || p[1] == '/')
-}
-
-// IsAbsoluteScanPath accepts the local POSIX and Windows absolute forms on
-// every OS: one config serves a mixed fleet, and a path for another OS
-// simply doesn't exist locally. Network paths are not "absolute" here.
-// Matches eami-api's store.IsAbsoluteScanPath.
-func IsAbsoluteScanPath(p string) bool {
-	if IsNetworkScanPath(p) {
-		return false
-	}
-	if len(p) >= 1 && p[0] == '/' {
-		return true
-	}
-	if len(p) >= 3 && ((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z')) && p[1] == ':' && (p[2] == '\\' || p[2] == '/') {
-		return true
-	}
-	return false
-}
+// IsNetworkScanPath, IsAbsoluteScanPath and IsRootScanPath are the shared
+// path-shape rules (internal/scanpath; eami-api's store matches them).
+func IsNetworkScanPath(p string) bool  { return scanpath.IsNetwork(p) }
+func IsAbsoluteScanPath(p string) bool { return scanpath.IsAbsolute(p) }
+func IsRootScanPath(p string) bool     { return scanpath.IsRoot(p) }
 
 // checkPaths returns "" or the specific reason code for the first bad path.
 func checkPaths(paths []string) string {
@@ -167,6 +152,20 @@ func checkPaths(paths []string) string {
 		}
 		if IsNetworkScanPath(p) {
 			return ReasonPathNetwork
+		}
+		// Forms Windows silently rewrites (B-269 Slice 0 security review
+		// M-1): an NTFS stream suffix, or a component ending in "." or " ".
+		if scanpath.HasStrayColon(p) {
+			return ReasonPathInvalidChars
+		}
+		if !scanpath.IsNormalized(p) {
+			return ReasonPathNotNormalized
+		}
+		// A filesystem root means walking the whole disk (B-277; B-269
+		// Slice 0, decision D9). Rejected outright, so the whole config is
+		// refused and last-known-good stays in force.
+		if IsRootScanPath(p) {
+			return ReasonPathRoot
 		}
 		if !IsAbsoluteScanPath(p) {
 			return ReasonPathNotAbsolute

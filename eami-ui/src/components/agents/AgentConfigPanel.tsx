@@ -26,9 +26,9 @@ const configSchema = z.object({
     .int()
     .min(60, 'Min 60 s')
     .max(86400, 'Max 86400 s'),
-  model_scan_paths: z
-    .string()
-    .min(1, 'At least one path required'),
+  // Optional (B-269 Slice 0, S4): new agents default to no extra model
+  // paths, and an empty list is a real value meaning "none".
+  model_scan_paths: z.string(),
   max_report_size_mb: z
     .number({ invalid_type_error: 'Required' })
     .min(1, 'Min 1 MB')
@@ -165,6 +165,26 @@ export function AgentConfigPanel({ agent, onClose }: { agent: Agent; onClose: ()
               />
               {form.formState.errors.model_scan_paths && (
                 <p className="mt-1 text-xs text-red-600">{form.formState.errors.model_scan_paths.message}</p>
+              )}
+              {/* B-269 Slice 0 (S1, B-194): what counts in these folders. */}
+              <p className="mt-1 text-xs text-gray-500">
+                Optional. Use specific absolute folders, not a whole drive or every user profile (/home, /Users, C:\Users).
+                Only model files are reported: .gguf, .ggml, .safetensors, .bin, .pt, .pth, .ckpt, .onnx, .tflite, .h5,
+                .keras, .pb, .mlmodel, .llamafile, at or above the minimum size, and only their name, path, size and
+                modified time. <span className="font-medium">.bin</span>, .pb and .h5 can also match non-model files.
+                Folders deeper than 8 levels aren&apos;t scanned.
+              </p>
+              {cfg?.path_warnings?.includes('path_profile_parent') && (
+                <p className="mt-1 text-xs text-amber-700">
+                  These saved paths include a whole-profile folder. They still apply, but can't be added again: change
+                  them to specific folders when you next edit this list.
+                </p>
+              )}
+              {cfg?.path_warnings?.includes('path_root') && (
+                <p className="mt-1 text-xs text-red-600">
+                  These saved paths include a filesystem root. Updated agents refuse the whole config until it is
+                  removed, so none of these settings reach them.
+                </p>
               )}
             </div>
 

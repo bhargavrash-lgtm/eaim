@@ -6,6 +6,7 @@ package payload
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -67,6 +68,12 @@ type Report struct {
 	// can carry file paths or argument fragments, so the full detail stays
 	// in the endpoint's local log (founder decision D1).
 	ScannerErrors map[string]string `json:"scanner_errors,omitempty"`
+
+	// ScannerNotes records what a scanner deliberately skipped, so it is
+	// never silent (B-269 Slice 0): for models, "depth_limited" (a walk hit
+	// models.MaxWalkDepth) and "path_root" (a configured path was a
+	// filesystem root). Codes only. The scanner's status stays ok.
+	ScannerNotes map[string][]string `json:"scanner_notes,omitempty"`
 
 	// The config this scan ran with (B-293), set by the agent loop from
 	// remoteconfig.Manager.Status. ConfigVersion is "" unless a versioned
@@ -179,6 +186,12 @@ func collect(ctx context.Context, specs []scannerSpec, mu *sync.Mutex, log *slog
 			}()
 			err := sp.fn(ctx, commit)
 			switch {
+			case err != nil && ctx.Err() != nil && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)):
+				// A scanner that stops at the deadline and returns the
+				// context's error (the models walk, B-269 Slice 0) timed
+				// out; it didn't fail.
+				out = scanOutcome{ScannerError, ReasonTimeout}
+				log.Warn("scanner stopped at the scan deadline", "scanner", sp.name)
 			case err != nil:
 				out = scanOutcome{ScannerError, ReasonError}
 				log.Warn("scanner returned an error", "scanner", sp.name, "err", err)
@@ -274,12 +287,20 @@ func BuildWith(cfg *config.Config, log *slog.Logger) (*Report, error) {
 	}
 	specs := []scannerSpec{
 		spec("models", func(ctx context.Context, commit func(func())) error {
-			r, err := models.Scan(ctx, models.ScanOptions{
+			r, err := models.ScanWithNotes(ctx, models.ScanOptions{
 				MinSizeMB:      cfg.Detection.MinModelSizeMB,
 				ExtraScanPaths: cfg.Detection.ModelFileScanPaths,
 			})
 			if err == nil {
-				commit(func() { report.LocalModels = r })
+				commit(func() {
+					report.LocalModels = r.Models
+					if len(r.Notes) > 0 {
+						if report.ScannerNotes == nil {
+							report.ScannerNotes = map[string][]string{}
+						}
+						report.ScannerNotes["models"] = r.Notes
+					}
+				})
 			}
 			return err
 		}),

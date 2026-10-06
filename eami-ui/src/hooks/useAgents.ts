@@ -200,6 +200,9 @@ export interface AgentConfig {
   max_report_size_bytes: number
   enabled_scanners: string[]
   updated_at: string
+  // B-269 Slice 0 (S5): codes the stored paths would fail if added now
+  // (path_root, path_profile_parent). Legacy paths stay accepted, flagged.
+  path_warnings?: string[]
 }
 
 export interface AgentConfigUpdate {

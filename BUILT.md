@@ -1,5 +1,63 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-269 Slice 0 — B-277 path rules and depth limit, plus the B-194 file-type filter (agent 1.3.2) — 2026-10-06 (Claude Code)
+
+The evidence record is `B-269_SLICE0_VERIFICATION.md`; the plan is `B-269_SLICE0_PLAN.md`; the decisions are in `DISCOVERY_PRESETS_DESIGN.md` §12 (D9, D10, S1–S7).
+
+**Agent (1.3.2)**
+- **New `internal/scanpath`:** the shape rules `IsNetwork`, `IsAbsolute`, `IsRoot`, `IsNormalized` and `HasStrayColon`.
+- **`models` scanner:**
+  - one walk with a per-source extension set; configured paths use `ModelFileExtensions`, labelled `scan_path` (S2);
+  - a depth limit of 8, noted as `depth_limited` (S3);
+  - it stops at the scan deadline;
+  - configured paths are **resolved through links** and refused if they lead to a root or a network share (`path_root` / `path_network` notes).
+- The report gains `scanner_notes`.
+- `remoteconfig` gains `path_root` and `path_not_normalized`.
+- **`payload.collect`** records a deadline-stopped scanner as `timeout`.
+
+**API**
+- **`store/agent_config_limits.go`:**
+  - stable codes;
+  - `ValidateModelScanPaths` (always: shape, root, normal form, stray colon);
+  - `ValidateModelScanPathsFull` (adds whole-profile parents and aliases);
+  - `PathWarnings`;
+  - the numeric bounds as constants.
+- **Config PUT:**
+  - `{code, field, message}` 400s, with fixed messages that never echo values;
+  - the full path rules only when the paths change, after the ownership check;
+  - `path_warnings` in responses.
+- `ErrorResponse.Field`.
+- **Ingest** stores `lm_studio` as `lmstudio` (it was `unknown`), plus `gpt4all` and `scan_path`.
+- New agents default to no model paths (S4).
+
+**Schema:** migration 000028 sets an empty `model_scan_paths` default and widens the `endpoint_model_files.source` CHECK (`NOT VALID`). It has a down migration. `schema.sql` is updated.
+
+**Shared fixture:** `testdata/agent_config_vectors.json` (limits, versions, 42 path cases), loaded by both Go modules.
+
+**UI**
+- Endpoint Detail model-source labels, and notes for `depth_limited`, `path_root` and `path_network`.
+- **Configure panel:** paths are optional; help text including the `.bin`, `.pb` and `.h5` caveat; banners for flagged legacy paths.
+
+**Docs:** `API_CONTRACT_DRIFT.md` rows C21–C23.
+
+**Verified 2026-10-06**
+- Agent tests pass on Windows, and the Linux binaries pass in WSL as root. The API suite (real Postgres), migration tests, `tsc` and `vite build` all pass.
+- **Live, on the packaged agent, before (1.3.1) and after (1.3.2):**
+  - decoy `.iso`, `.mp4` and `.vmdk` files were reported, then not;
+  - `.gguf` is still found, as "Configured path";
+  - a depth-10 model was reported, then cut off with `depth_limited`;
+  - a slow walk went `timeout` then `still_running`, then `timeout` every cycle;
+  - a hash-valid `/` config was accepted and persisted, then refused (`path_root`, and the persisted `['/']` refused as `state_invalid`), with the saved config kept.
+- **Browser:** labels, notes and help text verified.
+- **Both reviews:** security M-1 and M-2 and code-review M1 and M2 fixed, plus most Lows. Security L-2 (remote filesystems) is logged on B-277.
+
+**Limitations**
+- **Rollout:** agents older than 1.3.0 can't have paths removed remotely, and Endpoint Detail keeps listing any large file under their configured paths until they update. Agents on 1.3.0–1.3.1 have no type filter or depth limit.
+- Remote filesystem mounts that aren't UNC-shaped aren't detected (B-277).
+- No magic-byte checks.
+- Stored whole-profile paths are B-296.
+- B-282 and B-294 untouched; S7 still needs a VM; live Windows verification is gated (8a).
+
 ## B-293 (item 8a) — Agent applies remote config correctly: replace not merge, persisted, fetched before the first scan, reported back — 2026-10-05 (Claude Code)
 
 The evidence record is `B-293_VERIFICATION.md`; the Part A investigation is `B-293_PART_A_INVESTIGATION.md`. Founder decisions D-a to D-g were all approved, with guards (two consecutive 404s; a fixed drop order; specific reason codes).

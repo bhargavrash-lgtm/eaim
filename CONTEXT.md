@@ -8,7 +8,25 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-05, newest) — B-269: D1–D10 recorded; Slice 0 planned (no build)
+## Active decision thread (2026-10-06, newest) — B-269 Slice 0 DONE (agent 1.3.2)
+
+- **Decisions S1–S7** and the D4 correction were recorded first (`f0e0d32`); B-296 minted.
+- **Built:**
+  - a shared walk with the model-file extension filter for configured paths (`scan_path`);
+  - depth limit 8 (`depth_limited`);
+  - deadline stop;
+  - agent root, non-normal and link refusal;
+  - server path codes (including `path_profile_parent`, only on change for the legacy route);
+  - `{code, field}` errors that never echo;
+  - the shared fixture;
+  - migration 000028 (empty default paths, wider source CHECK);
+  - the ingest `lm_studio`→`lmstudio` fix (it was stored as `unknown`).
+- **Reviews:** security M-1 (profile-parent bypass via Windows-rewritten forms) and M-2 (link plus trailing separator to root or share) **fixed**; code-review M1 (deadline stop labelled `error`) and M2 (root banner) fixed; L-2 (remote filesystem mounts) logged on B-277.
+- **Live, before and after on the packaged agent:** all five founder tests passed; browser checks passed. Evidence: `B-269_SLICE0_VERIFICATION.md`.
+- **Rollout reality:** agents older than 1.3.0 can't have paths removed remotely, and Endpoint Detail keeps listing any large file under their configured paths until they update.
+- **Next:** Slice 0b (minimal admin audit trail), then Slice 1. The 7a acknowledgement is required before Slice 2 (D1).
+
+## Active decision thread (2026-10-05) — B-269: D1–D10 recorded; Slice 0 planned (no build)
 
 - **Part 0** (`9bc2672`):
   - D1–D10 recorded in `DISCOVERY_PRESETS_DESIGN.md` §12, B-269's entry and under item 8.
@@ -2976,6 +2994,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-06 by Claude Code — B-269 Slice 0 DONE (agent 1.3.2): B-277 path rules and depth limit, B-194 file-type filter; both reviews' Mediums fixed; live before/after verified on the packaged agent. Marker cleared.
+
+Prior entry:
 2026-10-05 by Claude Code — B-269: D1–D10 recorded (Part 0, `9bc2672`); B-295 minted; Slice 0 planned (`B-269_SLICE0_PLAN.md`), S1–S7 pending. No code. Marker cleared.
 
 Prior entry:

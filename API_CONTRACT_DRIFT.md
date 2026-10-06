@@ -12,7 +12,7 @@
 **Counts:** 118 eami-api routes vs 71 documented operations.
 - §A: 3 operations are documented but don't exist as documented.
 - §B: **54 routes are served but undocumented** (53 plus `/health`).
-- §C: 20 field, parameter or response mismatches (C18–C20 added by B-293; C18 sits on routes that are themselves undocumented, §B).
+- §C: 23 field, parameter or response mismatches (C18–C20 added by B-293, C21–C23 by B-269 Slice 0; C18, C21 and C22 sit on routes that are themselves undocumented, §B).
 
 ---
 
@@ -55,7 +55,7 @@ Each group's origin, where one is recorded:
 - **Reorder:** the `PUT` alias is undocumented; `POST` is documented (see C10).
 - **`GET /v1/memory/episodes/search`:** see A3.
 
-## C. Field, parameter and response mismatches on documented routes (20)
+## C. Field, parameter and response mismatches on documented routes (23)
 
 | # | Route / schema | Drift | Source | Tracked |
 |---|---|---|---|---|
@@ -79,6 +79,9 @@ Each group's origin, where one is recorded:
 | C18 | `GET /v1/agents/{agent_id}/config` (service key), `GET` and `PUT /v1/gateway/agents/{agentId}/config` | B-293: every response carries the **full** config, with `[]` meaning empty and never `null`, plus `config_version` (`c1:` + sha256 of the canonical JSON, a content hash) and `model_file_size_mb` (1–100000, default 100). PUT accepts `[]` for `model_scan_paths` and `enabled_scanners` (`[]` = no scanners); an absent field still means unchanged. New 400s: `model_file_size_mb` out of range; paths: more than 32, empty, over 1024 bytes, control characters, not absolute (POSIX `/`, `X:\` or `X:/`), or a network/UNC/device path (`\\host\x`, `//host/x`, `\\?\…`); more than 32 scanner names. Responses stay well under the agent's 256 KiB cap. The canonical form is specified in `B-293_VERIFICATION.md`. | B-293 | here |
 | C19 | `Endpoint` detail (`GET /v1/endpoints/{endpointId}`) | B-293: new nullable `applied_config_version`, `config_source` (`remote`/`persisted`/`local`/`defaults`), `config_error` (a fixed reason-code set, else `unrecognised`), and `expected_config_version` (null when unlinked). Null on reports from older agents. **New failure status:** the route now returns 500 (a fixed message) when the linked agent's config can't be read, rather than silently showing no expected config. | B-293 | here |
 | C20 | `POST /v1/reports` / collector ingest report payload | B-293: the report gains `config_version`, `config_source` and optional `config_error`; `scanner_errors` gains the code `too_large` (a section dropped to respect `max_report_size_bytes`). Extends C8. | B-293 | here |
+| C21 | `PUT /v1/gateway/agents/{agentId}/config` (and future preset routes) error body | B-269 Slice 0 (D10): `ErrorResponse` gains an optional `field` (one of `scan_interval_seconds`, `max_report_size_bytes`, `model_file_size_mb`, `model_scan_paths`, `enabled_scanners`). Validation 400s now carry **stable codes** instead of `bad_request`: `interval_out_of_range`, `report_size_out_of_range`, `model_size_out_of_range`, `too_many_paths`, `path_empty`, `path_too_long`, `path_invalid_chars`, `path_network`, `path_not_absolute`, `path_not_normalized` (a `.` or `..` part, or a part ending in a dot or space; a `:` after the drive letter is `path_invalid_chars`), `path_root`, `path_profile_parent` (server-only: `/home`, `/Users`, `X:\Users`, and the aliases `X:\Documents and Settings`, `/System/Volumes/Data/Users`, `/var/home`), `too_many_scanners`, `unknown_scanner`. Messages are fixed text and **never echo the submitted value** (the old `unknown scanner %q` echo is gone). `path_profile_parent` (and the full rules) apply on this legacy route **only when `model_scan_paths` changes** (S5). Shared vectors: `testdata/agent_config_vectors.json`. | B-269 | here |
+| C22 | Agent config responses (`GET /v1/agents/{agent_id}/config`, `GET`/`PUT /v1/gateway/agents/{agentId}/config`) | B-269 Slice 0 (S5): new `path_warnings: string[]` (never null): codes the stored paths would fail if added now (`path_root`, `path_profile_parent`); legacy paths stay accepted but flagged. **Behaviour:** new agents' default `model_scan_paths` is now `[]` (migration 000028; was `/home`, `/Users`, `C:\\Users`). `config_error` (C19) gains `path_root` and `path_not_normalized` (agent codes); the API allowlist also accepts `path_profile_parent`. | B-269 | here |
+| C23 | Report payload: local models and notes | B-269 Slice 0: `local_models[].source` gains `scan_path` (a hit under a configured path; agents ≥ 1.3.2; older agents send `lm_studio`). New optional `scanner_notes: {scanner: [code]}`, codes `depth_limited` (a walk hit the depth limit of 8), `path_root` (a configured path was, or resolved through links to, a root and was skipped) and `path_network` (it resolved to a network share). Stored `endpoint_model_files.source` now accepts `gpt4all` and `scan_path`, and the agent's `lm_studio` is stored as `lmstudio` (previously both became `unknown`). Extends C20. | B-269 | here |
 
 **Unspecified older entries:** B-217 recorded "two changed response shapes" for the CMDB list without naming them. They are superseded by C1–C5 above, which describe the current shape.
 

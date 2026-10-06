@@ -19,6 +19,9 @@ type PaginationMeta struct {
 type ErrorResponse struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// Field names the request field a validation code refers to, from a
+	// fixed list (B-269 Slice 0, decision D10). Never the offending value.
+	Field string `json:"field,omitempty"`
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────

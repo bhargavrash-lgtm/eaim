@@ -1,0 +1,332 @@
+{
+  "_comment": "Shared remote-config vectors (B-293, B-269 Slice 0 / D10). Loaded by eami-agent/internal/remoteconfig and eami-api/internal/store tests; both modules must agree with every case. agent = remoteconfig's code for a config holding only that path; server_basic = the rules every config route always applies; server_full = basic plus the rules applied when paths are changed or published (filesystem roots, whole-profile parents). Empty string = accepted. Normal form (B-269 Slice 0 security review M-1): no \".\" or \"..\" component, no component ending in \".\" or \" \", no \":\" after a drive letter.",
+  "limits": {
+    "max_model_scan_paths": 32,
+    "max_model_scan_path_bytes": 1024,
+    "max_enabled_scanners": 32,
+    "min_interval_seconds": 60,
+    "max_interval_seconds": 86400,
+    "min_report_size_bytes": 1048576,
+    "max_report_size_bytes": 52428800,
+    "min_model_file_size_mb": 1,
+    "max_model_file_size_mb": 100000,
+    "max_walk_depth": 8
+  },
+  "version_vectors": [
+    {
+      "name": "defaults",
+      "config": {
+        "scan_interval_seconds": 300,
+        "enabled_scanners": [
+          "ai_apps",
+          "models",
+          "mcp_servers",
+          "cloud_clients",
+          "network_activity",
+          "browser",
+          "ai_processes",
+          "gpu",
+          "python_envs",
+          "nodejs_ai"
+        ],
+        "model_scan_paths": [
+          "/home",
+          "/Users",
+          "C:\\Users"
+        ],
+        "model_file_size_mb": 100,
+        "max_report_size_bytes": 5242880
+      },
+      "version": "c1:e13b658a7e5071ab4d196d1dc42eb1b32d15041f075bf12a4db95cac0cc8b8ad"
+    },
+    {
+      "name": "unsorted, duplicated, empty paths",
+      "config": {
+        "scan_interval_seconds": 3600,
+        "enabled_scanners": [
+          "gpu",
+          "ai_apps",
+          "gpu"
+        ],
+        "model_scan_paths": [],
+        "model_file_size_mb": 250,
+        "max_report_size_bytes": 1048576
+      },
+      "version": "c1:d8d8341e266e8f725147e368c5d0bb8e34a9d8028d39f235b92b03fa1b79c958"
+    },
+    {
+      "name": "escaping",
+      "config": {
+        "scan_interval_seconds": 60,
+        "enabled_scanners": [],
+        "model_scan_paths": [
+          "/opt/<m>&\"q\"",
+          "D:/Models"
+        ],
+        "model_file_size_mb": 1,
+        "max_report_size_bytes": 52428800
+      },
+      "version": "c1:5cbc77f53148d018dfeb6a6b93b492f7d18a794e64b807f2e40b013c45e3d9f9"
+    }
+  ],
+  "path_cases": [
+    {
+      "path": "/srv/models",
+      "agent": "",
+      "server_basic": "",
+      "server_full": ""
+    },
+    {
+      "path": "C:\\Models",
+      "agent": "",
+      "server_basic": "",
+      "server_full": ""
+    },
+    {
+      "path": "D:/m",
+      "agent": "",
+      "server_basic": "",
+      "server_full": ""
+    },
+    {
+      "path": "/home/alice/models",
+      "agent": "",
+      "server_basic": "",
+      "server_full": ""
+    },
+    {
+      "path": "C:\\Users\\alice\\models",
+      "agent": "",
+      "server_basic": "",
+      "server_full": ""
+    },
+    {
+      "path": "models",
+      "agent": "path_not_absolute",
+      "server_basic": "path_not_absolute",
+      "server_full": "path_not_absolute"
+    },
+    {
+      "path": "./x",
+      "agent": "path_not_normalized",
+      "server_basic": "path_not_normalized",
+      "server_full": "path_not_normalized"
+    },
+    {
+      "path": "../../etc",
+      "agent": "path_not_normalized",
+      "server_basic": "path_not_normalized",
+      "server_full": "path_not_normalized"
+    },
+    {
+      "path": "",
+      "agent": "path_empty",
+      "server_basic": "path_empty",
+      "server_full": "path_empty"
+    },
+    {
+      "path": "/a\nb",
+      "agent": "path_invalid_chars",
+      "server_basic": "path_invalid_chars",
+      "server_full": "path_invalid_chars"
+    },
+    {
+      "path": "/a\u0000",
+      "agent": "path_invalid_chars",
+      "server_basic": "path_invalid_chars",
+      "server_full": "path_invalid_chars"
+    },
+    {
+      "path": "\\\\nas\\m",
+      "agent": "path_network",
+      "server_basic": "path_network",
+      "server_full": "path_network"
+    },
+    {
+      "path": "//nas/m",
+      "agent": "path_network",
+      "server_basic": "path_network",
+      "server_full": "path_network"
+    },
+    {
+      "path": "\\\\?\\C:\\x",
+      "agent": "path_network",
+      "server_basic": "path_network",
+      "server_full": "path_network"
+    },
+    {
+      "path": "\\\\.\\pipe\\x",
+      "agent": "path_network",
+      "server_basic": "path_network",
+      "server_full": "path_network"
+    },
+    {
+      "path": "/",
+      "agent": "path_root",
+      "server_basic": "path_root",
+      "server_full": "path_root"
+    },
+    {
+      "path": "/..",
+      "agent": "path_not_normalized",
+      "server_basic": "path_not_normalized",
+      "server_full": "path_not_normalized"
+    },
+    {
+      "path": "/./",
+      "agent": "path_not_normalized",
+      "server_basic": "path_not_normalized",
+      "server_full": "path_not_normalized"
+    },
+    {
+      "path": "C:\\",
+      "agent": "path_root",
+      "server_basic": "path_root",
+      "server_full": "path_root"
+    },
+    {
+      "path": "c:/",
+      "agent": "path_root",
+      "server_basic": "path_root",
+      "server_full": "path_root"
+    },
+    {
+      "path": "C:\\..\\",
+      "agent": "path_not_normalized",
+      "server_basic": "path_not_normalized",
+      "server_full": "path_not_normalized"
+    },
+    {
+      "path": "/home",
+      "agent": "",
+      "server_basic": "",
+      "server_full": "path_profile_parent"
+    },
+    {
+      "path": "/home/",
+      "agent": "",
+      "server_basic": "",
+      "server_full": "path_profile_parent"
+    },
+    {
+      "path": "/Users",
+      "agent": "",
+      "server_basic": "",
+      "server_full": "path_profile_parent"
+    },
+    {
+      "path": "C:\\Users",
+      "agent": "",
+      "server_basic": "",
+      "server_full": "path_profile_parent"
+    },
+    {
+      "path": "C:\\\\Users",
+      "agent": "",
+      "server_basic": "",
+      "server_full": "path_profile_parent"
+    },
+    {
+      "path": "c:/users/",
+      "agent": "",
+      "server_basic": "",
+      "server_full": "path_profile_parent"
+    },
+    {
+      "path": "D:\\Users",
+      "agent": "",
+      "server_basic": "",
+      "server_full": "path_profile_parent"
+    },
+    {
+      "path": "/home/.",
+      "agent": "path_not_normalized",
+      "server_basic": "path_not_normalized",
+      "server_full": "path_not_normalized"
+    },
+    {
+      "path": "/home/x/..",
+      "agent": "path_not_normalized",
+      "server_basic": "path_not_normalized",
+      "server_full": "path_not_normalized"
+    },
+    {
+      "path": "C:\\Users.",
+      "agent": "path_not_normalized",
+      "server_basic": "path_not_normalized",
+      "server_full": "path_not_normalized"
+    },
+    {
+      "path": "C:\\Users ",
+      "agent": "path_not_normalized",
+      "server_basic": "path_not_normalized",
+      "server_full": "path_not_normalized"
+    },
+    {
+      "path": "/srv/models.",
+      "agent": "path_not_normalized",
+      "server_basic": "path_not_normalized",
+      "server_full": "path_not_normalized"
+    },
+    {
+      "path": "C:\\Users::$INDEX_ALLOCATION",
+      "agent": "path_invalid_chars",
+      "server_basic": "path_invalid_chars",
+      "server_full": "path_invalid_chars"
+    },
+    {
+      "path": "/srv/a:b",
+      "agent": "path_invalid_chars",
+      "server_basic": "path_invalid_chars",
+      "server_full": "path_invalid_chars"
+    },
+    {
+      "path": "C:\\::$INDEX_ALLOCATION",
+      "agent": "path_invalid_chars",
+      "server_basic": "path_invalid_chars",
+      "server_full": "path_invalid_chars"
+    },
+    {
+      "path": "C:\\Documents and Settings",
+      "agent": "",
+      "server_basic": "",
+      "server_full": "path_profile_parent"
+    },
+    {
+      "path": "D:/documents and settings/",
+      "agent": "",
+      "server_basic": "",
+      "server_full": "path_profile_parent"
+    },
+    {
+      "path": "/System/Volumes/Data/Users",
+      "agent": "",
+      "server_basic": "",
+      "server_full": "path_profile_parent"
+    },
+    {
+      "path": "/var/home",
+      "agent": "",
+      "server_basic": "",
+      "server_full": "path_profile_parent"
+    },
+    {
+      "path": "///",
+      "agent": "path_network",
+      "server_basic": "path_network",
+      "server_full": "path_network"
+    },
+    {
+      "path": "C:",
+      "agent": "path_root",
+      "server_basic": "path_root",
+      "server_full": "path_root"
+    }
+  ],
+  "long_path": {
+    "length": 1025,
+    "agent": "path_too_long",
+    "server_basic": "path_too_long",
+    "server_full": "path_too_long"
+  }
+}

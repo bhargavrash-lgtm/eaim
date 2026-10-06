@@ -27,7 +27,7 @@ var knownConfigErrors = map[string]bool{
 	"wrong_type": true, "incomplete": true, "version_mismatch": true,
 	"interval_out_of_range": true, "report_size_out_of_range": true,
 	"model_size_out_of_range": true, "too_many_paths": true, "path_too_long": true,
-	"path_empty": true, "path_not_absolute": true, "path_invalid_chars": true, "path_network": true,
+	"path_empty": true, "path_not_absolute": true, "path_invalid_chars": true, "path_network": true, "path_root": true, "path_not_normalized": true, "path_profile_parent": true,
 	"too_many_scanners": true, "state_untrusted": true, "state_corrupt": true,
 	"state_invalid": true, "state_stale": true, "state_write_failed": true,
 }

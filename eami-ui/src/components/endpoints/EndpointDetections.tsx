@@ -5,11 +5,13 @@
 import { useState } from 'react'
 import type { components } from '@/api/schema'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { formatBytes } from './format'
+import { formatBytes, formatModelSource } from './format'
 import { CategoryStateLabel } from './CategoryStateLabel'
 import { STATE_DESCRIPTION, categoryState, type CategoryState, type EndpointWithScannerStatus } from './scannerState'
 
-type EndpointReport = components['schemas']['EndpointReport']
+// scanner_notes (B-269 Slice 0) isn't in api/openapi.yaml yet (drift logged
+// in API_CONTRACT_DRIFT.md); typed locally.
+type EndpointReport = components['schemas']['EndpointReport'] & { scanner_notes?: Record<string, string[]> }
 type MCPServer = components['schemas']['MCPServer']
 type GPU = components['schemas']['GPU']
 type PythonEnv = components['schemas']['PythonEnv']
@@ -89,6 +91,16 @@ export function EndpointDetections({ endpoint, report }: { endpoint: EndpointWit
 
       {/* Local Models */}
       <Section title="Local Models" state={categoryState(endpoint, 'local_models', report.local_models?.length ?? 0)}>
+        {/* B-269 Slice 0: what the scan deliberately skipped is never silent. */}
+        {report.scanner_notes?.models?.includes('depth_limited') && (
+          <p className="mb-2 text-xs text-amber-700">Some model folders go deeper than 8 levels; files below that depth weren't scanned.</p>
+        )}
+        {report.scanner_notes?.models?.includes('path_root') && (
+          <p className="mb-2 text-xs text-amber-700">A configured scan path was, or led to, a whole drive or filesystem root and was skipped.</p>
+        )}
+        {report.scanner_notes?.models?.includes('path_network') && (
+          <p className="mb-2 text-xs text-amber-700">A configured scan path led to a network share and was skipped.</p>
+        )}
         {(report.local_models ?? []).length === 0
           ? <p className="text-gray-400">None detected</p>
           : (
@@ -97,7 +109,7 @@ export function EndpointDetections({ endpoint, report }: { endpoint: EndpointWit
                 <li key={i} className="flex items-center justify-between">
                   <span className="font-medium">{m.name}</span>
                   <span className="text-gray-400 text-xs">
-                    {m.source} · {m.size_bytes != null ? formatBytes(m.size_bytes) : '—'}
+                    {formatModelSource(m.source)} · {m.size_bytes != null ? formatBytes(m.size_bytes) : '—'}
                   </span>
                 </li>
               ))}

@@ -87,7 +87,13 @@ type rawPasteEvent struct {
 // endpoint_model_files.source CHECK constraint.
 var allowedModelSources = map[string]bool{
 	"ollama": true, "lmstudio": true, "huggingface": true, "unknown": true,
+	"gpt4all": true, "scan_path": true, // migration 000028 (B-269 Slice 0)
 }
+
+// modelSourceAliases maps the agent's source values onto the stored ones.
+// The agent has always sent "lm_studio", which never matched "lmstudio"
+// and was stored as "unknown" (found in B-269 Slice 0).
+var modelSourceAliases = map[string]string{"lm_studio": "lmstudio"}
 
 // allowedMCPSources is the set of values accepted by the
 // endpoint_mcp_servers.source CHECK constraint.
@@ -257,6 +263,9 @@ func (s *Server) processIngestItem(ctx context.Context, orgID uuid.UUID, item ba
 			continue
 		}
 		src := m.Source
+		if alias, ok := modelSourceAliases[src]; ok {
+			src = alias
+		}
 		if !allowedModelSources[src] {
 			src = "unknown"
 		}
