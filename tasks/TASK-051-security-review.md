@@ -3,6 +3,7 @@
 **To:** QA-EAMI + Architect-EAMI  
 **Priority:** normal  
 **Blocked by:** TASK-038 (clean migrations), TASK-039 (gateway token auth)
+**Status:** SUPERSEDED (2026-10-06, founder). Area 3 review completed by QA-EAMI (2026-06-29), recorded in TASK-051-security-findings.md. Tracked in B-140, B-298 and B-299. B-299 (database role can modify audit rows) is OPEN. The verification route exists at GET /v1/audit/verify.
 
 ## What I need
 

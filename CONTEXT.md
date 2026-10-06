@@ -14,7 +14,7 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - **TASK-071:** an Acknowledgement section with the draft line, `55600e7` filled in as the drift list's state, and `<date>` placeholders **left for the founder**.
 - **`API_CONVENTION.md` founder decisions:** spec edits are made by a Code session and approved by the founder; each batch is checked mechanically (router vs spec, the method that found the 54 undocumented routes), with the result recorded with the batch.
 - **Master sequence 7a:** "Handed 2026-10-06; acknowledgement by founder pending"; the gate is met by the founder's dated acknowledgement.
-- **TASK-036 and TASK-051 (the other two tasks addressed to Architect-EAMI):** proposals reported to the founder (both "superseded"); **nothing changed until the founder decides.**
+- **TASK-036 and TASK-051 (the other two tasks addressed to Architect-EAMI): SUPERSEDED** (founder, 2026-10-06), each with a status line. TASK-051's Area 3 review is attributed to QA-EAMI (2026-06-29), as its findings file records; the founder's draft said "Code". B-299 stays OPEN. No other task file touched.
 - Docs only. Marker cleared.
 
 ## Active decision thread (2026-10-06) — Item 7: API convention LOCKED v1; section 11 open
@@ -3041,6 +3041,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-06 by Claude Code — TASK-036 and TASK-051 marked superseded (founder). Docs only. Marker cleared.
+
+Prior entry:
 2026-10-06 by Claude Code — Architect-EAMI gap closed: founder holds the role (BOUNDARIES.md note); TASK-071 acknowledgement drafted for the founder; spec-batch rule in API_CONVENTION.md; 7a updated. TASK-036/051 proposals reported, unchanged. Docs only. Marker cleared.
 
 Prior entry:

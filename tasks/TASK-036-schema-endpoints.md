@@ -3,6 +3,7 @@
 **To:** Architect-EAMI  
 **Priority:** high  
 **Blocked by:** none
+**Status:** SUPERSEDED (2026-10-06, founder). Work exists via migrations-v2 (000001 and later) and the endpoints routes; spec accuracy is covered by TASK-071.
 
 ## What I need
 
