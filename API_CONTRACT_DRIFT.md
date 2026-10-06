@@ -9,10 +9,10 @@
 - **Order:** §A comes first because a generated client calling those operations fails outright (404 or 405), which is worse than a missing entry.
 - Routes served by `eami-gateway` (`/v1/gateway/tokens`, `/v1/gateway/tokens/{jti}/revoke`, `/v1/mcp/sse`, `/v1/mcp/messages`) are documented in the same spec and are not drift.
 
-**Counts:** 118 eami-api routes vs 71 documented operations.
+**Counts:** 120 eami-api routes vs 71 documented operations.
 - §A: 3 operations are documented but don't exist as documented.
-- §B: **54 routes are served but undocumented** (53 plus `/health`).
-- §C: 23 field, parameter or response mismatches (C18–C20 added by B-293, C21–C23 by B-269 Slice 0; C18, C21 and C22 sit on routes that are themselves undocumented, §B).
+- §B: **56 routes are served but undocumented** (55 plus `/health`; the 2 admin-audit routes added by B-269 Slice 0b, row C24).
+- §C: 24 field, parameter or response mismatches (C18–C20 added by B-293, C21–C23 by B-269 Slice 0, C24 by B-269 Slice 0b; C18, C21 and C22 sit on routes that are themselves undocumented, §B).
 
 ---
 
@@ -24,14 +24,14 @@
 | A2 | `GET /v1/gateway/nodes/{nodeId}` | No such route (only list and delete) | `gateway_nodes` has no real writer (B-080). |
 | A3 | `POST /v1/memory/episodes/search` | Served as **`GET`** (and the `/v1/gateway/episodes/search` alias) | Method mismatch. A generated-client call would 405. |
 
-## B. Routes served by eami-api but absent from `openapi.yaml` (54)
+## B. Routes served by eami-api but absent from `openapi.yaml` (56)
 
 | Area | # | Routes |
 |---|---|---|
 | Infrastructure | 1 | `GET /health` |
 | Model pricing (FinOps) | 4 | `GET /v1/admin/model-pricing`<br>`POST /v1/admin/model-pricing`<br>`DELETE /v1/admin/model-pricing/{model}`<br>`PATCH /v1/admin/model-pricing/{model}` |
 | Agent config (B-271) | 3 | `GET /v1/agents/{agent_id}/config`<br>`GET /v1/gateway/agents/{agentId}/config`<br>`PUT /v1/gateway/agents/{agentId}/config` |
-| Audit | 1 | `GET /v1/audit/verify` |
+| Audit | 3 | `GET /v1/audit/verify`<br>`GET /v1/audit/admin-events` (B-269 Slice 0b, **admin only**)<br>`GET /v1/audit/admin-events/verify` (B-269 Slice 0b, **admin only**) |
 | Auth: invite, reset (B-212) | 3 | `POST /v1/auth/accept-invite`<br>`POST /v1/auth/request-reset`<br>`POST /v1/auth/reset-password` |
 | Agent Detail reads (B-200, Agent Lineage) | 2 | `GET /v1/gateway/agents/{agentId}/connections`<br>`GET /v1/gateway/agents/{agentId}/lineage` |
 | Memory / episodes | 4 | `GET /v1/gateway/episodes`<br>`GET /v1/gateway/episodes/search`<br>`GET /v1/gateway/episodes/{episodeId}`<br>`GET /v1/memory/episodes/search` |
@@ -55,7 +55,7 @@ Each group's origin, where one is recorded:
 - **Reorder:** the `PUT` alias is undocumented; `POST` is documented (see C10).
 - **`GET /v1/memory/episodes/search`:** see A3.
 
-## C. Field, parameter and response mismatches on documented routes (23)
+## C. Field, parameter and response mismatches on documented routes (24)
 
 | # | Route / schema | Drift | Source | Tracked |
 |---|---|---|---|---|
@@ -82,6 +82,7 @@ Each group's origin, where one is recorded:
 | C21 | `PUT /v1/gateway/agents/{agentId}/config` (and future preset routes) error body | B-269 Slice 0 (D10): `ErrorResponse` gains an optional `field` (one of `scan_interval_seconds`, `max_report_size_bytes`, `model_file_size_mb`, `model_scan_paths`, `enabled_scanners`). Validation 400s now carry **stable codes** instead of `bad_request`: `interval_out_of_range`, `report_size_out_of_range`, `model_size_out_of_range`, `too_many_paths`, `path_empty`, `path_too_long`, `path_invalid_chars`, `path_network`, `path_not_absolute`, `path_not_normalized` (a `.` or `..` part, or a part ending in a dot or space; a `:` after the drive letter is `path_invalid_chars`), `path_root`, `path_profile_parent` (server-only: `/home`, `/Users`, `X:\Users`, and the aliases `X:\Documents and Settings`, `/System/Volumes/Data/Users`, `/var/home`), `too_many_scanners`, `unknown_scanner`. Messages are fixed text and **never echo the submitted value** (the old `unknown scanner %q` echo is gone). `path_profile_parent` (and the full rules) apply on this legacy route **only when `model_scan_paths` changes** (S5). Shared vectors: `testdata/agent_config_vectors.json`. | B-269 | here |
 | C22 | Agent config responses (`GET /v1/agents/{agent_id}/config`, `GET`/`PUT /v1/gateway/agents/{agentId}/config`) | B-269 Slice 0 (S5): new `path_warnings: string[]` (never null): codes the stored paths would fail if added now (`path_root`, `path_profile_parent`); legacy paths stay accepted but flagged. **Behaviour:** new agents' default `model_scan_paths` is now `[]` (migration 000028; was `/home`, `/Users`, `C:\\Users`). `config_error` (C19) gains `path_root` and `path_not_normalized` (agent codes); the API allowlist also accepts `path_profile_parent`. | B-269 | here |
 | C23 | Report payload: local models and notes | B-269 Slice 0: `local_models[].source` gains `scan_path` (a hit under a configured path; agents ≥ 1.3.2; older agents send `lm_studio`). New optional `scanner_notes: {scanner: [code]}`, codes `depth_limited` (a walk hit the depth limit of 8), `path_root` (a configured path was, or resolved through links to, a root and was skipped) and `path_network` (it resolved to a network share). Stored `endpoint_model_files.source` now accepts `gpt4all` and `scan_path`, and the agent's `lm_studio` is stored as `lmstudio` (previously both became `unknown`). Extends C20. | B-269 | here |
+| C24 | `GET /v1/audit/admin-events`, `GET /v1/audit/admin-events/verify` (new, §B) | B-269 Slice 0b: the admin audit trail's read API. **Org `admin` only** (403 for operator, viewer, approver, platform_admin); always the caller's own org, **no org parameter**. List: filters `action` (registered codes only), `target_type`, `target_id` (UUID), `actor_user_id` (UUID), `from`/`to` (RFC 3339); `page`/`per_page` (default 50, max 100); `sort=seq` only, `order=asc|desc` (default `desc`). **Any unknown query parameter is a 400** (fail closed); bad values are 400 `bad_request` with a fixed message and `field`, never echoing the value. Response `{data, meta}`; each event: `id, seq, occurred_at, actor_type (user|system), actor_user_id, actor_email (joined, same org), actor_role, action, target_type, target_id, summary (object: field names, `sha256:`+16-hex value hashes, counts, closed-enum names, stable codes, ID/version refs; never values), source (api|system), request_id (nullable), prev_hash, hash`. Verify: `{valid, checked, head_seq, head_hash, first_bad_seq, reason (seq_gap|prev_hash_mismatch|hash_mismatch), guarantee}`; any query parameter is a 400. Duplicate query parameters are a 400; `page`/`per_page` must be positive integers (`per_page` at most 100). Verify is rate-limited per org (6 a minute, then 429 `rate_limited` with `Retry-After`). **Hash algorithm** (for an external verifier): SHA-256 over `eami-admin-audit-v1`, `prev_hash`, `id`, `org_id`, `seq` (decimal), `occurred_at` (UTC, `2006-01-02T15:04:05.000000Z`), `actor_type`, `actor_user_id` (or empty), `actor_role`, `action`, `target_type`, `target_id`, the stored `summary` bytes, `source`, `request_id` (or empty), each prefixed with its 4-byte big-endian length; genesis `prev_hash` = SHA-256(`eami-admin-audit-genesis-v1` + org id). `request_id` is chi's ID and can be client-supplied (`X-Request-Id`): correlation only, never authority. **Future write routes** (Slice 1+) can return 500 `audit_write_failed` when the audit event can't be recorded (the change is rolled back). | B-269 | here |
 
 **Unspecified older entries:** B-217 recorded "two changed response shapes" for the CMDB list without naming them. They are superseded by C1–C5 above, which describe the current shape.
 

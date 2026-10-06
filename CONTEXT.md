@@ -8,7 +8,18 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-06, newest) — B-269 Slice 0b Part A (admin audit trail): report, no build
+## Active decision thread (2026-10-06, newest) — B-269 Slice 0b DONE (admin audit trail); B-298 and B-299 minted; 7a handed
+
+- **Built** (`B-269_SLICE0B_VERIFICATION.md`): `admin_audit_events` (migration 000029) with its own hash chain per org; `store.RunAudited(ctx, uc.OrgID, change)` writes the change and its event in one transaction and fails closed (500 `audit_write_failed`); admin-only `GET /v1/audit/admin-events` and `/verify`. Codes registered for presets, assignment and enrollment keys only. No UI, no wiring.
+- **Guarantee, plainly:** detects edits, interior deletions, reordering, forged rows and cross-org moves; **cannot detect a database administrator** who deletes the newest events or recomputes the chain (asserted in tests). The app role is a superuser (B-299), so the triggers only stop app bugs.
+- **Proof:** 15 tests in throwaway databases, 15 of 15 deliberate breakages caught; suite 631/0; live: up/down/up on the real database after a backup, 22 of 22 route checks, TRUNCATE refused, fixtures soft-deleted, trail empty.
+- **Reviews:** security (no Critical/High) and code (no High); every actionable finding fixed; security M1 recorded on B-299.
+- **Gateway trace:** after 2028-01-01, tool calls go through **unaudited** → **B-298 High**. **B-299** (superuser app role, Medium-High) minted. Next B-ID **B-300**.
+- **Item 7a:** the drift list was handed to Architect-EAMI as `tasks/TASK-071-openapi-drift-handoff.md` (`a75e5b5`); **acknowledgement not yet received**, required before Slice 2 (D1).
+- **For Slice 1:** use `RunAudited` with `uc.OrgID`; handler tests must use throwaway databases (an org with audit events can't be deleted).
+- **Next:** Slice 1 (backend). Marker cleared.
+
+## Active decision thread (2026-10-06) — B-269 Slice 0b Part A (admin audit trail): report, no build
 
 - **Report:** `B-269_SLICE0B_PART_A_INVESTIGATION.md`.
 - **Recommendation:** a new `admin_audit_events` table with its own **per-org** hash chain (per-org `seq`, org-specific genesis, length-prefixed hash covering every column). **Not** `audit_log`: its chain is single-writer (gateway mutex, unlocked global head), its hash doesn't cover a summary, and six readers would need filtering.
@@ -17,7 +28,7 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - **Read:** admin-only `GET /v1/audit/admin-events` and `/verify`. Not partitioned, never deleted, org FK RESTRICT, append-only triggers.
 - **Honest limit:** detects edits and interior deletions; not tail truncation or a full recompute by a DB admin.
 - **Pre-existing findings, proposed, not minted (next B-ID B-298):** F1 `audit_log` inserts fail from 2028-01-01 (no partitions after 2027-12, no DEFAULT, partition job only in the retired path); F2 `eami_app` is a superuser, so `audit_log`'s REVOKE never applied.
-- **Waiting on:** founder decisions B0b-1..9. Marker cleared.
+- **Decisions B0b-1..9: all yes (founder, 2026-10-06); built the same day (see the newer thread).**
 
 ## Active decision thread (2026-10-06) — Path-rule authority recorded; B-297 gate minted; 1.3.2 release notes
 
@@ -3012,6 +3023,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-06 by Claude Code — B-269 Slice 0b DONE (admin audit trail, migration 000029); B-298 (High) and B-299 minted; drift list handed to Architect-EAMI (TASK-071, ack pending). Marker cleared.
+
+Prior entry:
 2026-10-06 by Claude Code — B-269 Slice 0b Part A investigation (admin audit trail): report only, no code; decisions B0b-1..9 pending; F1/F2 proposed, not minted. Marker cleared.
 
 Prior entry:

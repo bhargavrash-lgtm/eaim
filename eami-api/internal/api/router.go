@@ -69,9 +69,12 @@ type Server struct {
 	// auditExportLimiter limits repeated starts; auditExportsInFlight admits
 	// only one active Audit export per organization. Together they bound both
 	// sustained and parallel CSV egress on the tenant boundary.
-	auditExportLimiter   *rateLimiter
-	auditExportMu        sync.Mutex
-	auditExportsInFlight map[string]struct{}
+	auditExportLimiter *rateLimiter
+	// adminAuditVerifyLimiter bounds GET /v1/audit/admin-events/verify per
+	// org: each call re-walks the whole chain (B-269 Slice 0b).
+	adminAuditVerifyLimiter *rateLimiter
+	auditExportMu           sync.Mutex
+	auditExportsInFlight    map[string]struct{}
 }
 
 // NewServer creates a Server with the given dependencies. cfg may be nil
@@ -97,6 +100,7 @@ func NewServer(queries *store.Queries, authSvc *auth.Service, engine *alerting.E
 	s.loginIPLimiter = newRateLimiter(rl.LoginPerIP, time.Duration(rl.LoginPerIPWindowSeconds)*time.Second)
 	s.loginAccountLimiter = newRateLimiter(rl.LoginPerAccount, time.Duration(rl.LoginPerAccountWindowSeconds)*time.Second)
 	s.auditExportLimiter = newRateLimiter(4, time.Minute)
+	s.adminAuditVerifyLimiter = newRateLimiter(6, time.Minute)
 	s.auditExportsInFlight = make(map[string]struct{})
 	var gwURL, gwKey string
 	if cfg != nil {
@@ -129,15 +133,16 @@ func NewServer(queries *store.Queries, authSvc *auth.Service, engine *alerting.E
 func NewHandler(s Store, authSvc *auth.Service) *Server {
 	rl := config.DefaultRateLimitConfig()
 	return &Server{
-		storeIface:           s,
-		authSvc:              authSvc,
-		cfg:                  &config.Config{RateLimit: rl},
-		setupLimiter:         newRateLimiter(rl.Setup, time.Duration(rl.SetupWindowSeconds)*time.Second),
-		provisioningLimiter:  newRateLimiter(rl.Provisioning, time.Duration(rl.ProvisioningWindowSeconds)*time.Second),
-		loginIPLimiter:       newRateLimiter(rl.LoginPerIP, time.Duration(rl.LoginPerIPWindowSeconds)*time.Second),
-		loginAccountLimiter:  newRateLimiter(rl.LoginPerAccount, time.Duration(rl.LoginPerAccountWindowSeconds)*time.Second),
-		auditExportLimiter:   newRateLimiter(4, time.Minute),
-		auditExportsInFlight: make(map[string]struct{}),
+		storeIface:              s,
+		authSvc:                 authSvc,
+		cfg:                     &config.Config{RateLimit: rl},
+		setupLimiter:            newRateLimiter(rl.Setup, time.Duration(rl.SetupWindowSeconds)*time.Second),
+		provisioningLimiter:     newRateLimiter(rl.Provisioning, time.Duration(rl.ProvisioningWindowSeconds)*time.Second),
+		loginIPLimiter:          newRateLimiter(rl.LoginPerIP, time.Duration(rl.LoginPerIPWindowSeconds)*time.Second),
+		loginAccountLimiter:     newRateLimiter(rl.LoginPerAccount, time.Duration(rl.LoginPerAccountWindowSeconds)*time.Second),
+		auditExportLimiter:      newRateLimiter(4, time.Minute),
+		adminAuditVerifyLimiter: newRateLimiter(6, time.Minute),
+		auditExportsInFlight:    make(map[string]struct{}),
 	}
 }
 
@@ -259,6 +264,11 @@ func (s *Server) Handler() http.Handler {
 			// RequestPasswordReset (pre-auth, below) never mints a usable
 			// token or logs one; only this authenticated action does.
 			r.Post("/v1/users/{userId}/reset-link", s.AdminGenerateResetLink)
+			// Admin audit trail (B-269 Slice 0b, B0b-2): admins only, so it
+			// sits here and NOT in /v1/audit's admin/operator/viewer read
+			// group below. Always the caller's own org.
+			r.Get("/v1/audit/admin-events", s.ListAdminAuditEvents)
+			r.Get("/v1/audit/admin-events/verify", s.VerifyAdminAuditChain)
 			// Workspaces (B-197 increment 3): create/delete are org-wide
 			// structural changes, admin-only, same tier as every other
 			// org-wide write on this line -- not workspace-scoped (there's

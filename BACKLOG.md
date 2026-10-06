@@ -1485,6 +1485,8 @@ No schema/migration work (`policies.org_id` has existed since the original schem
 **Dependencies:** none blocking investigation start.
 **Status:** logged 2026-08-29 from a scalability/DR/integrations discussion. Zero investigation started.
 
+**Added 2026-10-06 (B-269 Slice 0b):** `admin_audit_events` (migration 000029) joins `audit_log` on the **never-delete** list: unpartitioned, append-only triggers, org FK `ON DELETE RESTRICT`. Its conflict with erasure obligations is noted on B-224. Separately, `audit_log` has no partition after 2027-12 (**B-298**).
+
 ### B-134 — Offsite backup + re-verification of B-029's restore test against current schema — **investigation complete, 2026-09-01, split into B-143 (fix) + B-144 (offsite design)**
 **Objective (original):** B-029 (DONE 2026-07-25) built and live-verified real Postgres backup/restore — but LOCAL-VOLUME ONLY, and its original restore proof predated roughly a dozen subsequent `schema/migrations-v2` migrations. This entry investigated both halves before any design/build work.
 **Part A — backup coverage re-verified, mechanism confirmed sound:** `backup-db.sh` runs a full-database `pg_dump -Fc` (no table allowlist), so it automatically captures every table added since B-029 — `ai_token_events` (migration 000010), `agent_lifecycle_events` (000009), all workflow tables (000006/000007), `token_usage`'s hypertable — with zero maintenance burden as new migrations land. No coverage gap found. One doc-accuracy gap found and folded into B-143 below: `RECOVERY.md` still claims `docker-entrypoint-initdb.d/schema.sql` auto-applies on a fresh volume; confirmed empirically false since B-051 moved schema ownership to the `migrate` service (`schema/migrations-v2`) — a truly fresh `postgres_data` volume today has zero tables until `migrate` runs.
@@ -1974,6 +1976,8 @@ B-164 also flagged one adjacent-but-unrelated dormant artifact so it isn't mista
 **Why not fixed in B-172/B-173:** the working precedent for periodic cleanup (`cron.schedule(...)` in `schema/migrations/007`) lives entirely in the OLD `schema/migrations/` path, not the active `schema/migrations-v2` (golang-migrate) path this fix's own new table lives in — `migrations-v2` has no working `cron.schedule(...)` job anywhere today. Confirmed live against the real dev Postgres (`docker exec eaim-postgres-1 psql ... SELECT extname FROM pg_extension`): `pg_cron` is preloaded (`shared_preload_libraries=timescaledb,pg_cron`) but the extension itself was never actually `CREATE EXTENSION`'d there. Adding `CREATE EXTENSION pg_cron` + `cron.schedule(...)` to a new `migrations-v2` migration would apply to EVERY throwaway test database `eami-gateway/internal/testdb.NewThrowawayPool` creates across the entire real-Postgres test suite (hundreds of short-lived databases), and `cron.schedule`'s job table only lives in `cron.database_name` (fixed to `eami`) — calling it from a throwaway database is untested territory with real risk of failing or orphaning `cron.job` rows for since-dropped databases. Not a small, low-risk addition under this session's own time budget; a real fix needs its own deliberate pass (e.g. a Go-side periodic DELETE from `cmd/gateway/main.go` instead of `pg_cron`, sidestepping the throwaway-database problem entirely, or scoping a `migrations-v2` `pg_cron` job carefully with its own dedicated test).
 **Dependencies:** B-173 (the table this cleans up).
 
+**Correction (2026-10-06, B-298):** `audit_log`'s `pg_cron` partition job lives only in the retired `schema/migrations/007` path; under `migrations-v2` nothing creates partitions, and the last one is 2027-12. Tracked as B-298.
+
 ### B-190 — Workflow Canvas rebuild, Brief 3 of 3 (B-131): structural persistence, closing the epic — **DONE, live-verified, closed 2026-09-16**
 **Objective:** B-131's own final recommended brief — a real Save action on the canvas, persisting add/remove/reorder/configure edits through the EXISTING, unmodified `UpdateWorkflow` PATCH + per-step static-param PUT endpoints, the same two the card editor's `EditWorkflowPanel` already uses. Closes the epic: the canvas now has genuine read/write parity with the card editor, not just interactivity.
 **Two functions newly exported from `WorkflowsPage.tsx`, zero logic change, same justified-exception category as B-148's own six exports:** `validateAndConvertRows` (StepRow[] → the real wire payload + per-step static-params-by-index) and `saveStaticParams` (the parallel B-059 PUTs using the real ids an Update response just returned) — both previously module-private, confirmed via `git diff` to be an `export` keyword + doc comment only, nothing else.
@@ -2443,6 +2447,13 @@ Breadcrumb is `Workflows` (real `<Link>` to `/gateway/workflows`) → the workfl
 - a roadmap mapping;
 - mandatory reviewer and security passes.
 **Status:** QUEUED, not investigated.
+
+**Slice 0b of B-269 is this item's first slice (2026-10-06, `B-269_SLICE0B_VERIFICATION.md`):**
+- The trail exists: `admin_audit_events`, its own hash chain per org, `store.RunAudited` (the change and its event in one transaction, fail closed), admin-only `GET /v1/audit/admin-events` and `/verify`.
+- Only preset, assignment and enrollment-key codes are registered. **Adopting another admin write needs no migration:** add a registry entry and a typed summary, move the handler's writes into `RunAudited`, done. The codes for every other write site are reserved in `B-269_SLICE0B_PART_A_INVESTIGATION.md` §7, so they're chosen once.
+- **Real cost of adoption:** several handlers aren't transactional today; each must move into a transaction.
+- **Never-delete conflicts with future erasure obligations (B0b-6):** rows are never deleted and `org_id` is `ON DELETE RESTRICT`, so an org with admin events can't be deleted, and a user's ID stays in old events after the user is deleted. Org offboarding and GDPR-style erasure need a documented export-then-purge procedure (and a decision on pseudonymising `actor_user_id`) before either is offered. Belongs with B-133's retention decision.
+- UI: still to come, under the existing Audit page (one-spine rule).
 
 ### B-225 — Hand-rolled paginators outside `pagination()` still overflow — **QUEUED, 2026-09-26**
 **Origin:** found by both independent reviews of the B-196 Brief 1 fix-up pass (Low); see `B-196_BRIEF1_FIXUP_VERIFICATION.md` §5 and §7. The founder approved minting this ID. It was confirmed free against BACKLOG.md directly: the counter read B-225 and no open item used that number or covered this scope.
@@ -3442,7 +3453,7 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 
 **Slices (each shippable, in order: 0, 0b, 1, 2, 3, 4; tick item 8 only when all are done):**
 - [x] **Slice 0 (prerequisite): DONE 2026-10-06** — `5290482` (`B-269_SLICE0_VERIFICATION.md`; agent 1.3.2). B-277's path rules and walk-depth limit, **plus the B-194 file-type filter**. Plan: `B-269_SLICE0_PLAN.md`.
-- [ ] **Slice 0b:** a minimal, generic, append-only admin audit trail (D2), wired to presets, keys and assignment only. **Part A done 2026-10-06** (`B-269_SLICE0B_PART_A_INVESTIGATION.md`): a separate `admin_audit_events` table with its own per-org hash chain (not `audit_log`), written in the change's own transaction under a per-org advisory lock, admin-only `GET /v1/audit/admin-events` (+ `/verify`). Decisions B0b-1..9 pending. Also found (proposed, not minted): `audit_log` has no partition after 2027-12 and no DEFAULT partition; the app DB role is a superuser, so `audit_log` append-only isn't enforced.
+- [x] **Slice 0b: DONE 2026-10-06** (`B-269_SLICE0B_VERIFICATION.md`; Part A `B-269_SLICE0B_PART_A_INVESTIGATION.md`; decisions B0b-1..9). `admin_audit_events` with its own hash chain per org, written with the change in one transaction (`store.RunAudited`, fail closed), admin-only `GET /v1/audit/admin-events` and `/verify`; codes registered for presets, assignment and enrollment keys only; no UI, no wiring. Tamper-evident against edits, **not** against a database administrator. Minted B-298 (`audit_log` 2028 cliff, High) and B-299 (superuser app role).
 - [ ] **Slice 1 (backend):** schema, migration, endpoint-keyed config delivery, assignment, validation, API, tests. Highest risk.
 - [ ] **Slice 2 (UI):** preset list, editor, draft/publish/revert, rollout summary.
 - [ ] **Slice 3:** enrollment keys, deployments, package builder, bundles.
@@ -4127,4 +4138,38 @@ Choose in the brief.
 **Pre-deployment gate:** no Windows deployment relies on the agent key's confidentiality until this is verified (and fixed if confirmed). Recorded next to the 8a persistence gate in the master sequence.
 **Status:** UNVERIFIED, GATE.
 
-## Next B-ID: B-298
+### B-298 — `audit_log` stops accepting inserts on 2028-01-01, and gateway tool calls then go through **unaudited** — **QUEUED, High, 2026-10-06**
+**Origin:** B-269 Slice 0b Part A (finding F1). Minted at founder direction 2026-10-06; confirmed free against BACKLOG.md directly (the counter read B-298).
+**Problem:**
+- `audit_log` has 20 monthly partitions, `audit_log_2026_05` to `audit_log_2027_12`, and **no DEFAULT partition** (checked live).
+- The monthly partition job existed only in the retired `schema/migrations/007` path (`pg_cron`). `migrations-v2` has none, the `pg_cron` extension was never created in the dev database (B-189), and `scripts/create-audit-partition.sh` exists but nothing schedules it.
+- From 2028-01-01 (or earlier on a gateway host with a wrong clock) every gateway `audit_log` insert fails: no partition for the row.
+
+**What the gateway does then (traced, `B-269_SLICE0B_VERIFICATION.md` §2):** the **tool call goes through, unaudited**.
+- Allow: the downstream call runs first; the audit write's error is only carried in `DispatchOutcome.AuditWriteErr` and logged by `logAuditWriteFailureHook` (`slog.Error`). The agent gets the result.
+- Escalate: the approval is still submitted and, once approved, executed.
+- Deny: denied anyway; the record is lost.
+- `writer.go` advances `lastHash` only after a successful insert, so the chain isn't corrupted; it just stops growing.
+
+**Severity:** **High** (founder rule: unaudited calls). About 15 months away, but silent when it hits.
+**Fix (small):** a migration that adds a DEFAULT partition and/or creates partitions years ahead, plus a scheduled creation job that runs in the `migrations-v2` world; a test that inserts a far-future row. Consider whether the gateway should fail closed on an audit write failure (a policy decision, separate from the partition fix).
+**Note:** B-189's text describes `audit_log`'s `pg_cron` job as working; it isn't.
+**Status:** QUEUED.
+
+### B-299 — The application's database role is a superuser that owns its tables, so no audit table is append-only or tamper-resistant against the app itself — **QUEUED, Medium-High, 2026-10-06**
+**Origin:** B-269 Slice 0b Part A (finding F2), widened by the Slice 0b security review (M1). Minted at founder direction 2026-10-06; confirmed free against BACKLOG.md directly.
+**Problem:**
+- `eami_app` (the API's and gateway's DSN role) has `rolsuper = t` (checked live) and owns its tables (B-168).
+- The baseline's `REVOKE UPDATE, DELETE ON audit_log FROM eami_app` is **a comment**, never applied; the `audit_insert_only` RLS policy doesn't constrain a superuser or owner.
+- **This removes the tamper-resistance claim for every audit table:** `audit_log`, `agent_lifecycle_events`, `license_events`, and B-269 Slice 0b's `admin_audit_events`, **its append-only triggers included**: an owner can `ALTER TABLE … DISABLE TRIGGER`, `DROP TABLE`, or rewrite rows and recompute the chain. An injection bug or a compromised API process can do all of that.
+- What remains is tamper-*evidence* only, with the limits stated in `B-269_SLICE0B_VERIFICATION.md` §1.
+
+**Fix scope (needs its own brief: deployment, compose, migrations):**
+- a separate owner or migration role owns the schema and runs migrations;
+- the runtime role is not a superuser and gets only what it needs; on audit tables `SELECT, INSERT` only, with `UPDATE, DELETE, TRUNCATE` revoked explicitly (security review M1);
+- verify existing deployments' upgrade path (role creation, grants, `ALTER … OWNER`), backups and restore (B-029/B-143), and the throwaway-database tests (`CREATEDB`).
+
+**Severity:** Medium-High.
+**Status:** QUEUED.
+
+## Next B-ID: B-300

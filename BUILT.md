@@ -1,5 +1,37 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-269 Slice 0b — minimal admin audit trail (`admin_audit_events`) — 2026-10-06 (Claude Code)
+
+Evidence: `B-269_SLICE0B_VERIFICATION.md`. Design: `B-269_SLICE0B_PART_A_INVESTIGATION.md`. Decisions B0b-1..9 (founder, all yes). First slice of B-224.
+
+**Schema:** migration `000029_admin_audit_events` (up and down; mirrored in `schema.sql`).
+- Table `admin_audit_events`: `id, org_id (FK orgs ON DELETE RESTRICT), seq (UNIQUE with org_id), occurred_at, actor_type, actor_user_id, actor_role, action, target_type, target_id, summary (TEXT, IS JSON OBJECT, ≤ 8 KiB), source, request_id, prev_hash, hash`, with format CHECKs on every text column.
+- Not partitioned; never deleted. Triggers refuse UPDATE, DELETE and TRUNCATE (`42501`). The down migration locks the table and refuses while any row exists.
+
+**Store (`eami-api/internal/store/admin_audit.go`):**
+- `AppendAdminAuditEvent(ctx, tx, ev)`: validates, takes the org's chain lock (`pg_advisory_xact_lock`, 5 s `lock_timeout`), requires READ COMMITTED, reads the head, inserts `seq+1` with a length-prefixed SHA-256 hash over every column. Failures are `ErrAdminAuditWrite`; bad events `ErrAdminAuditInvalid`.
+- `(*Queries).RunAudited(ctx, orgID, change)`: the change and its event in one transaction; the event's org must equal `orgID` (the caller's JWT org).
+- `ListAdminAuditEvents`, `CountAdminAuditEvents`, `VerifyAdminAuditChain` (read-only transaction, 30 s statement timeout), `AdminAuditGenesis`.
+- Registry: 12 codes for presets, assignment and enrollment keys only. Summary constructors `AdminAuditValueChange`, `AdminAuditListChange`, `AdminAuditEnumChange`, `AdminAuditFieldChanged` (free text: "changed" only). Validation rejects any value-shaped content.
+
+**API (`eami-api/internal/api/admin_audit.go`):**
+- `GET /v1/audit/admin-events` and `GET /v1/audit/admin-events/verify`, in the **admin-only** group. Org from the JWT only. Unknown or duplicate parameters, bad filters and bad paging are 400 with fixed messages (never echoed). Verify is rate limited per org (6/min) and returns the guarantee text.
+- For Slice 1: `writeAdminAuditFailure` (500 `audit_write_failed`, fixed text; detail only in the local log with the route pattern), `adminAuditActor`, `adminAuditRequestID`.
+
+**Tests:** 15 real-Postgres tests in throwaway databases (the 12 cross-org and tamper tests from Part A §8, plus three from the reviews); **15 of 15 deliberate breakages caught**. `eami-api` suite 631 passed, 0 failed; `migrationtest` pass.
+
+**Live:** backup, then migration up/down/up on the real database; API rebuilt; 22 of 22 route checks (roles, cross-org, fail-closed parameters, rate limit, existing Audit routes intact); TRUNCATE refused on the real table; fixtures soft-deleted; trail empty.
+
+**Reviews:** security (no Critical/High; M2, M3, L1, L2, L4 fixed; M1 recorded on B-299) and code (no High; M1 and L2–L8 fixed). Drift row C24.
+
+**Gateway trace (B-298):** after 2028-01-01 `audit_log` inserts fail and **tool calls go through unaudited** (Allow runs the call first and only logs the write failure). B-298 rated High.
+
+**Limitations**
+- Tamper-evident, **not** tamper-proof: a database administrator can delete the newest events or recompute the chain undetected (asserted in tests). The app role is a superuser (B-299), so the triggers only stop app bugs.
+- No UI; no wiring (presets, keys and assignment arrive in Slices 1 and 3).
+- Never-delete conflicts with future erasure obligations (noted on B-224).
+- `occurred_at` is the API server's clock; `seq` is the order.
+
 ## B-269 Slice 0 — B-277 path rules and depth limit, plus the B-194 file-type filter (agent 1.3.2) — 2026-10-06 (Claude Code)
 
 The evidence record is `B-269_SLICE0_VERIFICATION.md`; the plan is `B-269_SLICE0_PLAN.md`; the decisions are in `DISCOVERY_PRESETS_DESIGN.md` §12 (D9, D10, S1–S7).
