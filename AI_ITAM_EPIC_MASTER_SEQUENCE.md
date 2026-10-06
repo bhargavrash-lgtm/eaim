@@ -86,10 +86,15 @@ anything.
       Groups primitive with an optional rule definition. Full design in
       `DYNAMIC_ASSET_GROUPING_EPIC.md` (repo root; §2 is the schema
       decision this item resolves, and §5 is why it must precede B-269).
-- [ ] 7. **API design convention — lock, don't assume.** Confirm B-137's
+- [x] 7. **API design convention — lock, don't assume.** Confirm B-137's
       real state, trace CMDB's exact endpoint shape, confirm real
       versioning practice. Deliverable: one written convention every
       Phase 2 item follows.
+      **Locked v1 (principles 1–10) 2026-10-06 — `9563458`; section 11 open,
+      closes with Slice 1's plan.** Founder: `openapi.yaml` is updated by
+      Architect-EAMI within the epic, in batches; a Phase 2 slice that adds
+      routes can't be ticked until its drift rows are acknowledged;
+      deprecation length unset until B-137 has a design.
       **Convention drafted, awaiting founder lock (2026-10-05):** `API_CONVENTION.md`.
       - Principles 1–7 are copied from B-252 C2's §6.
       - Added: §8 sorting, §9 breaking changes.
