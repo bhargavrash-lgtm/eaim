@@ -106,10 +106,11 @@ anything.
       - Item 8 may start once the file has been handed to Architect-EAMI *and* Architect-EAMI has acknowledged receiving it.
       - Fixing the drift in `api/openapi.yaml` is **not** a precondition for item 8. It proceeds on Architect-EAMI's own schedule.
       - New drift keeps being appended under `API_CONVENTION.md` §10.
-      **Handed 2026-10-06:** `tasks/TASK-071-openapi-drift-handoff.md` (founder's
-      message, filed for Architect-EAMI; current counts are in the drift file's
-      header). **Acknowledgement: not yet received.** Required before B-269
-      Slice 2 (D1).
+      **Handed 2026-10-06; acknowledgement by founder pending.**
+      `tasks/TASK-071-openapi-drift-handoff.md`. Architect-EAMI is a role with
+      no running agent; the founder holds it (`BOUNDARIES.md`, 2026-10-06).
+      **The gate is met by the founder's dated acknowledgement** in TASK-071's
+      Acknowledgement section. Required before B-269 Slice 2 (D1).
 
 ---
 

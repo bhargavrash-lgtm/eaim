@@ -47,6 +47,11 @@ docs/
 
 **Never touches:** service implementation code, UI code.
 
+> **Current reality (2026-10-06):** Architect-EAMI is a **role with no running agent**. No Architect-EAMI session has ever left a commit, task result or note in this repo. **As of 2026-10-06 the founder holds the role.**
+> - Requests to Architect-EAMI still go in `tasks/` (the handoff format below) and are **acknowledged by the founder**, dated, in the task file.
+> - `api/openapi.yaml` edits are made by a Code session and approved by the founder, in batches, each checked mechanically against the router (`API_CONVENTION.md`, founder decisions).
+> - The role definition above is kept as written.
+
 ---
 
 ### Agent 3 — BE-Gateway

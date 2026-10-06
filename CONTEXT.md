@@ -8,7 +8,16 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-06, newest) — Item 7: API convention LOCKED v1; section 11 open
+## Active decision thread (2026-10-06, newest) — Architect-EAMI gap closed: the founder holds the role
+
+- **`BOUNDARIES.md`:** "Current reality" note under Architect-EAMI. It is a role with no running agent; as of 2026-10-06 the founder holds it. Requests go in `tasks/` and are acknowledged by the founder. The original role definition is kept.
+- **TASK-071:** an Acknowledgement section with the draft line, `55600e7` filled in as the drift list's state, and `<date>` placeholders **left for the founder**.
+- **`API_CONVENTION.md` founder decisions:** spec edits are made by a Code session and approved by the founder; each batch is checked mechanically (router vs spec, the method that found the 54 undocumented routes), with the result recorded with the batch.
+- **Master sequence 7a:** "Handed 2026-10-06; acknowledgement by founder pending"; the gate is met by the founder's dated acknowledgement.
+- **TASK-036 and TASK-051 (the other two tasks addressed to Architect-EAMI):** proposals reported to the founder (both "superseded"); **nothing changed until the founder decides.**
+- Docs only. Marker cleared.
+
+## Active decision thread (2026-10-06) — Item 7: API convention LOCKED v1; section 11 open
 
 - **`API_CONVENTION.md`:** status "LOCKED v1 (principles 1-10), 2026-10-06; section 11 open." The file's principles 5 and 6 and the 1–10 numbering were already intact; the damage the founder saw was a copy artifact.
 - **New §11, "Not yet specified (to be settled from Slice 1's plan)":** pagination, envelope and meta, error body (D10), draft/publish and optimistic-lock responses, action and bulk routes, idempotency, ID/timestamp/naming, body-size limits (B-287), org always from the session. Slice 1's plan proposes each; §11 gets the approved answers before Slice 1 builds.
@@ -3032,6 +3041,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-06 by Claude Code — Architect-EAMI gap closed: founder holds the role (BOUNDARIES.md note); TASK-071 acknowledgement drafted for the founder; spec-batch rule in API_CONVENTION.md; 7a updated. TASK-036/051 proposals reported, unchanged. Docs only. Marker cleared.
+
+Prior entry:
 2026-10-06 by Claude Code — Slice 0b grandfathered once under the route-acknowledgement rule (C24 pending on TASK-071); note recorded in the master sequence, API_CONVENTION.md and here. Docs only. Marker cleared.
 
 Prior entry:
