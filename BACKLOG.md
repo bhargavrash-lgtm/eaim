@@ -4188,6 +4188,11 @@ Choose in the brief.
 **Summary:** federate governed-agent identity with the customer's IdP (Okta, Entra, any OIDC provider) and keep a built-in fallback issuer for customers with no IdP. Every governed agent has an accountable human owner. Autonomous and delegated modes; delegated authority is the intersection of the agent's scope and the user's rights. Proposed slices A (accountability and lifecycle), B (delegation on the built-in issuer), C (federation, user side depends on B-138).
 **Roadmap:** Horizon 1, next to B-138 and B-231; not itself a numbered roadmap item.
 **Related:** B-138, B-243, B-231, B-230, B-255, B-295, B-269 Slice 0b.
+**Part A (read-only) done 2026-10-06** (`AGENT_IDENTITY_PART_A_INVESTIGATION.md`). Conflicts C1–C11 flagged, notably:
+- **C2:** suspending a governed agent doesn't stop an already-open MCP session: messages are authenticated by session ID only and keep dispatching until the token expires (≤ 4 h). Code trace; not live-tested. Proposed for its own B-ID (Medium–High), pending the founder.
+- **C6:** gateway 401/403 bodies echo raw error text. Proposed for its own B-ID, pending the founder.
+- C1 owner is free text (0/13 match a user); C3–C4 no key expiry, last-used or rotation, single signing key with no `kid`; C5 `audit_log` has no user column.
+
 **Status:** PARKED: listed under "Parked (not scheduled)" in the master sequence. Not in the active sequence; no build.
 
 ## Next B-ID: B-301

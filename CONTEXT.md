@@ -8,7 +8,21 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-06, newest) — Item 7a DONE: TASK-071 acknowledged by the founder
+## Active decision thread (2026-10-06, newest) — B-300 agent identity: design record parked; Part A reported (no build)
+
+- **Part 0** (`cc393bd`): `AGENT_IDENTITY_DESIGN.md` saved; **B-300** minted (epic, parked); listed under "Parked (not scheduled)" in the master sequence; cross-referenced from B-138, B-243, B-231, B-230, B-255. Roadmap: Horizon 1 next to B-138/B-231, not itself a numbered item.
+- **Part A** (`AGENT_IDENTITY_PART_A_INVESTIGATION.md`), read-only:
+  - owner is free text, 0/13 match a user (`created_by` set on 10/13);
+  - tokens RS256, one auto-generated key with no `kid` or rotation, TTL 60 s – 4 h;
+  - **suspension doesn't stop an open MCP session** (C2: messages authenticated by session ID only; JTI revocation per-process and checked only at session open);
+  - API keys: optional expiry (unused), `last_used` never written, no rotation, any number per agent;
+  - collector keys (discovery agents, SQLite) are unrelated to gateway keys;
+  - calls record only the governed agent, no user context anywhere;
+  - federation would sit next to `identity.Manager.Validate`; air-gapped needs uploaded keys with `kid`.
+- **Proposed, not minted (founder to decide):** C2 as its own B-ID (Medium–High) with a short live test; C6 (raw error text in gateway 401/403 bodies) as its own B-ID. Next free B-ID **B-301**.
+- No code. Marker cleared.
+
+## Active decision thread (2026-10-06) — Item 7a DONE: TASK-071 acknowledged by the founder
 
 - **TASK-071 acknowledged 2026-10-06** by the founder, acting in the Architect-EAMI role, recorded word for word in its Acknowledgement section; first acceptance box ticked. First batch (section A) is committed to be completed **before B-269 Slice 2 starts**; the master sequence's Slice 2 entry now requires it.
 - **Scope:** the drift list **as of `55600e7` only** (§A, the undocumented routes, the mismatches, and C24). **Routes added later need their own acknowledgement** under the `API_CONVENTION.md` rule.
@@ -3050,6 +3064,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-06 by Claude Code — B-300 (agent identity) design record parked and minted; Part A investigation reported (C1–C11; C2 open-session finding proposed for a B-ID). No code. Marker cleared.
+
+Prior entry:
 2026-10-06 by Claude Code — TASK-071's first-batch placeholder replaced: section A to be completed before B-269 Slice 2 starts; Slice 2 entry now requires it. Docs only. Marker cleared.
 
 Prior entry:
