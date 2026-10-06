@@ -101,16 +101,16 @@ anything.
       - Open at lock: OpenAPI-first or same-epic; deprecation length (deferred to B-137).
       - B-137 is a scoping placeholder with no design.
       - **Not ticked.**
-- [ ] 7a. **Contract drift hand-off.** `API_CONTRACT_DRIFT.md` (3 documented operations that don't exist as documented, 54 undocumented routes, 17 field/response mismatches) **goes to Architect-EAMI before item 8 starts.**
+- [x] 7a. **Contract drift hand-off.** `API_CONTRACT_DRIFT.md` (3 documented operations that don't exist as documented, 54 undocumented routes, 17 field/response mismatches) **goes to Architect-EAMI before item 8 starts.**
       **The gate is hand-off plus acknowledgement, not completion.**
       - Item 8 may start once the file has been handed to Architect-EAMI *and* Architect-EAMI has acknowledged receiving it.
       - Fixing the drift in `api/openapi.yaml` is **not** a precondition for item 8. It proceeds on Architect-EAMI's own schedule.
       - New drift keeps being appended under `API_CONVENTION.md` §10.
-      **Handed 2026-10-06; acknowledgement by founder pending.**
-      `tasks/TASK-071-openapi-drift-handoff.md`. Architect-EAMI is a role with
-      no running agent; the founder holds it (`BOUNDARIES.md`, 2026-10-06).
-      **The gate is met by the founder's dated acknowledgement** in TASK-071's
-      Acknowledgement section. Required before B-269 Slice 2 (D1).
+      **Handed 2026-10-06; acknowledged 2026-10-06 by founder in the
+      Architect-EAMI role. Gate met for Slice 2.** Done 2026-10-06 — `d307930`
+      (`tasks/TASK-071-openapi-drift-handoff.md`). Covers the drift list as of
+      `55600e7` only; routes added later need their own acknowledgement
+      (`API_CONVENTION.md`).
 
 ---
 
