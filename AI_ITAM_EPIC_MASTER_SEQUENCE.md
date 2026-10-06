@@ -129,8 +129,12 @@ anything.
       Decisions D1–D10 (founder, 2026-10-05): design §12. Slices, each
       shippable, in order 0, 0b, 1, 2, 3, 4. Tick item 8 only when all
       are done:
-      - [ ] Slice 0 (prerequisite): B-277 path allowlist and depth limit,
+      - [x] Slice 0 (prerequisite): B-277 path allowlist and depth limit,
             plus the B-194 file-type filter (`B-269_SLICE0_PLAN.md`).
+            Done 2026-10-06 — `5290482` (agent 1.3.2;
+            `B-269_SLICE0_VERIFICATION.md`). Rollout: agents older than
+            1.3.0 can't have paths removed remotely and keep listing any
+            large file under their configured paths until they update.
       - [ ] Slice 0b: minimal append-only admin audit trail (D2), for
             presets, keys and assignment only.
       Gate: the 7a drift hand-off acknowledgement is waived for Slices

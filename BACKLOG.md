@@ -3441,7 +3441,7 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 - D10: stable JSON error codes with one shared fixture file.
 
 **Slices (each shippable, in order: 0, 0b, 1, 2, 3, 4; tick item 8 only when all are done):**
-- [x] **Slice 0 (prerequisite): DONE 2026-10-06** (`B-269_SLICE0_VERIFICATION.md`; agent 1.3.2). B-277's path rules and walk-depth limit, **plus the B-194 file-type filter**. Plan: `B-269_SLICE0_PLAN.md`.
+- [x] **Slice 0 (prerequisite): DONE 2026-10-06** — `5290482` (`B-269_SLICE0_VERIFICATION.md`; agent 1.3.2). B-277's path rules and walk-depth limit, **plus the B-194 file-type filter**. Plan: `B-269_SLICE0_PLAN.md`.
 - [ ] **Slice 0b:** a minimal, generic, append-only admin audit trail (D2), wired to presets, keys and assignment only.
 - [ ] **Slice 1 (backend):** schema, migration, endpoint-keyed config delivery, assignment, validation, API, tests. Highest risk.
 - [ ] **Slice 2 (UI):** preset list, editor, draft/publish/revert, rollout summary.
