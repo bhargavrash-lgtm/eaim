@@ -29,7 +29,7 @@ which builds UI on the new routes.
 **Includes row C24** (`GET /v1/audit/admin-events` and `.../verify`, added by
 B-269 Slice 0b on 2026-10-06, after this task was filed). One acknowledgement
 covers it: Slice 0b was ticked before the route-acknowledgement rule existed and
-is grandfathered on condition that C24 is acknowledged with the rest of this list.
+is grandfathered on condition that C24 is acknowledged with the rest of this list. Condition met: C24 acknowledged 2026-10-06; the exception is closed.
 
 ## Context
 
@@ -43,7 +43,7 @@ is grandfathered on condition that C24 is acknowledged with the rest of this lis
 
 ## Acknowledgement
 
-> ACKNOWLEDGED 2026-10-06 by founder, acting in the Architect-EAMI role: drift list received as of 55600e7, scope accepted (sections A, undocumented routes, mismatches, and C24). Updates to api/openapi.yaml will be made in batches by a Code session under founder approval; first batch (section A) planned by <FIRST-BATCH-DATE>.
+> ACKNOWLEDGED 2026-10-06 by founder, acting in the Architect-EAMI role: drift list received as of 55600e7, scope accepted (sections A, undocumented routes, mismatches, and C24). Updates to api/openapi.yaml will be made in batches by a Code session under founder approval; first batch (section A) planned by <DATE OR "when ...">.
 
 This acknowledgement covers the drift list **as of 55600e7 only**. Routes added later need their own acknowledgement under the `API_CONVENTION.md` rule (§10, founder decisions).
 

@@ -156,8 +156,9 @@ anything.
             cannot detect a database administrator (B-299). Found B-298
             (`audit_log` 2028 cliff, High).
             **Ticked 2026-10-06, before the route-acknowledgement rule
-            existed. Drift row C24 acknowledgement pending (TASK-071).
-            Grandfathered once; Slice 1 and later follow the rule strictly.**
+            existed. Drift row C24 was acknowledged 2026-10-06 via TASK-071.
+            The one-time exception is closed. Slice 1 and later follow the
+            rule strictly.**
             (The one explanation: `API_CONVENTION.md`, founder decisions.)
       Gate: the 7a drift hand-off acknowledgement is waived for Slices
       0–1 and **required before Slice 2** (D1).

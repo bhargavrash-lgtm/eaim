@@ -10,10 +10,10 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 
 ## Active decision thread (2026-10-06, newest) — Item 7a DONE: TASK-071 acknowledged by the founder
 
-- **TASK-071 acknowledged 2026-10-06** by the founder, acting in the Architect-EAMI role, recorded word for word in its Acknowledgement section; first acceptance box ticked. The first-batch date is still the literal placeholder `<FIRST-BATCH-DATE>`.
+- **TASK-071 acknowledged 2026-10-06** by the founder, acting in the Architect-EAMI role, recorded word for word in its Acknowledgement section; first acceptance box ticked. The first-batch date is the placeholder `<DATE OR "when ...">`; the founder supplies the exact text.
 - **Scope:** the drift list **as of `55600e7` only** (§A, the undocumented routes, the mismatches, and C24). **Routes added later need their own acknowledgement** under the `API_CONVENTION.md` rule.
 - **Item 7a ticked**; gate met for B-269 Slice 2 (D1). No other item ticked.
-- C24 is inside this acknowledgement, which satisfies the condition on Slice 0b's grandfathered tick.
+- C24 is inside this acknowledgement. Drift row C24 was acknowledged 2026-10-06 via TASK-071. The one-time exception is closed.
 - `api/openapi.yaml` not edited; the first batch (§A) is a separate brief.
 - Docs only. Marker cleared.
 
@@ -32,7 +32,7 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - **New §11, "Not yet specified (to be settled from Slice 1's plan)":** pagination, envelope and meta, error body (D10), draft/publish and optimistic-lock responses, action and bulk routes, idempotency, ID/timestamp/naming, body-size limits (B-287), org always from the session. Slice 1's plan proposes each; §11 gets the approved answers before Slice 1 builds.
 - **Founder answers recorded:** `openapi.yaml` updated by Architect-EAMI within the epic, in batches; a Phase 2 slice that adds routes can't be ticked until its drift rows are acknowledged; deprecation length unset until B-137 has a design.
 - **Item 7 ticked** in the master sequence.
-- **Slice 0b (founder, 2026-10-06): stays ticked.** Ticked 2026-10-06, before the route-acknowledgement rule existed. Drift row C24 acknowledgement pending (TASK-071). Grandfathered once; Slice 1 and later follow the rule strictly. C24 added to TASK-071's list. The single explanation lives in `API_CONVENTION.md`'s founder decisions; it is not a precedent.
+- **Slice 0b (founder, 2026-10-06): stays ticked.** Ticked 2026-10-06, before the route-acknowledgement rule existed. Drift row C24 was acknowledged 2026-10-06 via TASK-071. The one-time exception is closed. Slice 1 and later follow the rule strictly. The single explanation lives in `API_CONVENTION.md`'s founder decisions; it is not a precedent.
 - Docs only. Marker cleared.
 
 ## Active decision thread (2026-10-06) — B-269 Slice 0b DONE (admin audit trail); B-298 and B-299 minted; 7a handed
@@ -3050,6 +3050,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-06 by Claude Code — Slice 0b's one-time exception recorded as closed (C24 acknowledged via TASK-071) in the master sequence, API_CONVENTION.md, TASK-071 and here; TASK-071's first-batch placeholder changed for the founder to fill. Docs only. Marker cleared.
+
+Prior entry:
 2026-10-06 by Claude Code — TASK-071 acknowledged by the founder (Architect-EAMI role), drift list as of 55600e7; item 7a ticked, gate met for Slice 2. Docs only. Marker cleared.
 
 Prior entry:
