@@ -124,7 +124,7 @@ Sequenced strictly by real dependency, per tonight's own research synthesis:
 7. **The Chat Engine** — the real, daily web surface for this. Worth stating precisely: this is distinct from **B-130's original scope, a native desktop client** — related, not identical. The Chat Engine (web) can ship first; a native desktop app remains its own, later, separate decision.
 8. **B-147 (Customer-controlled training orchestration)** — genuinely later in character, not a blocker for 1-7. Real candidates identified: Axolotl, Ludwig (both Apache 2.0). Requires model hosting to exist first, develops in parallel with 4-7 otherwise. Includes real model-evaluation/benchmarking-over-time, already folded into this scope.
 9. **Multi-agent coordination — deliberately last, deliberately separate.** Confirmed via real, current research: the least-solved part of even ServiceNow's and Salesforce's own platforms. Single-agent v1 first.
-- **Native governed desktop chat app and discovery bundle (B-130)** — Horizon 2, parked, design record only; distinct from the hosted Chat Engine (item 7): `CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`.
+- **Native governed desktop chat app and discovery bundle (B-130)** — Horizon 2, parked, design record only (B-130 differences decided 2026-10-07; first surface open); distinct from the hosted Chat Engine (item 7): `CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`.
 
 ---
 

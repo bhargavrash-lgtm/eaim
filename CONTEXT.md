@@ -8,7 +8,19 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-07, newest) — B-305 folded into B-130; roadmap moves; B-306 minted
+## Active decision thread (2026-10-07, newest) — B-130 differences decided; first surface open; overlap-check rule
+
+- **Part A (read-only):**
+  - The AI-token dual-auth path (episode reads' Bearer branch, `episode.Handler.authenticateCaller`) **still works after B-301** for tokens issued through `POST /v1/gateway/tokens`. They carry `agent_uuid` and `api_key_id`, are bound to the agent row, and are live-checked.
+  - Tokens minted before B-301 are refused (403).
+  - Covered by tests: `internal/episode/http_test.go` (Bearer tests, bound tokens), `http_org_scoping_pg_test.go`, B-301's episode and unbound-token tests.
+  - **Gap:** no issuance test asserts that `HandleIssue` actually puts `agent_uuid`/`api_key_id` into the token (every Bearer test mints with `Manager.Issue` directly). It's proven live (B-301 after-pass), not by a test. Not fixed.
+- **B-130 and the design record:** all nine differences decided (gateway history; bundle keeps the service; chat first; thin client, no MCP client in the app; one model in v1; delegated identity via Slice B and C5; detection still runs, B-130's objective annotated not deleted; later phases deferred; desktop tech open, security review required). **First surface recorded as OPEN** (recommendation: thin web client first, then desktop).
+- **CLAUDE.md:** search BACKLOG and the roadmap for overlapping scope before minting.
+- **Overlap check of this week's epics and records:** the one real gap is **B-306 overlapping B-196** (CMDB epic component 3, reconciliation/deduplication to one CI), with no cross-reference either way. The others already cross-reference their overlaps (B-280: B-196, B-207, B-139; B-300: B-138; grouping: B-207; service mapping: B-267; presets: B-293, B-277, B-270). Nothing merged.
+- Docs only. Marker cleared.
+
+## Active decision thread (2026-10-07) — B-305 folded into B-130; roadmap moves; B-306 minted
 
 - **B-130 is the single item** for the desktop chat app; B-305 reduced to "Merged into B-130". B-130 gained a "Discovery bundle" section (pointer to the design record; the C5 restriction on claiming that audit records the user) and a table of **nine disagreements** between B-130 and the design record (history ownership, packaging, modes, tool use, model routing, identity, relation to discovery, extra scope, desktop tech), each **pending the founder**. Cross-references in B-152, B-193, B-269, B-295, B-138, B-300 (and the master sequence and presets §12) repointed to B-130.
 - **Design record:** B-130 as its item; hosted web chat is the separate Chat Engine item; new §10 constraints (no credential reuse; authenticated status-only local interface; per-user install open, not v1; gateway-owned history as the recorded default with open questions; first slice is a gateway change).
@@ -3119,6 +3131,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-07 by Claude Code — B-130 differences decided, first surface recorded open; overlap-check rule in CLAUDE.md; B-306/B-196 overlap reported. Docs only. Marker cleared.
+
+Prior entry:
 2026-10-07 by Claude Code — B-305 folded into B-130 (disagreements recorded, pending founder); design-record constraints; roadmap: chat line own Horizon 2 line, GxP/CSV to Horizon 1; B-306 minted. Docs only. Marker cleared.
 
 Prior entry:
