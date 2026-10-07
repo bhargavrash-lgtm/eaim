@@ -8,7 +8,27 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-07, newest) — B-301/B-302 annotated for red CI; CI investigation status
+## Active decision thread (2026-10-07, newest) — B-269 Slice 1 PLANNED (no build); B-308 minted; B-298 interim fix and pre-customer gate
+
+- **Plan:** `B-269_SLICE1_PLAN.md`. Decisions waiting on the founder:
+  - K2: compute `config_version` with the one Go function, don't store it;
+  - K3: a separate drafts table, with "superseded" derived;
+  - K4: the migration and Standard seed are unaudited, or every org becomes undeletable;
+  - K11: reverting to a legacy-path version is refused;
+  - plus the `API_CONVENTION.md` §11 answers (§12 of the plan).
+- **Code reality found:**
+  - ingest has no transaction (D7 needs one);
+  - Configure is on two pages;
+  - `GET /v1/endpoints/{id}` reads `agent_configs`;
+  - linking stops changing config.
+- **Housekeeping:**
+  - No `.mutbak` files; `55600e7` holds only Slice 0b's named files; the Slice 0b tick cites `55600e7`.
+  - The three stale "pending" lines (S1–S7, D1–D10, D-a–D-g) are now annotated as superseded.
+  - `AGENTS.md`, `CODEX_NEXT_BRIEF.md` and `JEV_ORCHESTRATION_ROADMAP.md` (untracked, 2026-09-25) were summarised and left unchanged.
+- **B-308 minted (High):** run-then-audit order and log-only audit failures in the gateway. **B-298:** interim fix proposed; recorded as a pre-customer gate.
+- **CI is still red** (since `111fc8e`), so Slice 1 can't be ticked until it's green. Docs only. Marker cleared. Next free B-ID **B-309**.
+
+## Active decision thread (2026-10-07) — B-301/B-302 annotated for red CI; CI investigation status
 
 - **B-301 and B-302 stay DONE, with a CI note:** CI red since `111fc8e` (gateway `go test` job); cause under investigation. Behaviour is verified live, but a clean-database CI run isn't green yet. Do not describe them as closed externally until CI is green.
 - **Investigation status:** open.
@@ -222,7 +242,7 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - **Two points that change decisions:**
   - D4's "where the existing key is stored" means the agent rewriting `agent.yaml` (forbidden), and on Windows `HKLM\SOFTWARE\EAMI\Agent` is readable by local users (pre-existing, unverified). Suggest the B-293 state directory.
   - D9 would make the legacy `agent_configs` default row unsavable. Suggest an empty column default, with the rules applied only on path change.
-- Decisions S1–S7 are pending. Marker cleared at founder direction (plan only; the next brief re-sets it).
+- Decisions S1–S7 are pending. Marker cleared at founder direction (plan only; the next brief re-sets it). *(Superseded: S1–S7 decided `f0e0d32`; see the Slice 0 DONE thread above.)*
 
 ## Active decision thread (2026-10-05) — Item 8 / B-269: design recorded, Part A reported, awaiting approval
 
@@ -242,7 +262,7 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
   - The migrated defaults (`/home`, `/Users`, `C:\Users`) aren't "roots".
   - The API returns messages, not reason codes.
 - Migration confirmed **no behaviour change** for the 2 linked endpoints: identical content and hash, and both run pre-1.3.0 agents.
-- **Decisions D1–D10 pending. The marker stays set**: the build is part of this brief, awaiting approval.
+- **Decisions D1–D10 pending. The marker stays set**: the build is part of this brief, awaiting approval. *(Superseded: D1–D10 recorded `9bc2672`; see the D1–D10 thread above.)*
 
 ## Active decision thread (2026-10-05) — B-293 follow-ups: D-c evidence, B-277 before presets, Windows gate
 
@@ -290,7 +310,7 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
     - a minimal B-277 slice;
     - enforce `max_report_size_bytes` with a visible `too_large`;
     - add `model_file_size_mb` (migration 000027).
-- **Founder decisions pending:** D-a to D-g. **The marker stays set**: the build is part of this brief, waiting on approval.
+- **Founder decisions pending:** D-a to D-g. **The marker stays set**: the build is part of this brief, waiting on approval. *(Superseded: decided and built; see the B-293 DONE thread above.)*
 
 ## Active decision thread (2026-10-05) — Drift-row check added to standing code-review checks
 
@@ -3177,6 +3197,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-07 by Claude Code — B-269 Slice 1 planned (`B-269_SLICE1_PLAN.md`, no build); B-308 minted (High); B-298 interim fix and pre-customer gate; stale CONTEXT lines annotated. Docs only. Marker cleared.
+
+Prior entry:
 2026-10-07 by Claude Code — B-301/B-302 annotated (CI red since 111fc8e; don't describe as closed externally until green); CI investigation status and the planned re-run of run #324 recorded. Docs only. Marker cleared.
 
 Prior entry:

@@ -164,6 +164,8 @@ anything.
       0–1 and **required before Slice 2** (D1).
       - [ ] Slice 1 (backend): schema, migration, endpoint-keyed config
             delivery, assignment, validation, API, tests.
+            Planned 2026-10-07 (`B-269_SLICE1_PLAN.md`); awaiting approval.
+            Can't be ticked while CI is red.
       - [ ] Slice 2 (UI): preset list, editor, draft/publish/revert,
             rollout summary.
             Requires TASK-071 section A (the documented operations that don't

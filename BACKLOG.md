@@ -4204,6 +4204,14 @@ Choose in the brief.
 **Severity:** **High** (founder rule: unaudited calls). About 15 months away, but silent when it hits.
 **Fix (small):** a migration that adds a DEFAULT partition and/or creates partitions years ahead, plus a scheduled creation job that runs in the `migrations-v2` world; a test that inserts a far-future row. Consider whether the gateway should fail closed on an audit write failure (a policy decision, separate from the partition fix).
 **Note:** B-189's text describes `audit_log`'s `pg_cron` job as working; it isn't.
+**Pre-customer gate (founder, 2026-10-07):** B-298 must be DONE before the first customer install.
+**Cheapest safe interim fix (proposed 2026-10-07, not built):** one migration, no gateway code:
+- Pre-create `audit_log` monthly partitions through 2030-12 (`CREATE TABLE IF NOT EXISTS … PARTITION OF audit_log`), the same form as the baseline's.
+- Add a `DEFAULT` partition as a net for wrong clocks (before 2026-05 or past 2030).
+- Caveat: once the DEFAULT partition holds rows in a range, creating that range's partition later fails until those rows move. With partitions to 2030 it only catches clock errors.
+- A test inserts rows for 2029-06 and 2031-01 and checks both land.
+- The scheduled job and the fail-closed question (B-308) stay open.
+**See also B-308** (run-then-audit order and log-only failure handling).
 **Status:** QUEUED.
 
 ### B-299 — The application's database role is a superuser that owns its tables, so no audit table is append-only or tamper-resistant against the app itself — **QUEUED, Medium-High, 2026-10-06**
@@ -4328,4 +4336,16 @@ Choose in the brief.
 **Belongs to:** agent identity Slice A3 (`AGENT_IDENTITY_DESIGN.md` §8).
 **Status:** QUEUED. Not fixed.
 
-## Next B-ID: B-308
+### B-308 — The gateway runs a tool call before writing its audit record, and any audit write failure is only logged — **QUEUED, High, 2026-10-07**
+**Origin:** B-269 Slice 1 plan housekeeping (2026-10-07), completing the `audit_log` trace that B-298's report cut short. Minted at founder direction; confirmed free against BACKLOG.md directly (the counter read B-308). Overlap searched first: **B-121** (DONE) made these failures visible as `slog.Error` and deliberately chose logging only; **B-298** is one cause (no partition after 2027-12); **B-299** (superuser role). None covers the order or the failure handling.
+**Problem (traced in `eami-gateway/cmd/gateway/dispatcher.go`):** `audit.Writer.Write` is the only writer of `audit_log`. On **any** write failure (database down, timeout, missing partition, constraint, the writer failing to load its last hash), the gateway logs and carries on:
+- **Allowed:** the downstream call runs **first** (AI provider, REST tool or forward proxy); the audit row is written **after**. On failure the error goes only to `DispatchOutcome.AuditWriteErr` → `logAuditWriteFailureHook` (`slog.Error`). The agent gets the result.
+- **Escalated:** the `escalated` row is written before `Submit`; its failure is ignored, the approval is created, and once approved the call **executes**. The resolution row is written **after** execution by `recordEscalationResolutionAuditHook`; its failure is only logged. An escalated call can therefore run with **no** `audit_log` row at all (the mutable `approval_requests` row remains).
+- **Denied** (policy deny, B-301 not-live deny, connector-resolution failure): the call is refused; the record is lost, logged only.
+- No metric, alert, retry or outbox. `lastHash` advances only on success, so the chain isn't corrupted; it just has gaps that verification can't see.
+**Severity:** High (founder rule: unaudited calls).
+**Fix (not chosen; a policy decision):** write a durable record **before** dispatch and fail closed (deny with a fixed reason code) when it can't be written, then record the outcome as a second row; or a transactional outbox. Availability trade-off: fail closed makes the audit database a dependency of every call.
+**Cross-references:** B-298 (the 2028 partition cliff, one trigger of this), B-121, B-299.
+**Status:** QUEUED. Not fixed.
+
+## Next B-ID: B-309
