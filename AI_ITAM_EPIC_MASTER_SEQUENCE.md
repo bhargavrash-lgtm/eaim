@@ -216,6 +216,7 @@ anything.
 Design records kept for later. Nothing here is in a phase or the active sequence.
 
 - **B-300** (`AGENT_IDENTITY_DESIGN.md`): Agent identity: federate with the customer's IdP plus a built-in fallback issuer. Design record only. Not in the active sequence.
+- **B-305** (`CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`): Chat app and discovery bundle: an endpoint-installed governed chat app bundled with the discovery service (two components, one endpoint identity). Design record only. Not in the active sequence.
 
 ---
 

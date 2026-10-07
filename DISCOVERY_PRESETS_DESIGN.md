@@ -144,3 +144,7 @@ Part A (`B-269_PART_A_INVESTIGATION.md`) was approved, with D1–D10 as follows.
 - **The server cannot resolve paths on a remote machine.** It can't know that `/srv/models` is a symlink to `/`, that a folder is a junction to `C:\Users`, or that a path is an NFS mount.
 - **The agent resolves links before walking** (B-269 Slice 0, `models.resolveScanRoot`) and refuses a target that is a root or a network share. It also enforces the depth limit, the file-type filter and the deadline on the machine itself.
 - **Design consequence for Slices 1–4:** never present a server-side "accepted" as a guarantee of what an endpoint will walk. The preset editor and impact panel describe paths as *requested*. What an endpoint actually did comes from its reports (`scanner_notes`, `config_error`).
+
+### Enrollment keys bind to a preset, never a package (founder, 2026-10-07)
+
+An enrollment key binds a machine to a preset, never to a package type, so the same key works from the standalone discovery installer and from the chat bundle. Nothing in Slices 1-4 may assume the package type. (Context: B-305, `CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`.)
