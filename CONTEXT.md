@@ -8,7 +8,32 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-07, newest) — CMDB principle recorded; B-306/B-196 cross-referenced; B-307 minted
+## Active decision thread (2026-10-07, newest) — CI red on master since 111fc8e: investigated, NOT reproduced, cause undetermined
+
+- **CI status:**
+  - **Last green:** `9c5232a` (run #324).
+  - **First red:** `111fc8e` (#325), the B-301/B-302 build.
+  - **Red since:** every completed run (#325, #326, #329, #330, #331, #332); the others were cancelled because a newer push superseded them.
+  - **Always the same job:** **Test — eami-gateway**, step `go test`.
+- **Logs:** `gh` isn't installed, and the public API returns 403 for job logs, so the **failing test names are unknown**.
+- **Annotations on #330:**
+  - error: "Process completed with exit code 1" at line 1449;
+  - warning: Node 20 actions forced onto Node 24;
+  - warning: setup-go cache found no go.sum;
+  - notice: `ubuntu-latest` moves to Ubuntu 26 on 2026-10-19.
+- **CI-equivalent reproduction** (Linux, Go 1.25.14, fresh `timescaledb-ha:pg16`, migrations via `migrate/migrate:v4.19.1`, `go test ./... -count=1 -v`): **passed six times.**
+  - standard;
+  - 2 CPUs with `GOMAXPROCS=2`, repeated ×3;
+  - non-root user;
+  - clean `git archive` of HEAD.
+  - Line-count clue: a full local `-v` run is 1,447 lines and CI's error is at line 1449, so CI likely ran the whole suite and failed one or more tests.
+- **Classification:** undetermined. It's deterministic in CI and not reproduced locally. Local state (fresh database, clean checkout), privileges (non-root) and CPU timing (2 cores ×3) are all ruled out as tested. The remaining suspects are GitHub-runner-specific; the job log is needed.
+- **Not fixed, no CI re-run** (per brief).
+- **B-301 and B-302 were marked DONE at a red commit.** Under the new rule they wouldn't be ticked; flagged for the founder, not changed.
+- **CLAUDE.md:** after every push, check CI for that commit and state it in the report; a red CI means nothing is ticked as done.
+- Marker cleared.
+
+## Active decision thread (2026-10-07) — CMDB principle recorded; B-306/B-196 cross-referenced; B-307 minted
 
 - **B-196 component 3** (reconciliation/deduplication across signals to one CI) conflicts with the founder's 2026-10-06 decision (the customer's CMDB reconciles; rheoARC supplies identity keys and AI data); so does component 4 (CI lifecycle state model). The narrower, compatible need is rheoARC's own record integrity: never two records for one machine, never one record for two (B-295). **Superseding any B-196 text waits for the founder**; component 3 is unedited.
 - **Principle:** B-196's Vision and its CONTEXT summary already said "not a full enterprise CMDB … feed into, not replace"; the stricter decision was recorded nowhere, and the roadmap had nothing. Added one paragraph to the roadmap's positioning section, dated 2026-10-06.
@@ -3139,6 +3164,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-07 by Claude Code — CI red since 111fc8e (Test — eami-gateway): investigated read-only, not reproduced in 6 CI-equivalent runs, cause undetermined without the job log; CI-status rule added to CLAUDE.md. Marker cleared.
+
+Prior entry:
 2026-10-07 by Claude Code — CMDB integrate-don't-compete principle added to the roadmap; B-306/B-196 cross-referenced; B-307 minted (issuance-claims test). Docs only. Marker cleared.
 
 Prior entry:
