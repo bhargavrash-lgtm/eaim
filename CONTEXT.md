@@ -8,7 +8,20 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-07, newest) — CI red on master since 111fc8e: investigated, NOT reproduced, cause undetermined
+## Active decision thread (2026-10-07, newest) — B-301/B-302 annotated for red CI; CI investigation status
+
+- **B-301 and B-302 stay DONE, with a CI note:** CI red since `111fc8e` (gateway `go test` job); cause under investigation. Behaviour is verified live, but a clean-database CI run isn't green yet. Do not describe them as closed externally until CI is green.
+- **Investigation status:** open.
+  - The failing test names are still unknown: no `gh`, and the job log needs sign-in.
+  - Six CI-equivalent local runs all passed (see the previous thread).
+  - Next step needs the job log: the founder pastes the `--- FAIL` lines, or `gh` gets installed and signed in.
+- **Planned (founder):** re-run run #324 (`9c5232a`, the last green commit).
+  - Red again: the runner environment changed (image, action or tool versions), not B-301's code.
+  - Green: the failure is in `111fc8e`'s changes.
+  - Not done by Code.
+- Tests and workflow files untouched. Marker cleared.
+
+## Active decision thread (2026-10-07) — CI red on master since 111fc8e: investigated, NOT reproduced, cause undetermined
 
 - **CI status:**
   - **Last green:** `9c5232a` (run #324).
@@ -3164,6 +3177,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-07 by Claude Code — B-301/B-302 annotated (CI red since 111fc8e; don't describe as closed externally until green); CI investigation status and the planned re-run of run #324 recorded. Docs only. Marker cleared.
+
+Prior entry:
 2026-10-07 by Claude Code — CI red since 111fc8e (Test — eami-gateway): investigated read-only, not reproduced in 6 CI-equivalent runs, cause undetermined without the job log; CI-status rule added to CLAUDE.md. Marker cleared.
 
 Prior entry:

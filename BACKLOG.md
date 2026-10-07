@@ -4256,6 +4256,8 @@ Choose in the brief.
 
 **Done 2026-10-07:** per-call database check at `Dispatcher.Dispatch` (agent status, revoked token, revoked issuing key; fails closed), sessions end with a fixed error, notifications close sessions promptly on every node (optimisation only), catch-up on reconnect and every 60 s, resume-time re-check for approved escalations, live checks on `tools/list`, SSE open and episode reads, tokens bound to the agent row and key (`agent_uuid`, `api_key_id`; hard cutover), key revocation revokes its tokens in one transaction with an admin audit event. 26/26 deliberate breakages caught; live before → after shown.
 
+**CI note (2026-10-07, founder direction):** CI red since 111fc8e (gateway go test job); cause under investigation. Behaviour verified live; clean-database CI run not yet green. Do not describe as closed externally until CI is green.
+
 ### B-302 — Gateway 401/403 responses echo raw error text; distinct text can reveal whether a governed agent exists or is suspended — **DONE, 2026-10-07** (`B-301_B-302_VERIFICATION.md`)
 **Origin:** B-300 Part A, conflict C6. Minted at founder direction 2026-10-06; confirmed free against BACKLOG.md directly.
 **Problem:**
@@ -4266,6 +4268,8 @@ Choose in the brief.
 **Status:** DONE 2026-10-07.
 
 **Done 2026-10-07:** fixed `401 unauthorized: invalid or expired token` / `403 forbidden: agent not authorized` on the MCP SSE, workflow-run and episode routes (and the token-revoke route's 403); unknown, other-org, suspended and unbound look identical. Remaining pre-existing raw error text elsewhere in the gateway (JSON-RPC `-32000`, parse errors, workflow-run and episode non-auth errors) is proposed as a new item, pending a founder B-ID.
+
+**CI note (2026-10-07, founder direction):** CI red since 111fc8e (gateway go test job); cause under investigation. Behaviour verified live; clean-database CI run not yet green. Do not describe as closed externally until CI is green.
 
 ### B-303 — Remaining raw error text in eami-gateway replies (dispatch, parse, workflow-run and episode errors) — **QUEUED, Low-Medium (pending classification), 2026-10-07**
 **Origin:** B-301/B-302 security review (Low 6) and re-review (Info 2). Minted at founder direction 2026-10-07; confirmed free against BACKLOG.md directly (the counter read B-303; the only mentions were "next free" notes).
