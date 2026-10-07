@@ -8,7 +8,15 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-07, newest) — B-130 differences decided; first surface open; overlap-check rule
+## Active decision thread (2026-10-07, newest) — CMDB principle recorded; B-306/B-196 cross-referenced; B-307 minted
+
+- **B-196 component 3** (reconciliation/deduplication across signals to one CI) conflicts with the founder's 2026-10-06 decision (the customer's CMDB reconciles; rheoARC supplies identity keys and AI data); so does component 4 (CI lifecycle state model). The narrower, compatible need is rheoARC's own record integrity: never two records for one machine, never one record for two (B-295). **Superseding any B-196 text waits for the founder**; component 3 is unedited.
+- **Principle:** B-196's Vision and its CONTEXT summary already said "not a full enterprise CMDB … feed into, not replace"; the stricter decision was recorded nowhere, and the roadmap had nothing. Added one paragraph to the roadmap's positioning section, dated 2026-10-06.
+- **B-306 ↔ B-196** cross-referenced both ways.
+- **B-307 minted** (Low): no test checks that token issuance sets `agent_uuid`/`api_key_id`; attached to agent identity Slice A3. Not fixed. Next free B-ID **B-308**.
+- Docs only. Marker cleared.
+
+## Active decision thread (2026-10-07) — B-130 differences decided; first surface open; overlap-check rule
 
 - **Part A (read-only):**
   - The AI-token dual-auth path (episode reads' Bearer branch, `episode.Handler.authenticateCaller`) **still works after B-301** for tokens issued through `POST /v1/gateway/tokens`. They carry `agent_uuid` and `api_key_id`, are bound to the agent row, and are live-checked.
@@ -3131,6 +3139,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-07 by Claude Code — CMDB integrate-don't-compete principle added to the roadmap; B-306/B-196 cross-referenced; B-307 minted (issuance-claims test). Docs only. Marker cleared.
+
+Prior entry:
 2026-10-07 by Claude Code — B-130 differences decided, first surface recorded open; overlap-check rule in CLAUDE.md; B-306/B-196 overlap reported. Docs only. Marker cleared.
 
 Prior entry:

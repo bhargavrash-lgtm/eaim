@@ -2161,6 +2161,8 @@ This is for Brief 2 or the IA consolidation to resolve. No B-ID was minted.
 **Severity/Priority:** foundational EPIC, comparable in scope to B-130/B-147/B-157/B-160 — its own dedicated investigation needed, not built casually or folded into an existing brief. Recommended to be investigated **before or alongside** B-197 (Workspaces), specifically because of the shared unresolved Groups-vs-Workspaces primitive question above — building either epic's grouping concept in isolation risks needing to rework it once the other epic's needs are actually understood.
 **Status:** Increment 1 shipped as B-217. Increment 2 Part A and Brief 1, including its 2026-09-26 fix-up pass, are complete. Brief 2 is pending.
 
+**Cross-reference (2026-10-07): B-306** (CI-reconciliation identity keys and CMDB export) overlaps component 3 above (reconciliation/deduplication to one CI). Component 3's text is unchanged; how it relates to the founder's 2026-10-06 decision (rheoARC supplies identity keys, the customer's CMDB reconciles; see the roadmap's positioning section) waits for the founder.
+
 ### B-197 — EPIC: Workspaces — delegated sub-organization administration — **logged, investigation not started**
 **Vision:** a genuine new organizational tier — **Org → Workspace → Agent/Endpoint** — enabling delegated administration (e.g. an HR workspace-admin managing their own policies/workflows/spend visibility) without compromising IT's universal governance floor. **This is the concrete architectural mechanism realizing B-160's Enterprise AI Operating System vision — not a separate idea, the same vision's real implementation**, specifically the structural piece that would let B-160's per-persona workflows (Finance, HR, Compliance, etc.) actually scope to "their own" slice of the org rather than seeing everything or nothing.
 **Grounded in real, current, proven multi-tenant SaaS patterns, not invented from scratch (verified via research):**
@@ -4313,4 +4315,13 @@ Choose in the brief.
 **Scope:** decide the identity keys that reconcile a configuration item across sources (the discovery agent's endpoints, the probe, governed agents, CMDB records) so one real-world thing is one CI, and a CMDB export (format and route, per `API_CONVENTION.md`). No CMDB export record exists today.
 **Status:** QUEUED; investigation-first; sequenced as master-sequence item 15 (Phase 4).
 
-## Next B-ID: B-307
+**Cross-reference (2026-10-07): B-196** (CMDB epic), whose component 3 is reconciliation/deduplication to one CI. Overlapping scope; per the founder's 2026-10-06 decision (roadmap positioning section), rheoARC supplies reliable identity keys and AI-specific data, and the customer's CMDB reconciles. Whether any B-196 text is superseded waits for the founder.
+
+### B-307 — No test checks that token issuance sets the agent and key IDs in the token — **QUEUED, Low, 2026-10-07**
+**Origin:** found during the B-130 dual-auth trace (2026-10-07). Minted at founder direction; confirmed free against BACKLOG.md directly (the counter read B-307), and searched for overlap first (per the 2026-10-07 rule): the closest item is **B-116** (DONE), whose `TestIssueHandler_ForgedClaims_OverwrittenFromDB` asserts five server-set claims (scope, model, owner, risk tier, TTL) but not these two. No open item covers it.
+**Problem:** B-301's guarantees rely on `HandleIssue` (`eami-gateway/internal/identity/issue_http.go`) setting `agent_uuid` and `api_key_id` from the resolved agent row and validated key. No test asserts it: every Bearer-path test mints its token with `Manager.Issue` directly, with the IDs supplied by the test. Removing those two lines would leave every test green; every real token would then be refused (it would fail open nowhere, but break all agents). It is proven live (the B-301 after-runs), not by a test.
+**Fix:** assert both claims on a token issued through the real HTTP route (extend B-116's test), with a deliberate-breakage check.
+**Belongs to:** agent identity Slice A3 (`AGENT_IDENTITY_DESIGN.md` §8).
+**Status:** QUEUED. Not fixed.
+
+## Next B-ID: B-308

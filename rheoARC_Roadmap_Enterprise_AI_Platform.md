@@ -15,6 +15,8 @@
 
 **The real evidence this wedge matters, not just a hopeful claim:** Gartner's own 2026 research says 40% of enterprises will demote or decommission AI agents by 2027 over governance gaps discovered only *after* production incidents. Every hour of adversarial testing this session has done — the TOCTOU protections, the tamper-evident audit chain (with a real bug found in its own verifier), fail-closed RBAC, redaction at the actual dispatch chokepoint — is directly closing the exact gap that statistic describes.
 
+**CMDB: integrate, don't compete (founder decision, 2026-10-06).** rheoARC never performs full CI lifecycle, reconciliation or deduplication for a customer's estate; the customer's CMDB does. rheoARC supplies reliable identity keys (MAC address, serial number, hardware UUID) plus the AI-specific data the customer's CMDB doesn't have.
+
 ---
 
 ## Horizon 0 — Foundation: Built and Adversarially Proven
