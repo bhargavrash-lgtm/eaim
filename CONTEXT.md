@@ -8,7 +8,15 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-07, newest) — B-301 + B-302 DONE
+## Active decision thread (2026-10-07, newest) — B-303 and B-304 minted; B-224 and B-132 notes
+
+- **B-303** (Low-Medium, pending classification): 10 remaining gateway sites send raw error text. They can reveal upstream URLs, hosts and ports, upstream response bodies, SQL error text, connector state, and echoes of the caller's own input. Cross-referenced B-234, B-302. Not fixed.
+- **B-304** (Low): **no test now calls an audited admin action against the shared database** (only key revocation is audited; its three tests use throwaway databases). 21 shared-database test files call write routes that B-224 will audit; each must move to a throwaway database when its route is audited, plus a guard. Not fixed.
+- **B-224:** org deletion is blocked once any admin audit event exists (one test org already); an export-then-tombstone path is needed before the first customer.
+- **B-132:** the gateway reads the database on every call and fails closed, so its availability depends on the database's.
+- Next free B-ID **B-305**. Docs only. Marker cleared.
+
+## Active decision thread (2026-10-07) — B-301 + B-302 DONE
 
 - **Built** (`B-301_B-302_VERIFICATION.md`): suspending, revoking or deleting a governed agent, or revoking its token or issuing key, refuses its **next call** on every node (per-call database check in `Dispatch`, fails closed); sessions end with a fixed error; notifications close sessions promptly (optimisation only); approved escalations re-checked at resume; `tools/list`, SSE open and episode reads checked; key revocation revokes its tokens in one transaction with an admin audit event (`api_key.revoked`).
 - **Reviews raised two Highs, both fixed:** tokens now carry `agent_uuid` and `api_key_id`, binding them to the exact agent row and key (deleting and re-creating an agent never revives tokens; a revoked key's tokens stop per call). **Hard cutover:** every token minted before the deploy is refused; deploy all gateway nodes together.
@@ -16,7 +24,7 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - **Proof:** 22 gateway + 1 rate-limit + 2 eami-api tests; 26/26 deliberate breakages caught; suites 379/0 and 633/0; live before → after on the real stack with the deny policy proven on the baseline.
 - **Measured:** 0.27 ms p50 per call inside Docker; 4 ms p50 end to end.
 - **Dev database:** migration 000030 applied; 10 inert `b301-*` fixture agents marked; one leaked test org (`b253-rbac-9723bccb`) marked (the RBAC test now uses a throwaway database).
-- **Proposed, not minted:** pre-existing raw error text in other gateway replies. Next free B-ID **B-303**.
+- **Minted (2026-10-07): B-303** (remaining raw error text in gateway replies) and **B-304** (shared-database write tests). Next free B-ID **B-305**.
 - Nothing in the master sequence ticked (B-301/B-302 aren't listed there). Marker cleared.
 
 ## Active decision thread (2026-10-06) — B-301 CONFIRMED live (High); B-302 minted; fix planned (no code)
@@ -3084,6 +3092,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-07 by Claude Code — minted B-303 (gateway raw error text) and B-304 (shared-database write tests); B-224 org-deletion note; B-132 database-dependency note. Docs only. Marker cleared.
+
+Prior entry:
 2026-10-07 by Claude Code — B-301 + B-302 DONE (per-call liveness, token binding, key-to-token revocation, fixed 401/403); 26/26 mutations; live before/after. Marker cleared.
 
 Prior entry:

@@ -1478,6 +1478,8 @@ No schema/migration work (`policies.org_id` has existed since the original schem
 - B-196 Brief 1's security review also noted that each list call runs the three-table UNION three times (total, page, per-type counts), with no index on the `ci_type_id` columns.
 - Re-measure both with `EXPLAIN (ANALYZE, BUFFERS)` against a seeded large org (thousands of endpoints, a realistic report history) before any horizontal-scale work is scoped.
 
+**Note (2026-10-07, B-301):** the gateway now reads the database on **every call** (the per-call liveness check: agent status, revoked token, revoked key) and **fails closed**, so **gateway availability depends on database availability**: a database outage refuses every call and ends open sessions. Horizontal-scale and HA planning must treat Postgres as a hard dependency of the gateway's hot path (about 0.27 ms p50 per call inside Docker).
+
 ### B-133 — Data lifecycle/retention strategy for ever-growing TimescaleDB hypertables — **logged, investigation not started**
 **Objective:** `audit_log` (append-only by design — this table is never meant to shrink, per its own tamper-evident hash-chain purpose), `token_usage`, and `paste_events` all grow unbounded with no retention policy, compression, or archival strategy defined anywhere in the codebase. Needs investigation into a real retention policy (what can safely age out vs. what must never be deleted — `audit_log` likely never, the other two plausibly compactable/archivable), TimescaleDB's native compression features (columnar compression on aged chunks, already available in the `timescale/timescaledb-ha:pg16` image already in use), and connection-pooling behavior under sustained load as data volume grows.
 **Why this matters now:** per explicit user framing during this discussion, likely a more realistic near-term bottleneck than compute/horizontal scaling (B-132) — storage growth and query performance on ever-larger hypertables will bite before a single instance's CPU/memory becomes the limiting factor for a typical single-enterprise deployment.
@@ -2454,6 +2456,7 @@ Breadcrumb is `Workflows` (real `<Link>` to `/gateway/workflows`) → the workfl
 - The trail exists: `admin_audit_events`, its own hash chain per org, `store.RunAudited` (the change and its event in one transaction, fail closed), admin-only `GET /v1/audit/admin-events` and `/verify`.
 - Only preset, assignment and enrollment-key codes are registered. **Adopting another admin write needs no migration:** add a registry entry and a typed summary, move the handler's writes into `RunAudited`, done. The codes for every other write site are reserved in `B-269_SLICE0B_PART_A_INVESTIGATION.md` §7, so they're chosen once.
 - **Real cost of adoption:** several handlers aren't transactional today; each must move into a transaction.
+- **Org deletion is blocked once any admin audit event exists (founder, 2026-10-07).** This has already happened to one test org (`b253-rbac-9723bccb`, leaked by a B-301 suite run, now marked as a fixture). It will block trial cleanup and customer offboarding. **An export-then-tombstone path is needed before the first customer:** export the org's trail (verifiable chain), then tombstone the org (deactivate, purge non-audit data, keep or archive the trail under a documented retention), instead of a cascade delete.
 - **Never-delete conflicts with future erasure obligations (B0b-6):** rows are never deleted and `org_id` is `ON DELETE RESTRICT`, so an org with admin events can't be deleted, and a user's ID stays in old events after the user is deleted. Org offboarding and GDPR-style erasure need a documented export-then-purge procedure (and a decision on pseudonymising `actor_user_id`) before either is offered. Belongs with B-133's retention decision.
 - UI: still to come, under the existing Audit page (one-spine rule).
 
@@ -4231,4 +4234,45 @@ Choose in the brief.
 
 **Done 2026-10-07:** fixed `401 unauthorized: invalid or expired token` / `403 forbidden: agent not authorized` on the MCP SSE, workflow-run and episode routes (and the token-revoke route's 403); unknown, other-org, suspended and unbound look identical. Remaining pre-existing raw error text elsewhere in the gateway (JSON-RPC `-32000`, parse errors, workflow-run and episode non-auth errors) is proposed as a new item, pending a founder B-ID.
 
-## Next B-ID: B-303
+### B-303 — Remaining raw error text in eami-gateway replies (dispatch, parse, workflow-run and episode errors) — **QUEUED, Low-Medium (pending classification), 2026-10-07**
+**Origin:** B-301/B-302 security review (Low 6) and re-review (Info 2). Minted at founder direction 2026-10-07; confirmed free against BACKLOG.md directly (the counter read B-303; the only mentions were "next free" notes).
+**Problem:** these gateway replies still send `err.Error()` to the caller (a governed agent holding a valid token, or a service-key caller). B-302 fixed only the 401/403 bodies.
+
+| Site | Reply | Can reveal |
+|---|---|---|
+| `internal/mcp/handler.go:395` | JSON-RPC `-32000` with the dispatch error, for every failed `tool_call` | **Upstream URL, hostname, IP and port** (`proxy: downstream request failed …: Post "http://host:9000/…": dial tcp …` from `proxy.go:107`, `toolrouter: request failed …` from `toolrouter/router.go:246`, `aiprovider/claude: request failed` from `claude.go:96`). If a connector's `base_url` carries a query-string secret, that would be echoed too. **Upstream response bodies** (`proxy.go:125`, `toolrouter/router.go:257`, `claude.go:109`: "downstream error %d … %s" with the raw body). **SQL error text** (`aiprovider: query connector …` `router.go:91`, `toolrouter: query tool …` `router.go:126`, reaching the agent via "dispatch: ai_provider connector resolution failed: %w"). Connector ids and config state ("no base_url configured", "credentials could not be decrypted", `toolrouter/router.go:179-192`). Approval submit errors (`approval submit: %w`, database text). |
+| `internal/mcp/handler.go:447` | JSON-RPC `-32000` for a failed `tools/list` | **SQL error text** from `listGatewayTools`. |
+| `internal/mcp/handler.go:315` | JSON-RPC `-32700 parse error: …` | **Input echo**: Go's JSON decoder error quotes fragments of the request body. |
+| `internal/mcp/handler.go:347` | JSON-RPC `-32602 invalid params: …` | **Input echo** (the same decoder, on `params`). |
+| `internal/workflow/http.go:136` | 404/409/500 with the run error | **SQL error text** (`workflow: resolve steps: …`), workflow and step ids, and internal state. The run result's per-step `error_detail` (stored and returned in the 200 body) carries the same dispatch errors as the first row. |
+| `internal/episode/http.go:157`, `:190`, `:220` | the `authenticateCaller` error | **Input echo** (service-key path: `org_id query param required and must be a UUID: …` with the `uuid.Parse` error) and the **agent name** (`registry: malformed org_id for agent %q`). The auth failures themselves are fixed text since B-302. |
+| `internal/identity/issue_http.go:245` | `400 bad request: …` on `POST /v1/gateway/tokens` | **Input echo** (JSON decoder). Reachable before key validation. |
+| `internal/identity/revoke_http.go:118` | `400 bad request: …` (service-key route) | **Input echo** (JSON decoder). |
+
+**Severity:** Low-Medium pending classification. All callers are authenticated (a valid governed-agent token or a service key), except the issuance 400, which echoes only the caller's own input. The upstream URLs and response bodies, and the SQL text, are the material ones: they describe internal topology and data to a governed agent, which is exactly the party the gateway is meant to constrain.
+**Fix direction:** fixed messages with short reason codes (the B-285 / B-302 standard), with detail only in the local log. Decide per row whether an agent should see an upstream's error body (some tools return useful validation errors; if so, pass them through deliberately and size-capped, never the URL or transport error).
+**Related:** B-234 (the same class in eami-api 500s), B-302 (the 401/403 part, done).
+**Status:** QUEUED. Not fixed.
+
+### B-304 — Move shared-database write tests to throwaway databases before their admin action is audited — **QUEUED, Low, 2026-10-07**
+**Origin:** B-301 found that a shared-database test (`TestRBACSplit_*`) revoked a key, which now writes a permanent `admin_audit_events` row; its org could no longer be deleted and leaked (`b253-rbac-9723bccb`, marked as a fixture). That test was moved to a throwaway database in `111fc8e`. Minted at founder direction 2026-10-07; confirmed free against BACKLOG.md directly.
+**Current state (checked 2026-10-07):**
+- **No test now calls an audited admin action against the shared database.** The only audited action is API-key revocation (`api_key.revoked`; presets, assignment and enrollment keys don't exist yet). Its three callers (`admin_audit_test.go`, `b301_key_revocation_test.go`, `rbac_split_pg_test.go`) all use throwaway databases.
+- **At risk:** each of these 21 shared-database test files calls write routes whose admin actions are reserved for B-224 (Part A report §7). Each will start leaking its org the moment its route is audited:
+  - `auth_apikey_pg_test.go` (key create: `api_key.created`, the most likely next adoption);
+  - agents: `agents_pg_test.go`, `agent_config_pg_test.go`, `agent_config_b293_pg_test.go`, `agent_config_scanners_pg_test.go`, `slice0_paths_pg_test.go`;
+  - CMDB: `cmdb_pg_test.go`, `cmdb_fixup_pg_test.go`, `cmdb_id_filter_pg_test.go`;
+  - `license_pg_test.go`;
+  - policies: `policies_update_conditions_pg_test.go`, `policies_workspace_visibility_pg_test.go`;
+  - users: `provisioning_pg_test.go`, `invite_enumeration_pg_test.go`;
+  - tools: `tools_data_handling_pg_test.go`, `tools_redaction_pg_test.go`;
+  - workflows: `workflows_test.go`, `workflow_step_params_test.go`;
+  - workspaces: `workspaces_pg_test.go`, `workspace_member_org_pg_test.go`, `workspace_policies_pg_test.go`.
+- **Slice 1** (presets, assignment) must use throwaway databases from the start (already recorded in `B-269_SLICE0B_VERIFICATION.md` §3).
+
+**Fix:**
+- Move each file to a throwaway database (`newThrowawayWorkspaceTestEnv` / `newAdminAuditEnv` pattern) in the same change that audits its route.
+- Add a guard that fails a test run if a shared-database test writes an `admin_audit_events` row (for example, compare the shared database's count before and after the package).
+**Status:** QUEUED. Not fixed.
+
+## Next B-ID: B-305

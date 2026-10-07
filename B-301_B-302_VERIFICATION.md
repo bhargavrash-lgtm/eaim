@@ -168,7 +168,7 @@ Standing checks: orphans none; drift rows C25 and C26 present.
   - JSON parse errors;
   - workflow-run and episode non-auth errors.
 
-  Proposed as a new item (not minted; next free B-ID B-303).
+  **Minted as B-303** (2026-10-07).
 - **`revoked_ai_tokens` still cascades on agent delete.** That's harmless now that tokens are bound to the agent row, but the revocation record is lost with the agent.
 - **No UI** for the new audit action or resume outcome.
 - **Live:** the notification path was exercised; the dropped-notification path is proven by tests, not live.
