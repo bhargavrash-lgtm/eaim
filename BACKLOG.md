@@ -2486,6 +2486,7 @@ Breadcrumb is `Workflows` (real `<Link>` to `/gateway/workflows`) → the workfl
 - **Org deletion is blocked once any admin audit event exists (founder, 2026-10-07).** This has already happened to one test org (`b253-rbac-9723bccb`, leaked by a B-301 suite run, now marked as a fixture). It will block trial cleanup and customer offboarding. **An export-then-tombstone path is needed before the first customer:** export the org's trail (verifiable chain), then tombstone the org (deactivate, purge non-audit data, keep or archive the trail under a documented retention), instead of a cascade delete.
 - **Never-delete conflicts with future erasure obligations (B0b-6):** rows are never deleted and `org_id` is `ON DELETE RESTRICT`, so an org with admin events can't be deleted, and a user's ID stays in old events after the user is deleted. Org offboarding and GDPR-style erasure need a documented export-then-purge procedure (and a decision on pseudonymising `actor_user_id`) before either is offered. Belongs with B-133's retention decision.
 - UI: still to come, under the existing Audit page (one-spine rule).
+- **Seeding writes no admin audit events (founder, B-269 Slice 1 K4, 2026-10-08):** the presets and assignments that Slice 1's migration creates, and the Standard preset seeded for every new org, are system actions. They are recorded in the migration and `BUILT.md`, not in the chain, so seeding never makes an org undeletable. A test checks it.
 
 ### B-225 — Hand-rolled paginators outside `pagination()` still overflow — **QUEUED, 2026-09-26**
 **Origin:** found by both independent reviews of the B-196 Brief 1 fix-up pass (Low); see `B-196_BRIEF1_FIXUP_VERIFICATION.md` §5 and §7. The founder approved minting this ID. It was confirmed free against BACKLOG.md directly: the counter read B-225 and no open item used that number or covered this scope.
@@ -4228,6 +4229,7 @@ Choose in the brief.
 - verify existing deployments' upgrade path (role creation, grants, `ALTER … OWNER`), backups and restore (B-029/B-143), and the throwaway-database tests (`CREATEDB`).
 
 **Severity:** Medium-High.
+**Pre-customer gate (founder, 2026-10-08 brief, listed with B-298 and B-308).**
 **Status:** QUEUED.
 
 ### B-300 — EPIC: Agent identity — federate with the customer's IdP, plus a built-in fallback issuer — **PARKED (design record only), 2026-10-06**
@@ -4346,6 +4348,7 @@ Choose in the brief.
 **Severity:** High (founder rule: unaudited calls).
 **Fix (not chosen; a policy decision):** write a durable record **before** dispatch and fail closed (deny with a fixed reason code) when it can't be written, then record the outcome as a second row; or a transactional outbox. Availability trade-off: fail closed makes the audit database a dependency of every call.
 **Cross-references:** B-298 (the 2028 partition cliff, one trigger of this), B-121, B-299.
+**Pre-customer gate (founder, 2026-10-08),** next to B-298 and B-299: it must be resolved before the first customer install. Until it is resolved, **nobody states externally that every action is audited**.
 **Status:** QUEUED. Not fixed.
 
 ## Next B-ID: B-309

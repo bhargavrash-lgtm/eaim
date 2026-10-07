@@ -148,3 +148,14 @@ Part A (`B-269_PART_A_INVESTIGATION.md`) was approved, with D1–D10 as follows.
 ### Enrollment keys bind to a preset, never a package (founder, 2026-10-07)
 
 An enrollment key binds a machine to a preset, never to a package type, so the same key works from the standalone discovery installer and from the chat bundle. Nothing in Slices 1-4 may assume the package type. (Context: B-130, `CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`; B-305 merged into B-130.)
+
+### Slice 1 decisions (founder, 2026-10-08)
+
+Plan: `B-269_SLICE1_PLAN.md`. K2, K3, K4 and K11 are accepted, with conditions:
+- **K2, hash:** computed in Go and cached per version.
+- **K3, versions:**
+  - published versions are blocked from update or delete at the database level;
+  - unique (preset, version), and one draft per preset;
+  - the version number is allocated under a per-preset lock inside the publish transaction.
+- **K4, the seed writes no audit events:** the migration's presets and assignments, and the Standard preset seeded for every new org, are system actions recorded in the migration and `BUILT.md`, not in `admin_audit_events`. Otherwise every org, including test orgs, would become undeletable (B-224). A test checks it.
+- **K11, legacy paths:** reverting to a legacy-path version is a path change, so it's refused. Editing a migrated preset's other fields with its legacy paths unchanged stays allowed and flagged (S5).

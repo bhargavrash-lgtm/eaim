@@ -8,7 +8,29 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-07, newest) — B-269 Slice 1 PLANNED (no build); B-308 minted; B-298 interim fix and pre-customer gate
+## Pre-customer gates (must be resolved before the first customer install)
+- **B-298:** `audit_log` has no partitions after 2027-12, so gateway calls then go unaudited.
+- **B-299:** the application's database role is a superuser that owns its tables, so no audit table is tamper-resistant against the app.
+- **B-308:** the gateway runs a call before auditing it, and audit failures are only logged. Until it is resolved, **nobody states externally that every action is audited**.
+- Also recorded elsewhere: B-224 (an export-then-tombstone path for org deletion, before the first customer); B-243 (pre-pilot); B-297 (gate, unverified).
+
+## Active decision thread (2026-10-08, newest) — Slice 1 plan follow-up: K2/K3/K4/K11 accepted with conditions; gates; AGENTS.md emptied; Jev parked
+
+- **Accepted (founder):** K2, K3, K4 and K11, with conditions. Recorded in `B-269_SLICE1_PLAN.md` (new final section), `DISCOVERY_PRESETS_DESIGN.md` and B-224.
+- **Two follow-on points flagged for confirmation:**
+  - the cached hash needs a NULL-to-value exception to the update block, for rows created in SQL;
+  - a plain delete block would stop org deletion, so the proposal is to allow a DELETE only in a cascade from the org's deletion.
+- **Ingest finding (Part A, not fixed):** `IngestBatch` skips a failed item and still returns 202, so the collector marks the whole batch delivered. **A report that fails mid-ingest is dropped today.**
+  - The collector retries only on a 5xx or a network error (10 attempts, 10 s apart), then moves the batch to `dead_letter`, which nothing replays.
+  - A batch-level 4xx goes straight to `dead_letter`.
+  - Slice 1's transaction change must not keep this behaviour. Proposed: an idempotency key per item (the collector's buffer row ID) and a 5xx when any item fails transiently. Relates to B-251.
+- **Gates:** a pre-customer gate list was added at the top of this file (B-298, B-299, B-308). No one may say externally that every action is audited until B-308 is resolved.
+- **Docs:**
+  - `AGENTS.md` now holds no rules, only a pointer to CLAUDE.md and MULTI_AGENT_PROTOCOL.md.
+  - `JEV_ORCHESTRATION_ROADMAP.md` is committed unchanged and listed under Parked (not adopted, no B-ID).
+- **CI:** still red, in Test — eami-gateway only; every other job is green. Docs only. Marker cleared.
+
+## Active decision thread (2026-10-07) — B-269 Slice 1 PLANNED (no build); B-308 minted; B-298 interim fix and pre-customer gate
 
 - **Plan:** `B-269_SLICE1_PLAN.md`. Decisions waiting on the founder:
   - K2: compute `config_version` with the one Go function, don't store it;
@@ -3197,6 +3219,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-08 by Claude Code — Slice 1 plan follow-up: K2/K3/K4/K11 accepted with conditions (two follow-on points flagged); pre-customer gate list (B-298, B-299, B-308); AGENTS.md emptied; Jev proposal parked; ingest drop finding recorded. Docs only. Marker cleared.
+
+Prior entry:
 2026-10-07 by Claude Code — B-269 Slice 1 planned (`B-269_SLICE1_PLAN.md`, no build); B-308 minted (High); B-298 interim fix and pre-customer gate; stale CONTEXT lines annotated. Docs only. Marker cleared.
 
 Prior entry:

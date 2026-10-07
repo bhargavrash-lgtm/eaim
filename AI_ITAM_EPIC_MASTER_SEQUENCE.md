@@ -219,6 +219,7 @@ Design records kept for later. Nothing here is in a phase or the active sequence
 
 - **B-300** (`AGENT_IDENTITY_DESIGN.md`): Agent identity: federate with the customer's IdP plus a built-in fallback issuer. Design record only. Not in the active sequence.
 - **B-130** (`CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`; B-305 merged into it): Native governed desktop chat app and discovery bundle (two components, one endpoint identity). Design record only. Not in the active sequence.
+- **Jev proposal** (`JEV_ORCHESTRATION_ROADMAP.md`, Codex, 2026-09-25): not adopted; input to the Horizon 2 orchestration investigation; its hosted component conflicts with the on-prem wedge. No B-ID.
 
 ---
 

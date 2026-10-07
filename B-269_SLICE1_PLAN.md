@@ -474,3 +474,28 @@ ALTER TABLE endpoints
   - about 10–12 new admin audit events;
   - the D7 columns on every endpoint.
 - **Every other org:** a Standard preset (and the fixture org a Migrated one) from the migration, with **no** events, so they stay deletable, except the fixture org, which already wasn't.
+
+---
+
+## Founder decisions on the plan (2026-10-08)
+
+**K2, K3, K4 and K11 are accepted, with these conditions:**
+- **K2:** the hash is **computed in Go** (`store.AgentConfig.Version()`) and **cached per version** (a `config_version` column written only by Go).
+- **K3:**
+  - a **database-level block on updating or deleting published versions**;
+  - `UNIQUE (preset, version)`, and **one draft per preset**;
+  - the version number is **allocated under a per-preset lock inside the publish transaction**.
+- **K4:** the migration and the Standard seed **write no audit events**, with a test, and a note in the design record and on B-224.
+- **K11:**
+  - reverting to a legacy-path version is a path change, so it's refused;
+  - **editing a migrated preset's other fields with its legacy paths unchanged stays allowed, and flagged.**
+
+**Follow-on points for the build, flagged, not decided:**
+- **The K2 cache and the K3 update block meet:** rows the migration and the seed trigger create in SQL have no hash (SQL can't call Go).
+  - The build fills it from Go: on first read, plus a startup backfill.
+  - So the update block needs **one narrow exception**: `config_version` may change from NULL to a value, with every other column unchanged. Anything else raises.
+  - Rollout queries treat a NULL hash as "fill first" and never as "applied".
+- **The K3 delete block and org deletion:** a plain DELETE block also stops an org's `ON DELETE CASCADE`. Every org will hold a Standard preset with v1, so every org would become undeletable, and every shared-database test that deletes its org would fail.
+  - **Proposed:** the trigger refuses a DELETE unless the parent preset row is already gone, which happens only in a cascade from the org's deletion.
+  - Direct deletes by the application, or of a single version, still raise.
+  - This narrows the condition, so it needs **your confirmation** before the build.
