@@ -8,7 +8,15 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-07, newest) — B-305 chat app and discovery bundle: design record parked; roadmap pass; Part A
+## Active decision thread (2026-10-07, newest) — B-305 folded into B-130; roadmap moves; B-306 minted
+
+- **B-130 is the single item** for the desktop chat app; B-305 reduced to "Merged into B-130". B-130 gained a "Discovery bundle" section (pointer to the design record; the C5 restriction on claiming that audit records the user) and a table of **nine disagreements** between B-130 and the design record (history ownership, packaging, modes, tool use, model routing, identity, relation to discovery, extra scope, desktop tech), each **pending the founder**. Cross-references in B-152, B-193, B-269, B-295, B-138, B-300 (and the master sequence and presets §12) repointed to B-130.
+- **Design record:** B-130 as its item; hosted web chat is the separate Chat Engine item; new §10 constraints (no credential reuse; authenticated status-only local interface; per-user install open, not v1; gateway-owned history as the recorded default with open questions; first slice is a gateway change).
+- **Roadmap:** the chat line is now its own Horizon 2 line (B-130), distinct from the hosted Chat Engine; GxP/CSV is a Horizon 1 pre-sale gate (a validation package); hosted visibility stays Horizon 3, pending.
+- **B-306 minted:** CI-reconciliation identity keys and CMDB export (master-sequence item 15). Next free B-ID **B-307**.
+- Docs only. Marker cleared.
+
+## Active decision thread (2026-10-07) — B-305 chat app and discovery bundle: design record parked; roadmap pass; Part A
 
 - **Part 0** (one docs commit, since the new rule puts a design record and its roadmap line in the same commit): `CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md` saved; **B-305** minted (parked) and cross-referenced from B-152, B-193, B-269, B-295, B-138, B-300; parked line in the master sequence; `DISCOVERY_PRESETS_DESIGN.md` §12: enrollment keys bind to a preset, never a package type.
 - **Roadmap pass:** present already: B-269 (Discovery presets, its own setup destination) and B-267 (Discovery Probe). Added one line each: B-280 epic, agent identity (B-300, placement **proposed**), Dynamic Asset Grouping, AI/LLM Service Mapping, CI-reconciliation keys and CMDB export (no record yet), the chat app (under the Chat Engine item), and the hosted visibility layer and GxP/CSV gate (no record; nearest is ADR-020). No existing line changed.
@@ -3111,6 +3119,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-07 by Claude Code — B-305 folded into B-130 (disagreements recorded, pending founder); design-record constraints; roadmap: chat line own Horizon 2 line, GxP/CSV to Horizon 1; B-306 minted. Docs only. Marker cleared.
+
+Prior entry:
 2026-10-07 by Claude Code — B-305 chat app and discovery bundle: design record parked, B-305 minted, roadmap pass (7 lines added, none changed), design-record roadmap rule; Part A reported (B-130 overlap and Chat Engine placement flagged). Docs only. Marker cleared.
 
 Prior entry:

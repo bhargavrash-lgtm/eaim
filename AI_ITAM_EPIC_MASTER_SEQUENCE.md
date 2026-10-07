@@ -199,7 +199,7 @@ anything.
 
 ## Phase 4 — Only once Phase 2 and 3 are fully closed
 
-- [ ] 15. CI-reconciliation identity keys investigation.
+- [ ] 15. CI-reconciliation identity keys investigation (**B-306**, with CMDB export).
 - [ ] 16. **AI/LLM Service Mapping** — the four-tier model, begins only
       once B-267 exists.
 - [ ] 17. **B-279** — report data minimisation (redact command-line and
@@ -216,7 +216,7 @@ anything.
 Design records kept for later. Nothing here is in a phase or the active sequence.
 
 - **B-300** (`AGENT_IDENTITY_DESIGN.md`): Agent identity: federate with the customer's IdP plus a built-in fallback issuer. Design record only. Not in the active sequence.
-- **B-305** (`CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`): Chat app and discovery bundle: an endpoint-installed governed chat app bundled with the discovery service (two components, one endpoint identity). Design record only. Not in the active sequence.
+- **B-130** (`CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`; B-305 merged into it): Native governed desktop chat app and discovery bundle (two components, one endpoint identity). Design record only. Not in the active sequence.
 
 ---
 

@@ -1271,6 +1271,23 @@ No schema/migration work (`policies.org_id` has existed since the original schem
 
 **Status:** fully discussed and scoped conceptually this session (2026-08-29); ZERO investigation or code started. Scope clarified further 2026-09-02 (see addendum above) and 2026-09-19 (model-routing capability, see addendum immediately above); still ZERO investigation or code started.
 
+**Discovery bundle (2026-10-07; B-305 merged into this item).** Design record: `CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`; Part A: `CHAT_APP_AND_DISCOVERY_BUNDLE_PART_A_INVESTIGATION.md`.
+- The desktop chat app ships as one bundle with the privileged discovery service (the same binary as the standalone discovery agent, never one process); one enrollment and one endpoint identity per machine; the standalone discovery package stays.
+- **Restriction:** nobody may claim externally that audit records the user behind a chat call until constraint C5 in `AGENT_IDENTITY_DESIGN.md` is resolved (`audit_log` has no user column and a fixed hash).
+- **Where this entry and the design record disagree, both versions stand and the decision is pending the founder:**
+
+| # | Topic | This entry (B-130) | Design record (2026-10-07) | Decision |
+|---|---|---|---|---|
+| 1 | Conversation history | The **gateway** owns and re-injects history each turn, so every turn's context passes policy and audit | Storage is open (local, server or none); the design record now keeps gateway-owned history as the **recorded default**, with open questions | Pending founder |
+| 2 | Packaging | A **third installed client** alongside the endpoint agent and browser extension | **One bundle, two components**: the installer installs the discovery service if absent; chat without the service is not a v1 mode | Pending founder |
+| 3 | Scope of modes | Two modes: chat, and later a **coding-agent** interface | Chat only; the coding agent isn't mentioned | Pending founder |
+| 4 | Tool use | A **gateway-orchestrated** agentic loop (the gateway drives tool calls; thin client) | An **MCP client in the app**; MCP tools in Slice 3 | Pending founder |
+| 5 | Model choice | **Content-aware routing**: policy, not the user, decides which model gets a prompt (a core capability) | "Models limited by policy"; the LLM-facing API is open (MCP or OpenAI-compatible, B-152) | Pending founder |
+| 6 | Identity | The client uses the gateway's **AI-token (governed agent) dual-auth path** | **Delegated mode**: every call carries the signed-in user; one chat governed agent per org or per user is open | Pending founder |
+| 7 | Relationship to discovery | Replaces the need for ungoverned tools "rather than just detecting" them (the endpoint agent's job) | Discovery **runs with** chat via the bundle and stays independent; discovery never depends on chat adoption | Pending founder |
+| 8 | Further scope | Admin policy push to the client fleet, usage monitoring, skills distribution, RAG | Not in the design record | Pending founder |
+| 9 | Desktop technology | "Likely Electron or Tauri" | Open decision | Pending founder |
+
 ### B-147 — EPIC: Customer-controlled LLM training orchestration — **logged, investigation not started**
 **Objective:** NOT an ML training engine built by EAMI — a state-of-the-art orchestration/management layer for training that the customer runs entirely on their own infrastructure, under their own control, matching the on-prem deployment model already used elsewhere in this product (ADR-020 Model A). EAMI's job is the guided, governed layer on top of a real training framework, not reimplementing the framework itself.
 **Real, current tooling identified as the underlying framework to orchestrate, not reinvent:** Axolotl (Apache 2.0, actively maintained, YAML-config-driven, supports LoRA/QLoRA/full fine-tuning, real multi-GPU/multi-node support). Axolotl explicitly leaves GPU ops/monitoring/serving to the wrapping platform — that gap is exactly EAMI's opportunity here, not a limitation to work around.
@@ -1382,7 +1399,7 @@ No schema/migration work (`policies.org_id` has existed since the original schem
 **Severity/Priority:** Feature, part of the TrueFoundry feature-parity initiative, explicitly not near-term (gated on adapter count).
 **Status:** logged 2026-09-02, zero investigation or code started, explicitly not startable yet per its own gating condition.
 
-**Cross-reference (2026-10-07): B-305, chat app** (`CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`). Its LLM-facing API is an open decision: MCP or an OpenAI-compatible endpoint (this item).
+**Cross-reference (2026-10-07): B-130, desktop chat app** (B-305 merged into it; `CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`). Its LLM-facing API is an open decision: MCP or an OpenAI-compatible endpoint (this item).
 
 ### B-153 — INVESTIGATION: real performance benchmarking (latency/throughput under realistic load)
 **Objective:** real, measured latency/throughput benchmarking of EAMI's dispatch path under realistic load — **required before any claim of performance parity with, or gap versus, a competitor's published numbers.** Per this session's own strategic framing (see shared context above), an unverified parity/gap claim would be exactly the kind of feature-checklist thinking this initiative is explicitly trying to avoid — a real number, adversarially measured, is the standard, not an assumption carried over from a competitor's marketing page.
@@ -1541,7 +1558,7 @@ No schema/migration work (`policies.org_id` has existed since the original schem
 
 **Cross-reference (2026-10-06): B-300, agent identity** (`AGENT_IDENTITY_DESIGN.md`). Its delegation slice needs the user token from the customer's IdP, which is this item (design §7, slice C).
 
-**Cross-reference (2026-10-07): B-305, chat app.** For customers with an IdP, chat sign-in and delegated calls depend on this item.
+**Cross-reference (2026-10-07): B-130, desktop chat app (B-305 merged into it).** For customers with an IdP, chat sign-in and delegated calls depend on this item.
 
 ### B-139 — EPIC: Agentless discovery — **logged, investigation not started**
 **Objective:** network-level shadow-AI detection that doesn't require an installed endpoint agent — extending shadow-AI visibility to unmanaged/BYOD devices the current `eami-agent`-based approach structurally cannot reach (the endpoint agent, per its own design, only ever sees what's installed on a machine it's deployed to). One of the four original strategic epics discussed early in this session, alongside the VM appliance (B-053, DONE), IdP/SSO (B-138), and the third-party public API (B-137).
@@ -2024,7 +2041,7 @@ B-164 also flagged one adjacent-but-unrelated dormant artifact so it isn't mista
 - [ ] Live-verify on a real machine with a real Squirrel-installed app (e.g. Cursor) actually detected through the real deployed service, not just interactively
 **Dependencies:** B-191 (found this while fixing a narrower instance of the same class of bug).
 
-**Cross-reference (2026-10-07): B-305, chat app.** The chat app could optionally send user-context discovery data, partially covering this blind spot, but never as a dependency: this item is fixed in the discovery agent (enumerating user profiles) regardless.
+**Cross-reference (2026-10-07): B-130, desktop chat app (B-305 merged into it).** The chat app could optionally send user-context discovery data, partially covering this blind spot, but never as a dependency: this item is fixed in the discovery agent (enumerating user profiles) regardless.
 
 ### B-194 — `models` scanner over-collection: personal files (videos, unrelated binaries) reported to the backend by a detector meant to find LLM model files — **logged, not fixed; temporarily mitigated for one demo endpoint**
 **Found during:** live demo prep (2026-09-19) — founder noticed 544 "Local Models" entries on the real dev endpoint, clearly not LLM files (personal videos, a Docker VHDX, browser binaries), reported live to the backend.
@@ -3488,7 +3505,7 @@ This changes enforcement behaviour, so it is a founder decision with a dedicated
 
 **Status:** QUEUED. Design recorded 2026-10-05. **Part A done 2026-10-05** (`B-269_PART_A_INVESTIGATION.md`): 12 conflicts flagged, decisions D1–D10 awaiting the founder. **No build until the founder approves Part A.**
 
-**Cross-reference (2026-10-07): B-305, chat app and discovery bundle.** An enrollment key binds a machine to a preset, never a package type: the same key works from the standalone installer and the chat bundle (design §12). Nothing in Slices 1-4 may assume the package type.
+**Cross-reference (2026-10-07): B-130, desktop chat app and discovery bundle (B-305 merged into it).** An enrollment key binds a machine to a preset, never a package type: the same key works from the standalone installer and the chat bundle (design §12). Nothing in Slices 1-4 may assume the package type.
 
 ### B-270 — Read-only effective-config view on Endpoint Detail (Layer 3) — **QUEUED, 2026-09-30 — build order item 2 (with B-252 C2)**
 **Origin:** `DISCOVERY_ADMIN_INVESTIGATION.md` Part 1B(d). Founder-approved build order, 2026-09-30. Minted at founder direction 2026-09-30. B-270 was confirmed free against BACKLOG.md directly: the counter read B-269, and B-269 and B-270 were referenced nowhere. A grep for open items covering presets, effective config or enrollment keys found only B-267's own forward references to this work.
@@ -4124,7 +4141,7 @@ Choose in the brief.
 **Endpoints already merged can't be un-merged** (founder, 2026-10-05). Their history interleaves two machines, and nothing in the stored reports reliably separates them.
 **Severity:** Medium (wrong inventory, silent). **Status:** QUEUED; fixed by B-269 Slice 3.
 
-**Cross-reference (2026-10-07): B-305.** The chat bundle must join the machine's existing endpoint identity, never create a second endpoint record; this item's hostname-collision fix is a prerequisite for that.
+**Cross-reference (2026-10-07): B-130 (B-305 merged into it).** The chat bundle must join the machine's existing endpoint identity, never create a second endpoint record; this item's hostname-collision fix is a prerequisite for that.
 
 ### B-296 — Clean stored agent configs still carrying the whole-profile default paths (`/home`, `/Users`, `C:\Users`) — **QUEUED (Low–Medium), 2026-10-05**
 **Origin:** B-269 Slice 0 decision S4 (founder, 2026-10-05). Minted at founder direction. B-296 was confirmed free against BACKLOG.md directly (the counter read B-296 and the number appeared nowhere else). A grep found no open item to clean stored paths.
@@ -4216,7 +4233,7 @@ Choose in the brief.
 
 **Slice A1 delivered by B-301 (2026-10-07).** **Minted from Part A (2026-10-06):** **B-301** (C2, open MCP session keeps dispatching after suspension; High pending live test) and **B-302** (C6, raw error text in gateway 401/403). Slice A split into A1/A2/A3 and C5 recorded as a Slice B constraint in `AGENT_IDENTITY_DESIGN.md`.
 
-**Cross-reference (2026-10-07): B-305, chat app.** Chat uses delegated mode (Slice B, which needs A2); recording the user behind a chat call depends on constraint C5.
+**Cross-reference (2026-10-07): B-130, desktop chat app (B-305 merged into it).** Chat uses delegated mode (Slice B, which needs A2); recording the user behind a chat call depends on constraint C5.
 
 ### B-301 — A suspended or revoked governed agent's open MCP session keeps dispatching — **DONE, 2026-10-07** (High, confirmed live, fixed; `B-301_B-302_VERIFICATION.md`)
 **Origin:** B-300 Part A, conflict C2 (`AGENT_IDENTITY_PART_A_INVESTIGATION.md` §3). Minted at founder direction 2026-10-06; confirmed free against BACKLOG.md directly (the counter read B-301, and no file mentioned B-301).
@@ -4287,13 +4304,11 @@ Choose in the brief.
 - Add a guard that fails a test run if a shared-database test writes an `admin_audit_events` row (for example, compare the shared database's count before and after the package).
 **Status:** QUEUED. Not fixed.
 
-### B-305 — EPIC: Chat app and discovery bundle — an endpoint-installed governed chat app plus the discovery service, one endpoint identity — **PARKED (design record only), 2026-10-07**
-**Origin:** founder design brief, 2026-10-07. Minted at founder direction; confirmed free against BACKLOG.md directly (the counter read B-305, and no file mentioned B-305 except "next free" notes).
-**Record:** `CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`. Part A (read-only): `CHAT_APP_AND_DISCOVERY_BUNDLE_PART_A_INVESTIGATION.md`.
-**Summary:** a desktop chat app (the governed interaction layer between a user and LLMs through the gateway), shipped as one bundle with the privileged discovery service (same binary as the standalone agent, never one process). One enrollment and one endpoint identity per machine; chat without the service is not a v1 mode; disclosure in the app. Delegated identity per `AGENT_IDENTITY_DESIGN.md` (blocked on C5 for "audit records the user"). Proposed slices 0–4.
-**Roadmap:** Horizon 2, extending the Chat Engine item.
-**Related:** B-152, B-193, B-269 (enrollment keys bind to a preset, never a package type; design §12), B-295, B-138, B-300.
-**Part A (read-only) done 2026-10-07:** `CHAT_APP_AND_DISCOVERY_BUNDLE_PART_A_INVESTIGATION.md`. **Overlaps B-130** (EPIC: Native Governed AI Desktop Client), the same product: founder to decide whether B-305 folds into B-130 (C1); the roadmap line's placement under the web Chat Engine item is flagged (C2).
-**Status:** PARKED: listed under "Parked (not scheduled)" in the master sequence. No build.
+### B-305 — Merged into B-130 (2026-10-07). See `CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`.
 
-## Next B-ID: B-306
+### B-306 — CI-reconciliation identity keys and CMDB export — **QUEUED (investigation not started), 2026-10-07**
+**Origin:** master sequence item 15 ("CI-reconciliation identity keys investigation"), Phase 4 of the AI ITAM epic (B-280); the roadmap pass of 2026-10-07 found it had no B-ID or design record. Minted at founder direction; confirmed free against BACKLOG.md directly (the counter read B-306, and no file mentioned B-306 except "next free" notes).
+**Scope:** decide the identity keys that reconcile a configuration item across sources (the discovery agent's endpoints, the probe, governed agents, CMDB records) so one real-world thing is one CI, and a CMDB export (format and route, per `API_CONVENTION.md`). No CMDB export record exists today.
+**Status:** QUEUED; investigation-first; sequenced as master-sequence item 15 (Phase 4).
+
+## Next B-ID: B-307

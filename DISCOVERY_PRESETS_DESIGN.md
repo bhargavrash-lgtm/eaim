@@ -147,4 +147,4 @@ Part A (`B-269_PART_A_INVESTIGATION.md`) was approved, with D1–D10 as follows.
 
 ### Enrollment keys bind to a preset, never a package (founder, 2026-10-07)
 
-An enrollment key binds a machine to a preset, never to a package type, so the same key works from the standalone discovery installer and from the chat bundle. Nothing in Slices 1-4 may assume the package type. (Context: B-305, `CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`.)
+An enrollment key binds a machine to a preset, never to a package type, so the same key works from the standalone discovery installer and from the chat bundle. Nothing in Slices 1-4 may assume the package type. (Context: B-130, `CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`; B-305 merged into B-130.)

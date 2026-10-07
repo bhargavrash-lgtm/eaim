@@ -103,7 +103,8 @@ Scoped, logged, real backlog items — not yet built, no invented urgency, seque
 - **Agent identity (B-300)** — **proposed** placement, founder to confirm: Slice A1 shipped (B-301, B-302); Slices A2 and A3 in Horizon 1; Slices B and C in Horizon 2; record `AGENT_IDENTITY_DESIGN.md`.
 - **Dynamic Asset Grouping (part of B-280; schema resolution is master-sequence item 6)** — Horizon 1, design record, not a build brief: `DYNAMIC_ASSET_GROUPING_EPIC.md`.
 - **AI/LLM Service Mapping (part of B-280; master-sequence item 16)** — Horizon 1, design record, begins once B-267 exists: `AI_LLM_SERVICE_MAPPING_DESIGN.md`.
-- **CI-reconciliation identity keys and CMDB export (part of B-280; master-sequence item 15)** — Horizon 1, not started; no B-ID or design record yet (no CMDB export record exists).
+- **CI-reconciliation identity keys and CMDB export (B-306; part of B-280; master-sequence item 15)** — Horizon 1, not started; no design record yet.
+- **GxP/CSV validation gate** — Horizon 1, a **pre-sale gate for regulated customers**: a validation package (documentation and evidence), not engineering; no B-ID or record yet.
 - **The small, already-disclosed items** — B-213 (doc correction), B-218 (gateway_tools/nodes workspace scoping), the Status field allow-list nit, custom-roles investigation (deferred, correctly, pending real demonstrated need), Groups-for-users bulk-tagging (small, real, not blocked on custom roles per tonight's own analysis)
 
 ---
@@ -121,9 +122,9 @@ Sequenced strictly by real dependency, per tonight's own research synthesis:
 5. **Real autonomy safeguards** — per-time-unit spend/action limits, a real admin kill-switch, automatic escalation triggers.
 6. **B-152 (Unified multi-provider API surface)** — was originally blocked on having enough real adapters to unify; once model hosting (1) adds a genuinely new provider type alongside the existing Claude/external adapters, this gate is naturally satisfied.
 7. **The Chat Engine** — the real, daily web surface for this. Worth stating precisely: this is distinct from **B-130's original scope, a native desktop client** — related, not identical. The Chat Engine (web) can ship first; a native desktop app remains its own, later, separate decision.
-   - **Chat app and discovery bundle (B-305)** — Horizon 2, extends the Chat Engine item: parked, design record only: `CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`.
 8. **B-147 (Customer-controlled training orchestration)** — genuinely later in character, not a blocker for 1-7. Real candidates identified: Axolotl, Ludwig (both Apache 2.0). Requires model hosting to exist first, develops in parallel with 4-7 otherwise. Includes real model-evaluation/benchmarking-over-time, already folded into this scope.
 9. **Multi-agent coordination — deliberately last, deliberately separate.** Confirmed via real, current research: the least-solved part of even ServiceNow's and Salesforce's own platforms. Single-agent v1 first.
+- **Native governed desktop chat app and discovery bundle (B-130)** — Horizon 2, parked, design record only; distinct from the hosted Chat Engine (item 7): `CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md`.
 
 ---
 
@@ -135,7 +136,7 @@ The operational maturity that turns a proven product into something a large ente
 - **B-133 (TimescaleDB retention/scale strategy)** — real data-lifecycle planning for the hypertables (audit_log, token_usage, paste_events) as real deployments accumulate genuine volume
 - **B-153 (Real performance benchmarking)** — never formally measured; belongs here once there's a real, stable platform worth benchmarking rather than one still actively changing shape
 - **Compliance certification readiness (SOC 2, eventually relevant for regulated industries)** — the substance already exists (real audit logging, real access control, real encryption); what's missing is the formal documentation and audit process
-- **Hosted visibility layer decision (on-prem versus SaaS) and the GxP/CSV validation gate** — Horizon 3, undecided; no B-ID; the nearest record is ADR-020 in `DECISIONS.md` (appliance first, hybrid SaaS later); no GxP/CSV record exists yet.
+- **Hosted visibility layer decision (on-prem versus SaaS)** — Horizon 3, pending decision; no B-ID; the nearest record is ADR-020 in `DECISIONS.md` (appliance first, hybrid SaaS later).
 - **Groups-for-users (permission-bundle version) and custom configurable roles** — both correctly deferred pending real demonstrated need, not built speculatively
 
 ---
