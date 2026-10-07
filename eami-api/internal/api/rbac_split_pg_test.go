@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/eami/api/internal/api"
 	"github.com/eami/api/internal/auth"
@@ -31,7 +33,11 @@ type rbacEnv struct {
 }
 
 func newRBACEnv(t *testing.T) *rbacEnv {
-	env := newWorkspaceTestEnv(t)
+	// Throwaway database (B-301): this suite revokes an API key, which now
+	// writes a permanent admin_audit_events row, and an org with audit
+	// events can never be deleted. On the shared dev database that leaked
+	// the test org on every run.
+	env := newThrowawayWorkspaceTestEnv(t)
 	ctx := context.Background()
 	org := seedTestOrg(t, ctx, env.pool, "b253-rbac")
 	tok := func(role string) string {
@@ -387,4 +393,30 @@ func TestRBACSplit_ApproverReadSurface_RealDB(t *testing.T) {
 	for _, p := range []string{"/v1/gateway/agents", "/v1/gateway/agents/" + agent.String(), "/v1/gateway/tools", "/v1/gateway/agents/" + agent.String() + "/config", "/v1/gateway/agents/" + agent.String() + "/connections", "/v1/cmdb/assets", "/v1/gateway/policies"} {
 		expectCMDBStatus(t, e.do(t, http.MethodGet, p, e.viewer, nil), http.StatusOK, "viewer GET "+p)
 	}
+}
+
+// newThrowawayWorkspaceTestEnv is newWorkspaceTestEnv over a fresh throwaway
+// database (bootstrap_test.go's helpers), so rows this suite can't delete
+// (admin audit events and their org) never reach the shared dev database.
+func newThrowawayWorkspaceTestEnv(t *testing.T) *workspaceTestEnv {
+	t.Helper()
+	c := bootstrapTestPgConn(t)
+	dbName := newThrowawayDB(t, c)
+	applyMigrations(t, c, dbName)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, c.dbURL(dbName))
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+	if err := pool.Ping(ctx); err != nil {
+		t.Skipf("skipping: could not reach throwaway database: %v", err)
+	}
+	authSvc, err := auth.NewService("", time.Hour, 30*24*time.Hour)
+	if err != nil {
+		t.Fatalf("auth.NewService: %v", err)
+	}
+	ts := httptest.NewServer(api.NewServer(store.New(pool), authSvc, nil, nil).Handler())
+	t.Cleanup(ts.Close)
+	return &workspaceTestEnv{pool: pool, authSvc: authSvc, http: ts.Client(), url: ts.URL}
 }

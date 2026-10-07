@@ -133,7 +133,7 @@ func TestDispatch_OrgScoping_TwoOrgsConflictingPolicies(t *testing.T) {
 	}
 
 	dispatcher := NewDispatcher(
-		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, pLoader,
+		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, alwaysLive{}, pLoader,
 		auditWriter, episodeRecorder, approvalRouter, fwd,
 		"", "", holdTimeout,
 	)

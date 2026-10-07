@@ -150,15 +150,6 @@ func (q *Queries) CreateAPIKey(ctx context.Context, p CreateAPIKeyParams) (*APIK
 	return &k, nil
 }
 
-const revokeAPIKey = `-- name: RevokeAPIKey :exec
-UPDATE api_keys SET revoked = TRUE WHERE id = $1 AND org_id = $2
-`
-
-func (q *Queries) RevokeAPIKey(ctx context.Context, id, orgID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, revokeAPIKey, toPgtypeUUID(id), toPgtypeUUID(orgID))
-	return err
-}
-
 const getAPIKeyByHash = `-- name: GetAPIKeyByHash :one
 SELECT id, org_id, name, prefix, scopes, created_by, created_at, last_used, expires_at, agent_id, revoked
 FROM api_keys

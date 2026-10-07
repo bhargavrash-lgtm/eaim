@@ -70,12 +70,22 @@ const (
 // only matters for those few hours.
 type Claims struct {
 	jwt.RegisteredClaims
-	OrgID    string `json:"org_id"`
-	Scope    string `json:"scope"`
-	Task     string `json:"task"`
-	Model    string `json:"model"`
-	Owner    string `json:"owner"`
-	RiskTier string `json:"risk_tier"`
+	OrgID string `json:"org_id"`
+	// AgentUUID and APIKeyID (B-301 review High 1 and 2) bind the token to
+	// the exact governed agent row and the key it was issued with. Set by
+	// HandleIssue from server-side records, never client input. A token
+	// without AgentUUID is refused wherever a governed agent is resolved
+	// (a hard cutover, like B-141's org_id): resolving by name alone let a
+	// token for a deleted agent work again for a re-created agent of the
+	// same name. APIKeyID lets the per-call check refuse every token of a
+	// revoked key, without depending on ai_token_events.
+	AgentUUID string `json:"agent_uuid,omitempty"`
+	APIKeyID  string `json:"api_key_id,omitempty"`
+	Scope     string `json:"scope"`
+	Task      string `json:"task"`
+	Model     string `json:"model"`
+	Owner     string `json:"owner"`
+	RiskTier  string `json:"risk_tier"`
 }
 
 // IssueRequest is the request body for POST /v1/gateway/tokens.
@@ -88,6 +98,8 @@ type IssueRequest struct {
 	// HandleIssue, from the validated API key's own org_id, immediately
 	// before calling Manager.Issue -- see Claims' doc comment above.
 	OrgID      string `json:"-"`
+	AgentUUID  string `json:"-"` // B-301: server-set, see Claims.AgentUUID
+	APIKeyID   string `json:"-"` // B-301: server-set, see Claims.APIKeyID
 	Scope      string `json:"scope"`
 	Task       string `json:"task"`
 	Model      string `json:"model"`
@@ -166,11 +178,18 @@ type dbRevocationStore struct {
 	pool *pgxpool.Pool
 }
 
+// save also notifies "token_revoked" in the same statement (B-301), so
+// every gateway node adds the JTI to its in-memory set and closes matching
+// sessions promptly. The notification is an optimisation: the per-call
+// check (registry.CheckLive) reads revoked_ai_tokens itself.
 func (s *dbRevocationStore) save(ctx context.Context, jti string, agentID string) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO revoked_ai_tokens (jti, agent_id)
-		VALUES ($1, $2)
-		ON CONFLICT (jti) DO NOTHING
+		WITH ins AS (
+			INSERT INTO revoked_ai_tokens (jti, agent_id)
+			VALUES ($1, $2)
+			ON CONFLICT (jti) DO NOTHING
+		)
+		SELECT pg_notify('token_revoked', $1)
 	`, jti, agentID)
 	if err != nil {
 		return fmt.Errorf("revocation db insert: %w", err)
@@ -294,12 +313,14 @@ func (m *Manager) Issue(req IssueRequest) (*IssueResponse, error) {
 			ExpiresAt: jwt.NewNumericDate(exp),
 			ID:        jti,
 		},
-		OrgID:    req.OrgID,
-		Scope:    req.Scope,
-		Task:     req.Task,
-		Model:    req.Model,
-		Owner:    req.Owner,
-		RiskTier: req.RiskTier,
+		OrgID:     req.OrgID,
+		AgentUUID: req.AgentUUID,
+		APIKeyID:  req.APIKeyID,
+		Scope:     req.Scope,
+		Task:      req.Task,
+		Model:     req.Model,
+		Owner:     req.Owner,
+		RiskTier:  req.RiskTier,
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -364,6 +385,51 @@ func (m *Manager) Revoke(jti string, agentID string) error {
 	return nil
 }
 
+// BoundTo reports whether the token was issued for exactly this governed
+// agent row (B-301). False for a token without an agent_uuid claim.
+func (c *Claims) BoundTo(agentUUID string) bool {
+	return c != nil && c.AgentUUID != "" && c.AgentUUID == agentUUID
+}
+
+// IsRevoked reports whether jti is in this process's in-memory revoked
+// set (B-301; a cheap pre-check, not the guarantee).
+func (m *Manager) IsRevoked(jti string) bool {
+	if jti == "" {
+		return false
+	}
+	m.revokedMu.RLock()
+	defer m.revokedMu.RUnlock()
+	_, ok := m.revoked[jti]
+	return ok
+}
+
+// MarkRevoked adds jti to the in-memory set only, for a revocation another
+// node already persisted (B-301, from a token_revoked notification).
+func (m *Manager) MarkRevoked(jti string) {
+	if jti == "" {
+		return
+	}
+	m.revokedMu.Lock()
+	m.revoked[jti] = struct{}{}
+	m.revokedMu.Unlock()
+}
+
+// ReloadRevoked merges the backing store's full revoked set into memory
+// (B-301): called on every notification-listener (re)connect, so a node
+// that missed notifications catches up.
+func (m *Manager) ReloadRevoked(ctx context.Context) error {
+	jtis, err := m.store.loadAll(ctx)
+	if err != nil {
+		return err
+	}
+	m.revokedMu.Lock()
+	for _, jti := range jtis {
+		m.revoked[jti] = struct{}{}
+	}
+	m.revokedMu.Unlock()
+	return nil
+}
+
 // PublicKeyPEM returns the public key in PEM format.
 func (m *Manager) PublicKeyPEM() ([]byte, error) {
 	m.mu.RLock()
@@ -406,17 +472,28 @@ func (m *Manager) HandleJWKS(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(set)
 }
 
+// Fixed 401/403 bodies for every governed-agent-facing gateway route
+// (B-302). Never the error text: no parse detail, no JTI, no agent name, and
+// the same 403 whether the governed agent doesn't exist, is in another org,
+// or is suspended or revoked, so a token holder can't learn which. The detail
+// goes to the local log only.
+const (
+	MsgUnauthorized = "unauthorized: invalid or expired token"
+	MsgForbidden    = "forbidden: agent not authorized"
+)
+
 // Middleware validates Bearer token and injects claims into context.
 func (m *Manager) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
 		if len(auth) < 8 || auth[:7] != "Bearer " {
-			http.Error(w, "unauthorized: missing Bearer token", http.StatusUnauthorized)
+			http.Error(w, MsgUnauthorized, http.StatusUnauthorized)
 			return
 		}
 		claims, err := m.Validate(auth[7:])
 		if err != nil {
-			http.Error(w, "unauthorized: "+err.Error(), http.StatusUnauthorized)
+			slog.Info("identity: bearer token rejected", "err", err)
+			http.Error(w, MsgUnauthorized, http.StatusUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(WithClaims(r.Context(), claims)))

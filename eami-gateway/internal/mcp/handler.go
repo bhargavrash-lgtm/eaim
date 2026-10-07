@@ -36,7 +36,13 @@ import (
 // ActionContext is the normalised representation of a tool_call.
 type ActionContext struct {
 	// From JWT + registry lookup
-	AgentID   string // JWT sub  (e.g. "agent:claude-support-01")
+	AgentID string // JWT sub  (e.g. "agent:claude-support-01")
+	// TokenID is the jti of the token the call is made under (B-301): the
+	// dispatcher's per-call check refuses a revoked one.
+	TokenID string
+	// APIKeyID is the key the token was issued with (B-301): a revoked key
+	// refuses the call.
+	APIKeyID  string
 	AgentUUID string // gateway_agents.id UUID
 	AgentName string // short name (JWT sub without "agent:" prefix)
 	OrgID     string // gateway_agents.org_id UUID
@@ -111,6 +117,16 @@ type toolCallParams struct {
 	Arguments map[string]any `json:"arguments"`
 }
 
+// ErrNotLive is returned by a DecisionHandler when the call's governed agent
+// is no longer active or its token has been revoked (B-301). ServeMessages
+// answers with a fixed error and ends the session.
+var ErrNotLive = errors.New("mcp: governed agent or token no longer authorized")
+
+// MsgSessionEnded is the fixed JSON-RPC error text for a call refused by the
+// liveness checks. It is the same for suspension, revocation and expiry, so
+// it reveals nothing about which (B-302).
+const MsgSessionEnded = "unauthorized: session ended"
+
 // DecisionHandler is called with a validated ActionContext. Returns the proxy
 // result or an error (which becomes a JSON-RPC error response).
 // Return *PolicyDeniedError to produce a structured -32600 response.
@@ -184,7 +200,8 @@ func (h *Handler) ServeSSE(w http.ResponseWriter, r *http.Request) {
 
 	claims, err := h.parseBearer(r)
 	if err != nil {
-		http.Error(w, "unauthorized: "+err.Error(), http.StatusUnauthorized)
+		slog.Info("mcp/sse: bearer token rejected", "err", err)
+		http.Error(w, identity.MsgUnauthorized, http.StatusUnauthorized)
 		return
 	}
 
@@ -197,20 +214,35 @@ func (h *Handler) ServeSSE(w http.ResponseWriter, r *http.Request) {
 	// hours, so the compatibility cost is bounded and short-lived.
 	if claims.OrgID == "" {
 		slog.Warn("mcp/sse: rejected pre-cutover token with no org_id claim", "agent", agentName)
-		http.Error(w, "unauthorized: token missing org_id claim -- reissue a new token", http.StatusUnauthorized)
+		http.Error(w, identity.MsgUnauthorized, http.StatusUnauthorized)
 		return
 	}
 	agentRec, err := h.reg.LookupByNameAndOrg(r.Context(), agentName, claims.OrgID)
 	if err != nil {
 		slog.Warn("mcp/sse: agent lookup failed", "agent", agentName, "err", err)
-		http.Error(w, "agent not registered or suspended: "+err.Error(), http.StatusForbidden)
+		http.Error(w, identity.MsgForbidden, http.StatusForbidden)
+		return
+	}
+	// B-301: the token must be bound to this exact governed agent row (a
+	// deleted-and-re-created agent of the same name is a different row),
+	// and its token and issuing key must still be live (database, not just
+	// this node's memory).
+	if !claims.BoundTo(agentRec.ID) {
+		slog.Info("mcp/sse: token not bound to this governed agent", "agent", agentName)
+		http.Error(w, identity.MsgForbidden, http.StatusForbidden)
+		return
+	}
+	if lv, err := h.reg.CheckLive(r.Context(), agentRec.ID, agentRec.OrgID, claims.ID, claims.APIKeyID); err != nil || lv != registry.Live {
+		slog.Info("mcp/sse: token or governed agent not live", "agent", agentName, "err", err)
+		http.Error(w, identity.MsgUnauthorized, http.StatusUnauthorized)
 		return
 	}
 
 	tokenExpiry := claims.ExpiresAt.Time
 	sess, err := h.sessions.Create(claims, agentRec, tokenExpiry)
 	if err != nil {
-		http.Error(w, "internal error: "+err.Error(), http.StatusInternalServerError)
+		slog.Error("mcp/sse: session create failed", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	defer h.sessions.Close(sess.ID)
@@ -241,8 +273,18 @@ func (h *Handler) ServeSSE(w http.ResponseWriter, r *http.Request) {
 		case evt := <-sess.events:
 			sseWrite(w, flusher, evt.Event, evt.Data)
 		case <-sess.Done():
-			sseWrite(w, flusher, "error", `{"message":"session expired"}`)
-			slog.Info("mcp/sse: session expired", "session", sess.ID)
+			// Deliver anything already queued (for example the fixed
+			// "session ended" error for the refused call) before ending.
+			for drained := false; !drained; {
+				select {
+				case evt := <-sess.events:
+					sseWrite(w, flusher, evt.Event, evt.Data)
+				default:
+					drained = true
+				}
+			}
+			sseWrite(w, flusher, "error", `{"message":"session ended"}`)
+			slog.Info("mcp/sse: session ended", "session", sess.ID)
 			return
 		case <-r.Context().Done():
 			slog.Info("mcp/sse: client disconnected", "session", sess.ID)
@@ -268,10 +310,19 @@ func (h *Handler) ServeMessages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session not found or expired", http.StatusNotFound)
 		return
 	}
-
 	var req jsonRPCRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sessRPCError(sess, nil, -32700, "parse error: "+err.Error())
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+
+	// B-301 cheap pre-checks (in memory): an expired or locally revoked
+	// token ends the session before any work. The guarantee is the
+	// dispatcher's per-call database check; these only answer sooner.
+	if h.sessionNotLive(sess) {
+		sessRPCError(sess, req.ID, -32001, MsgSessionEnded)
+		h.sessions.Close(sess.ID)
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
@@ -325,6 +376,14 @@ func (h *Handler) ServeMessages(w http.ResponseWriter, r *http.Request) {
 	dispatchCtx := context.WithoutCancel(r.Context())
 	go func() {
 		result, err := h.dispatch(dispatchCtx, ac)
+		if errors.Is(err, ErrNotLive) {
+			// B-301: the governed agent was suspended or revoked, or its
+			// token was revoked. Fixed text (B-302), then end the session.
+			slog.Info("mcp/messages: refused, session ended", "agent", ac.AgentName, "session", sess.ID)
+			sessRPCError(sess, req.ID, -32001, MsgSessionEnded)
+			h.sessions.Close(sess.ID)
+			return
+		}
 		if err != nil {
 			slog.Warn("mcp/messages: rejected", "agent", ac.AgentName, "err", err)
 			// Policy denials get a structured JSON-RPC error (code -32600 + data).
@@ -353,6 +412,20 @@ func (h *Handler) ServeMessages(w http.ResponseWriter, r *http.Request) {
 // for tool_call.
 func (h *Handler) serveToolsList(w http.ResponseWriter, r *http.Request, sess *Session, req jsonRPCRequest) {
 	w.WriteHeader(http.StatusAccepted)
+
+	// B-301 review: listing the org's tools also requires a live governed
+	// agent and token (fails closed on a database error or no registry).
+	if sess.Agent == nil || h.reg == nil {
+		sessRPCError(sess, req.ID, -32001, MsgSessionEnded)
+		h.sessions.Close(sess.ID)
+		return
+	}
+	if lv, err := h.reg.CheckLive(context.WithoutCancel(r.Context()), sess.Agent.ID, sess.Agent.OrgID, sess.Claims.ID, sess.Claims.APIKeyID); err != nil || lv != registry.Live {
+		slog.Info("mcp/tools_list: refused, session ended", "session", sess.ID, "err", err)
+		sessRPCError(sess, req.ID, -32001, MsgSessionEnded)
+		h.sessions.Close(sess.ID)
+		return
+	}
 
 	orgID := ""
 	if sess.Agent != nil {
@@ -413,6 +486,8 @@ func buildActionContext(sess *Session, params toolCallParams, r *http.Request) A
 	}
 	return ActionContext{
 		AgentID:     sess.Claims.Subject,
+		TokenID:     sess.Claims.ID,
+		APIKeyID:    sess.Claims.APIKeyID,
 		AgentUUID:   agentUUID,
 		AgentName:   agentName,
 		OrgID:       orgID,
@@ -444,6 +519,46 @@ func sseWrite(w http.ResponseWriter, f http.Flusher, event, data string) {
 }
 
 // sessRPCError sends a generic JSON-RPC error as an SSE "message" event.
+// sessionNotLive is the in-memory part of B-301's check: token expiry and
+// this node's revoked set. About 9 ns; not the guarantee.
+func (h *Handler) sessionNotLive(sess *Session) bool {
+	if sess.Claims == nil {
+		return true
+	}
+	if sess.Claims.ExpiresAt != nil && !time.Now().Before(sess.Claims.ExpiresAt.Time) {
+		return true
+	}
+	return h.identity != nil && h.identity.IsRevoked(sess.Claims.ID)
+}
+
+// CloseSessionsForAgent ends every open session of one governed agent on
+// this node (B-301, agent_status notification). Matched by UUID, never name.
+func (h *Handler) CloseSessionsForAgent(agentUUID string) int {
+	return h.sessions.CloseWhere(func(s *Session) bool { return s.Agent != nil && s.Agent.ID == agentUUID })
+}
+
+// CloseSessionsForToken ends every open session opened with one token
+// (B-301, token_revoked notification).
+func (h *Handler) CloseSessionsForToken(jti string) int {
+	return h.sessions.CloseWhere(func(s *Session) bool { return s.Claims != nil && s.Claims.ID == jti })
+}
+
+// RecheckSessions ends every open session for which stillLive returns false
+// (B-301: after a listener reconnect, and periodically, to catch missed
+// notifications). stillLive runs OUTSIDE the session lock (it queries the
+// database); a session is kept when stillLive can't decide (it returns true
+// on error), and the per-call check still refuses its next call.
+func (h *Handler) RecheckSessions(stillLive func(s *Session) bool) int {
+	closed := 0
+	for _, s := range h.sessions.Snapshot() {
+		if !stillLive(s) {
+			h.sessions.Close(s.ID)
+			closed++
+		}
+	}
+	return closed
+}
+
 func sessRPCError(sess *Session, id any, code int, msg string) {
 	resp := jsonRPCResponse{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: msg}}
 	data, _ := json.Marshal(resp)

@@ -223,6 +223,9 @@ func run() error {
 		toolRouter,
 		aiProviderRouter,
 		licenseChecker,
+		// B-301: per-call liveness (status + revoked token), the guarantee
+		// that suspending or revoking stops a governed agent.
+		agentRegistry,
 		// pLoader itself, NOT pLoader.Evaluator() -- B-129: calling
 		// .Evaluator() here would snapshot the rule set that exists at
 		// this instant and freeze it for the process's entire lifetime.
@@ -242,6 +245,10 @@ func run() error {
 	mcpHandler := mcp.NewHandler(idManager, agentRegistry, dispatcher.Dispatch, func(ctx context.Context, orgID string) ([]mcp.ToolDefinition, error) {
 		return listGatewayTools(ctx, pool, orgID)
 	})
+	// B-301: close open sessions promptly on agent_status / token_revoked
+	// notifications, and catch up on every reconnect. An optimisation only:
+	// the dispatcher's per-call check (agentRegistry, above) is the guarantee.
+	go mcp.NewLivenessListener(pool, mcpHandler, idManager, agentRegistry).Run(ctx)
 	// B-098: api_keys (previously org-scoped only, enforced nowhere --
 	// GetAPIKeyByHash had zero callers) now gates POST /v1/gateway/tokens.
 	// Same Postgres pool as everything else above -- api_keys lives in the

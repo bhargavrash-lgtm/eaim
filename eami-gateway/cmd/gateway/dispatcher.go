@@ -34,6 +34,7 @@ import (
 	"github.com/eami/gateway/internal/episode"
 	"github.com/eami/gateway/internal/mcp"
 	"github.com/eami/gateway/internal/proxy"
+	"github.com/eami/gateway/internal/registry"
 	"github.com/eami/gateway/internal/safego"
 	"github.com/eami/gateway/internal/toolrouter"
 	policy "github.com/eami/policy"
@@ -158,6 +159,16 @@ type LicenseChecker interface {
 	ModuleLicensed(ctx context.Context, orgID, module string) bool
 }
 
+// AgentLiveness (B-301) answers, on every call, whether the governed agent
+// is still active and the call's token unrevoked. *registry.Registry
+// implements it with one primary-key query. It is THE guarantee that
+// suspending or revoking stops a governed agent: notifications only close
+// sessions sooner. A nil AgentLiveness, or any error, refuses the call
+// (fail closed).
+type AgentLiveness interface {
+	CheckLive(ctx context.Context, agentID, orgID, jti, keyID string) (registry.Liveness, error)
+}
+
 // UsageLimitChecker (B-157 epic, Brief 2) is a SEPARATE, additive
 // interface, not a new method on LicenseChecker -- deliberately, so
 // Brief 1's own existing LicenseChecker mocks across this file's test
@@ -210,6 +221,8 @@ type Dispatcher struct {
 	// this is a single org-level boolean, not a per-tool distinction the
 	// way toolRouter/aiProviderRouter's resolution is.
 	licenseChecker LicenseChecker
+	// liveness (B-301) is checked first on every Dispatch; see AgentLiveness.
+	liveness AgentLiveness
 	// policyEvalSource is read fresh (policyEvalSource.Evaluator()) on
 	// every Dispatch call, not cached -- see policy.EvaluatorSource's doc
 	// comment (B-129: a Dispatcher that instead stored a plain
@@ -238,6 +251,7 @@ func NewDispatcher(
 	toolRouter *toolrouter.Router,
 	aiProviderRouter *aiprovider.Router,
 	licenseChecker LicenseChecker,
+	liveness AgentLiveness,
 	policyEvalSource policy.EvaluatorSource,
 	auditWriter *audit.Writer,
 	episodeRecorder *episode.Recorder,
@@ -251,6 +265,7 @@ func NewDispatcher(
 		toolRouter:       toolRouter,
 		aiProviderRouter: aiProviderRouter,
 		licenseChecker:   licenseChecker,
+		liveness:         liveness,
 		policyEvalSource: policyEvalSource,
 		auditWriter:      auditWriter,
 		episodeRecorder:  episodeRecorder,
@@ -451,6 +466,16 @@ func newEpisodeStep(ac mcp.ActionContext, decision string, result json.RawMessag
 func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (json.RawMessage, error) {
 	start := time.Now()
 
+	// B-301: per-call liveness, before anything else. A governed agent that
+	// was suspended, revoked or deleted, or a revoked token, stops here on
+	// its next call, on any node, whether or not a notification arrived.
+	// Both production callers (MCP tool_call and every workflow step) come
+	// through this method. Fails closed: no checker or a database error
+	// refuses the call.
+	if reason := d.notLiveReason(reqCtx, ac); reason != "" {
+		return d.rejectOnNotLive(reqCtx, ac, start, reason)
+	}
+
 	// Licensing gate (B-157 epic, Brief 1, B-169) -- org-level, checked
 	// before anything else in this function, including tool resolution
 	// and policy evaluation: every real call that reaches here IS a
@@ -632,6 +657,8 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 		approvalReq := approval.Request{
 			OrgID:      ac.OrgID,
 			AgentID:    ac.AgentUUID,
+			TokenID:    ac.TokenID,
+			APIKeyID:   ac.APIKeyID,
 			AgentName:  ac.AgentName,
 			Tool:       ac.Tool,
 			Action:     ac.Action,
@@ -798,7 +825,7 @@ func (d *Dispatcher) Dispatch(reqCtx context.Context, ac mcp.ActionContext) (jso
 		outcome = DispatchOutcome{
 			Decision:             "escalated",
 			Result:               holdOutcome.Result,
-			Err:                  holdOutcome.Err,
+			Err:                  notLiveOr(holdOutcome.Err),
 			EpisodeSteps:         []episode.Step{newEpisodeStep(ac, "escalated", holdOutcome.Result)},
 			EpisodeOutcome:       episodeOutcome,
 			AuditWriteErr:        auditWriteErr,
@@ -944,6 +971,83 @@ func (d *Dispatcher) rejectOnProviderResolveError(reqCtx context.Context, ac mcp
 	outcome := DispatchOutcome{
 		Decision:       "denied",
 		Err:            fmt.Errorf("dispatch: ai_provider connector resolution failed: %w", resolveErr),
+		EpisodeSteps:   []episode.Step{newEpisodeStep(ac, "blocked", nil)},
+		EpisodeOutcome: "blocked",
+		AuditWriteErr:  auditWriteErr,
+		AuditDecision:  auditEntry.Decision,
+	}
+	outcome.Dispatched = outcome.Err == nil
+
+	for _, h := range d.hooks {
+		h(reqCtx, ac, outcome)
+	}
+	return outcome.Result, outcome.Err
+}
+
+// notLiveOr maps an approved call refused at resume time because its
+// governed agent or token is no longer live (approval.ErrAgentNotLive) to
+// mcp.ErrNotLive, so the MCP handler answers with the fixed text and ends
+// the session (B-301 review). Any other error is returned unchanged.
+func notLiveOr(err error) error {
+	if errors.Is(err, approval.ErrAgentNotLive) {
+		return mcp.ErrNotLive
+	}
+	return err
+}
+
+// notLiveReason returns "" when the call may proceed, otherwise a short
+// reason code for the local log: agent_not_active, token_revoked,
+// liveness_unavailable (database error or no checker).
+func (d *Dispatcher) notLiveReason(ctx context.Context, ac mcp.ActionContext) string {
+	if d.liveness == nil {
+		return "liveness_unavailable"
+	}
+	lv, err := d.liveness.CheckLive(ctx, ac.AgentUUID, ac.OrgID, ac.TokenID, ac.APIKeyID)
+	if err != nil {
+		slog.Error("dispatch: liveness check failed -- rejecting closed", "org_id", ac.OrgID, "agent_uuid", ac.AgentUUID, "err", err)
+		return "liveness_unavailable"
+	}
+	switch lv {
+	case registry.Live:
+		return ""
+	case registry.TokenRevoked:
+		return "token_revoked"
+	default:
+		return "agent_not_active"
+	}
+}
+
+// rejectOnNotLive (B-301) refuses a call from a governed agent that is no
+// longer active, or under a revoked token, or when liveness can't be
+// established. Same shape as rejectOnMissingLicense: a real audit_log row
+// (denied, parameters nil, so this decision is recorded), the hook loop,
+// and mcp.ErrNotLive so the MCP handler ends the session with a fixed
+// message. Nothing is dispatched downstream.
+func (d *Dispatcher) rejectOnNotLive(reqCtx context.Context, ac mcp.ActionContext, start time.Time, reason string) (json.RawMessage, error) {
+	slog.Warn("dispatch: governed agent or token not live -- rejecting", "reason", reason,
+		"org_id", ac.OrgID, "agent", ac.AgentName, "agent_uuid", ac.AgentUUID, "session_id", ac.SessionID)
+
+	orgID, _ := uuid.Parse(ac.OrgID)
+	agentID, _ := uuid.Parse(ac.AgentUUID)
+	workflowRunID, _ := uuid.Parse(ac.WorkflowRunID)
+	auditEntry := audit.Entry{
+		OrgID:         orgID,
+		AgentID:       agentID,
+		AgentName:     ac.AgentName,
+		ToolName:      ac.Tool,
+		Action:        ac.Action,
+		Parameters:    nil,
+		LatencyMS:     time.Since(start).Milliseconds(),
+		Timestamp:     ac.ReceivedAt,
+		WorkflowRunID: workflowRunID,
+		StepIndex:     ac.StepIndex,
+		Decision:      "denied",
+	}
+	auditWriteErr := d.auditWriter.Write(reqCtx, auditEntry)
+
+	outcome := DispatchOutcome{
+		Decision:       "denied",
+		Err:            mcp.ErrNotLive,
 		EpisodeSteps:   []episode.Step{newEpisodeStep(ac, "blocked", nil)},
 		EpisodeOutcome: "blocked",
 		AuditWriteErr:  auditWriteErr,

@@ -8,7 +8,18 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
 - The file is maintained directly by the agent and is never re-pasted from chat.
 
-## Active decision thread (2026-10-06, newest) — B-301 CONFIRMED live (High); B-302 minted; fix planned (no code)
+## Active decision thread (2026-10-07, newest) — B-301 + B-302 DONE
+
+- **Built** (`B-301_B-302_VERIFICATION.md`): suspending, revoking or deleting a governed agent, or revoking its token or issuing key, refuses its **next call** on every node (per-call database check in `Dispatch`, fails closed); sessions end with a fixed error; notifications close sessions promptly (optimisation only); approved escalations re-checked at resume; `tools/list`, SSE open and episode reads checked; key revocation revokes its tokens in one transaction with an admin audit event (`api_key.revoked`).
+- **Reviews raised two Highs, both fixed:** tokens now carry `agent_uuid` and `api_key_id`, binding them to the exact agent row and key (deleting and re-creating an agent never revives tokens; a revoked key's tokens stop per call). **Hard cutover:** every token minted before the deploy is refused; deploy all gateway nodes together.
+- **Not guaranteed:** a call already running finishes (at most 30 s); a database outage ends sessions.
+- **Proof:** 22 gateway + 1 rate-limit + 2 eami-api tests; 26/26 deliberate breakages caught; suites 379/0 and 633/0; live before → after on the real stack with the deny policy proven on the baseline.
+- **Measured:** 0.27 ms p50 per call inside Docker; 4 ms p50 end to end.
+- **Dev database:** migration 000030 applied; 10 inert `b301-*` fixture agents marked; one leaked test org (`b253-rbac-9723bccb`) marked (the RBAC test now uses a throwaway database).
+- **Proposed, not minted:** pre-existing raw error text in other gateway replies. Next free B-ID **B-303**.
+- Nothing in the master sequence ticked (B-301/B-302 aren't listed there). Marker cleared.
+
+## Active decision thread (2026-10-06) — B-301 CONFIRMED live (High); B-302 minted; fix planned (no code)
 
 - **Part 0** (`1e366de`): minted **B-301** (open MCP session keeps dispatching after suspension or revocation) and **B-302** (raw error text in gateway 401/403, Low-Medium); `AGENT_IDENTITY_DESIGN.md` Slice A split into A1 (liveness/revocation, B-301), A2 (owner as user link, visible "unowned"), A3 (signing keys, B-230); C5 recorded as an undecided Slice B constraint ("audit records the user" not to be claimed externally). Next B-ID **B-303**.
 - **Live test** (`B-301_LIVE_TEST_AND_FIX_PLAN.md`): on an already-open session, calls were **processed after suspension and after revoking key, token and status** (audit rows, downstream attempted); **node 2 accepted a token revoked on node 1**; token expiry does end the session. **B-301 is High, confirmed.**
@@ -3073,6 +3084,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-07 by Claude Code — B-301 + B-302 DONE (per-call liveness, token binding, key-to-token revocation, fixed 401/403); 26/26 mutations; live before/after. Marker cleared.
+
+Prior entry:
 2026-10-06 by Claude Code — B-301 confirmed live (High), B-302 minted, Slice A split; fix plan written (no code). Marker cleared.
 
 Prior entry:

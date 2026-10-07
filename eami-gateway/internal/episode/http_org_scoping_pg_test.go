@@ -87,11 +87,11 @@ func TestListEpisodes_OrgScoping_TwoOrgsSameAgentName_NeverLeaksAcrossOrgs(t *te
 	reader := episode.NewReader(pool)
 	h := episode.NewHTTPHandler(reader, idm, reg, "b141-unused-service-key")
 
-	tokenA, err := idm.Issue(identity.IssueRequest{AgentID: "agent:" + sharedName, OrgID: orgA.String(), TTLSeconds: 300})
+	tokenA, err := idm.Issue(identity.IssueRequest{AgentID: "agent:" + sharedName, OrgID: orgA.String(), AgentUUID: agentA.String(), TTLSeconds: 300})
 	if err != nil {
 		t.Fatalf("issue org A token: %v", err)
 	}
-	tokenB, err := idm.Issue(identity.IssueRequest{AgentID: "agent:" + sharedName, OrgID: orgB.String(), TTLSeconds: 300})
+	tokenB, err := idm.Issue(identity.IssueRequest{AgentID: "agent:" + sharedName, OrgID: orgB.String(), AgentUUID: agentB.String(), TTLSeconds: 300})
 	if err != nil {
 		t.Fatalf("issue org B token: %v", err)
 	}

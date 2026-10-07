@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## eami-gateway and eami-api — 2026-10-06 (B-301, B-302)
+
+### Changed
+- **Suspending or revoking a governed agent now stops it on its next call**, including on an MCP session it already had open, on every gateway node, and for every workflow step. Each call checks the agent's status and its token against the database; the call is refused and audited as denied, and the session ends.
+- **Revoking an API key also revokes every live token issued with it**, recorded in the admin audit trail. Tokens now carry their key's id and the gateway refuses any token whose key is revoked, on every call. If the revocation can't be recorded completely, nothing is revoked and the request fails with `key_revocation_failed`.
+- **Tokens are bound to the exact governed agent** they were issued for (`agent_uuid`, `api_key_id` claims), so deleting an agent and re-creating one with the same name never revives old tokens.
+- **Every governed-agent route checks liveness against the database:** tool calls, `tools/list`, new MCP sessions and episode reads.
+- **An approved escalation is re-checked before it runs.** If the governed agent was suspended or revoked while the call waited for approval, it doesn't run (`resume_outcome = agent_not_active`).
+- **Gateway 401 and 403 responses use fixed text** and no longer reveal whether a governed agent exists or is suspended (B-302).
+
+### Upgrade and deploy
+- **Run migration 000030 first** (it widens `approval_requests.resume_outcome`), then deploy eami-api, then eami-gateway.
+- **Open MCP sessions end at deploy.** Sessions live in the gateway process's memory, so restarting the gateway closes every open SSE session.
+- **Every token issued before the deploy is refused** (it has no `agent_uuid` claim): agents must request a new token from `POST /v1/gateway/tokens` with their API key, then reconnect. A suspended or revoked agent can't get one.
+- **A database error refuses the call and ends the session** (fail closed): during a database outage, agents reconnect once it's back.
+- **In-flight calls:** a call that already passed the check when a suspension lands runs to completion: at most **30 seconds** (the downstream timeout of the static forward, tool router and Claude adapter).
+- MCP clients see a refused call as JSON-RPC error `-32001` with message `unauthorized: session ended`, and the end-of-session SSE event now reads `session ended` (was `session expired`).
+
+---
+
 ## eami-agent 1.3.2 — 2026-10-06 (B-269 Slice 0)
 
 ### Changed

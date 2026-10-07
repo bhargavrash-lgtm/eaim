@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -289,15 +290,37 @@ func (s *Server) RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid keyId")
 		return
 	}
-	if err := s.queries.RevokeAPIKey(r.Context(), id, uc.OrgID); err != nil {
-		if err == pgx.ErrNoRows {
-			writeError(w, http.StatusNotFound, "not_found", "API key not found")
-			return
+	// B-301 (founder, 2026-10-06): revoking a key also revokes every live
+	// token issued with it, in one transaction with the key change and its
+	// admin audit event. If any part can't be written, nothing is: the key
+	// stays unrevoked and the caller gets a stable error code.
+	_, err = s.queries.RunAudited(r.Context(), uc.OrgID, func(tx pgx.Tx) (store.AdminAuditEvent, error) {
+		agentID, n, err := store.RevokeAPIKeyAndTokens(r.Context(), tx, id, uc.OrgID)
+		if err != nil {
+			return store.AdminAuditEvent{}, err
 		}
-		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
+		count := int32(n)
+		return store.AdminAuditEvent{
+			OrgID:     uc.OrgID,
+			Actor:     adminAuditActor(uc),
+			Action:    store.AdminAuditAPIKeyRevoked,
+			TargetID:  id,
+			Summary:   store.AdminAuditSummary{Refs: &store.AdminAuditRefs{AgentID: agentID, Count: &count}},
+			Source:    store.AdminAuditSourceAPI,
+			RequestID: adminAuditRequestID(r),
+		}, nil
+	})
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, store.ErrAPIKeyNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "API key not found")
+	case writeAdminAuditFailure(w, r, err):
+	default:
+		slog.Error("api: key revocation failed; nothing was revoked", "err", err)
+		writeError(w, http.StatusInternalServerError, "key_revocation_failed",
+			"the API key was not revoked because its tokens could not be revoked")
 	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func apiKeyToResp(k store.APIKey) APIKeyResp {

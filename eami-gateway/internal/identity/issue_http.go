@@ -360,6 +360,8 @@ func (h *IssueHandler) HandleIssue(w http.ResponseWriter, r *http.Request) {
 	// to scope that resolution instead of the bare Subject name alone.
 	req.OrgID = key.OrgID
 	req.AgentID = "agent:" + rec.Name
+	req.AgentUUID = rec.ID // B-301: bind to this exact governed agent row
+	req.APIKeyID = key.ID  // B-301: a revoked key refuses this token per call
 	req.Scope = rec.Scope
 	req.Model = rec.Model
 	req.Owner = rec.Owner

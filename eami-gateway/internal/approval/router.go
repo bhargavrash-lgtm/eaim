@@ -38,6 +38,7 @@ import (
 
 	"github.com/eami/gateway/internal/aiprovider"
 	"github.com/eami/gateway/internal/proxy"
+	"github.com/eami/gateway/internal/registry"
 	"github.com/eami/gateway/internal/safego"
 	"github.com/eami/gateway/internal/toolrouter"
 )
@@ -45,8 +46,13 @@ import (
 // Request is the normalised escalation payload passed from the dispatch pipeline.
 // It contains only what the approval router needs; it does not import the mcp package.
 type Request struct {
-	OrgID      string
-	AgentID    string // gateway_agents.id UUID
+	OrgID   string
+	AgentID string // gateway_agents.id UUID
+	// TokenID (B-301) is the jti of the token the call was made under.
+	// Kept in memory only (not persisted): the resume-time liveness
+	// re-check refuses an approved call whose token was revoked meanwhile.
+	TokenID    string
+	APIKeyID   string // B-301: the issuing key; a revoked key refuses the resume
 	AgentName  string
 	Tool       string
 	Action     string
@@ -222,7 +228,22 @@ type pendingEntry struct {
 }
 
 // Router manages escalation approvals via Postgres LISTEN/NOTIFY.
+// LiveChecker (B-301) is registry.Registry's per-call liveness check.
+type LiveChecker interface {
+	CheckLive(ctx context.Context, agentID, orgID, jti, keyID string) (registry.Liveness, error)
+}
+
+// ErrAgentNotLive (B-301): an approved call was refused at resume time
+// because its governed agent or token is no longer authorized.
+var ErrAgentNotLive = errors.New("approval: the governed agent or its token is no longer authorized -- refusing to resume this approved call")
+
 type Router struct {
+	// live (B-301) re-checks the governed agent and token at resume time,
+	// so an approved call is not executed for an agent suspended or revoked
+	// while the call waited. Defaults to the database-backed registry check
+	// in New; never nil in production.
+	live LiveChecker
+
 	pool         *pgxpool.Pool
 	fwd          *proxy.Proxy
 	holdTimeout  time.Duration
@@ -343,6 +364,7 @@ func New(
 	licenseChecker LicenseChecker,
 ) *Router {
 	return &Router{
+		live:             registry.New(pool),
 		pool:             pool,
 		fwd:              fwd,
 		holdTimeout:      holdTimeout,
@@ -918,6 +940,22 @@ func (r *Router) dispatchApproved(ctx context.Context, approvalID string, req Re
 	// Dispatch()'s own gate at escalation-submit time. Checked before the
 	// static-fallback branch too: an unlicensed org gets no dispatch at all
 	// via any path, not just the dynamically-resolved one.
+	// B-301: the governed agent may have been suspended, revoked or deleted,
+	// or its token revoked, while this call waited for approval. Refuse
+	// closed (a database error refuses too); nothing is dispatched.
+	// Fails closed: no checker, an error, or anything but Live refuses.
+	var lv registry.Liveness = registry.AgentNotActive
+	var lerr error
+	if r.live != nil {
+		lv, lerr = r.live.CheckLive(ctx, req.AgentID, req.OrgID, req.TokenID, req.APIKeyID)
+		if lerr != nil {
+			slog.Error("approval: liveness re-check failed at resume time -- refusing to resume closed", "approval_id", approvalID, "err", lerr)
+		}
+	}
+	if r.live == nil || lerr != nil || lv != registry.Live {
+		r.recordResumeOutcome(ctx, approvalID, "agent_not_active")
+		return proxy.ToolResponse{}, nil, ErrAgentNotLive
+	}
 	if r.licenseChecker != nil && !r.licenseChecker.ModuleLicensed(ctx, req.OrgID, "gateway") {
 		r.recordResumeOutcome(ctx, approvalID, "license_revoked")
 		return proxy.ToolResponse{}, nil, errors.New("approval: your organization is no longer licensed for the Gateway module -- refusing to resume this approved call")

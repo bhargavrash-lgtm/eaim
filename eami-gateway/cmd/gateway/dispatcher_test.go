@@ -173,7 +173,7 @@ func newDispatcherTestEnvFromEnv(t *testing.T, env *mainTestEnv, action string, 
 	episodeRecorder := episode.New(env.pool)
 
 	dispatcher := NewDispatcher(
-		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, staticEvaluatorSource{ev: &fakeEvaluator{action: action}},
+		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, alwaysLive{}, staticEvaluatorSource{ev: &fakeEvaluator{action: action}},
 		auditWriter, episodeRecorder, approvalRouter, fwd,
 		"", "", holdTimeout, extraHooks...,
 	)
@@ -796,7 +796,7 @@ func TestDispatch_AuditWriteFailure_AllowProxyError_LoggedWithCorrectDecision(t 
 	auditWriter := audit.NewWithDB(&failingAuditDB{err: injectedErr})
 
 	dispatcher := NewDispatcher(
-		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, staticEvaluatorSource{ev: &fakeEvaluator{action: policy.ActionAllow}},
+		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, alwaysLive{}, staticEvaluatorSource{ev: &fakeEvaluator{action: policy.ActionAllow}},
 		auditWriter, episodeRecorder, approvalRouter, brokenFwd,
 		"", "", holdTimeout,
 	)

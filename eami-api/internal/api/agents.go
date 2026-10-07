@@ -279,6 +279,12 @@ func (s *Server) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// event_type's CHECK constraint only allows the four values this
 	// codebase's own lifecycle actions produce.
 	if req.Status != nil {
+		// B-301: tell every gateway node so it ends this governed agent's
+		// open sessions now. Best-effort: the gateway's per-call check reads
+		// the status itself, so a lost notification only delays closing.
+		if err := s.queries.NotifyAgentStatus(r.Context(), a.ID); err != nil {
+			slog.Warn("api: agent_status notify failed (gateway per-call check still applies)", "agent_id", a.ID, "err", err)
+		}
 		var eventType string
 		switch *req.Status {
 		case "suspended":
@@ -337,6 +343,10 @@ func (s *Server) DeleteAgent(w http.ResponseWriter, r *http.Request) {
 		_ = s.queries.InsertAgentLifecycleEvent(r.Context(), store.InsertAgentLifecycleEventParams{
 			OrgID: uc.OrgID, AgentID: id, AgentName: existing.Name, EventType: "deleted", PerformedBy: uc.UserID,
 		})
+		// B-301: end any open sessions of the deleted agent (best-effort).
+		if err := s.queries.NotifyAgentStatus(r.Context(), id); err != nil {
+			slog.Warn("api: agent_status notify failed (gateway per-call check still applies)", "agent_id", id, "err", err)
+		}
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}

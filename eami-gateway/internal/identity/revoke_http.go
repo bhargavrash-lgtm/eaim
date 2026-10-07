@@ -135,7 +135,8 @@ func (h *RevokeHandler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 	// missing/unresolvable agent (rec == nil) blocks the request -- there
 	// is no valid agent_id to persist otherwise.
 	if err != nil && !errors.Is(err, registry.ErrAgentSuspended) {
-		http.Error(w, "forbidden: agent not registered: "+err.Error(), http.StatusForbidden)
+		slog.Info("identity: revoke target not resolvable", "err", err)
+		http.Error(w, "forbidden: agent not registered", http.StatusForbidden)
 		return
 	}
 	if rec == nil {

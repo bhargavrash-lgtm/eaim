@@ -119,6 +119,35 @@ func (m *SessionManager) Close(id string) {
 	}
 }
 
+// CloseWhere cancels and removes every session match selects, and returns
+// how many (B-301). match runs under the read lock, so it must be cheap.
+func (m *SessionManager) CloseWhere(match func(*Session) bool) int {
+	m.mu.RLock()
+	var hit []string
+	for id, s := range m.sessions {
+		if match(s) {
+			hit = append(hit, id)
+		}
+	}
+	m.mu.RUnlock()
+	for _, id := range hit {
+		m.Close(id)
+	}
+	return len(hit)
+}
+
+// Snapshot returns the live sessions at this moment (B-301), so callers can
+// do slow work on them without holding the lock.
+func (m *SessionManager) Snapshot() []*Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*Session, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		out = append(out, s)
+	}
+	return out
+}
+
 // Count returns the number of live sessions.
 func (m *SessionManager) Count() int {
 	m.mu.RLock()

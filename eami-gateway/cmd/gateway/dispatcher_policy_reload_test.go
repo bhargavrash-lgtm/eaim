@@ -95,7 +95,7 @@ func TestDispatch_PolicyReload_TakesEffectWithoutRestart(t *testing.T) {
 
 	// pLoader itself, not pLoader.Evaluator() -- the fix under test.
 	dispatcher := NewDispatcher(
-		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, pLoader,
+		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, alwaysLive{}, pLoader,
 		auditWriter, episodeRecorder, approvalRouter, fwd,
 		"", "", holdTimeout,
 	)
@@ -204,7 +204,7 @@ func TestDispatch_PolicyReload_FrozenSnapshotWiring_ReproducesTheBug(t *testing.
 	// The pre-fix pattern, reproduced exactly: pLoader.Evaluator() called
 	// ONCE here and frozen inside staticEvaluatorSource, never re-read.
 	dispatcher := NewDispatcher(
-		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, staticEvaluatorSource{ev: pLoader.Evaluator()},
+		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, alwaysLive{}, staticEvaluatorSource{ev: pLoader.Evaluator()},
 		auditWriter, episodeRecorder, approvalRouter, fwd,
 		"", "", holdTimeout,
 	)

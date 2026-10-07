@@ -69,6 +69,12 @@ const (
 	AdminAuditEnrollmentKeyCreated   = "enrollment_key.created"
 	AdminAuditEnrollmentKeyRevoked   = "enrollment_key.revoked"
 	AdminAuditEnrollmentKeyExchanged = "enrollment_key.exchanged"
+
+	// B-301 (founder, 2026-10-06): revoking a governed agent's API key also
+	// revokes every live token issued with it, in one transaction; refs carry
+	// the bound agent and how many tokens were revoked. First B-224 adoption
+	// outside the B-269 codes (reserved in the Slice 0b Part A report, §7).
+	AdminAuditAPIKeyRevoked = "api_key.revoked"
 )
 
 type adminAuditFieldKind int
@@ -124,6 +130,8 @@ var adminAuditActions = map[string]adminAuditAction{
 	AdminAuditEnrollmentKeyCreated:   {"enrollment_key", enrollmentKeyFields},
 	AdminAuditEnrollmentKeyRevoked:   {"enrollment_key", nil},
 	AdminAuditEnrollmentKeyExchanged: {"enrollment_key", nil},
+
+	AdminAuditAPIKeyRevoked: {"api_key", nil},
 }
 
 // IsAdminAuditAction reports whether code is a registered action. The read
@@ -211,6 +219,7 @@ type AdminAuditRefs struct {
 	FromVersion     *int32     `json:"from_version,omitempty"`
 	EnrollmentKeyID *uuid.UUID `json:"enrollment_key_id,omitempty"`
 	EndpointID      *uuid.UUID `json:"endpoint_id,omitempty"`
+	AgentID         *uuid.UUID `json:"agent_id,omitempty"`
 	Count           *int32     `json:"count,omitempty"`
 }
 

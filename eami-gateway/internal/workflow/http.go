@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -52,24 +53,34 @@ func NewHTTPHandler(idm *identity.Manager, resolver AgentResolver, exec *Executo
 func (h *HTTPHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "Bearer ") {
-		http.Error(w, "missing Authorization: Bearer", http.StatusUnauthorized)
+		http.Error(w, identity.MsgUnauthorized, http.StatusUnauthorized)
 		return
 	}
 	claims, err := h.identity.Validate(auth[7:])
 	if err != nil {
-		http.Error(w, "invalid bearer token: "+err.Error(), http.StatusUnauthorized)
+		slog.Info("workflow: bearer token rejected", "err", err)
+		http.Error(w, identity.MsgUnauthorized, http.StatusUnauthorized)
 		return
 	}
 	agentName := strings.TrimPrefix(claims.Subject, "agent:")
 	// B-141: hard cutover -- a pre-cutover token (no org_id claim) is
 	// rejected outright, same reasoning as mcp/handler.go's ServeSSE.
 	if claims.OrgID == "" {
-		http.Error(w, "unauthorized: token missing org_id claim -- reissue a new token", http.StatusUnauthorized)
+		http.Error(w, identity.MsgUnauthorized, http.StatusUnauthorized)
 		return
 	}
 	agentRec, err := h.resolver.LookupByNameAndOrg(r.Context(), agentName, claims.OrgID)
 	if err != nil {
-		http.Error(w, "agent not registered or suspended: "+err.Error(), http.StatusForbidden)
+		slog.Info("workflow: governed agent not authorized", "err", err)
+		http.Error(w, identity.MsgForbidden, http.StatusForbidden)
+		return
+	}
+	// B-301: the token must be bound to this exact governed agent row.
+	// Liveness (status, revoked token or key) is checked per step by
+	// Dispatch.
+	if !claims.BoundTo(agentRec.ID) {
+		slog.Info("workflow: token not bound to this governed agent")
+		http.Error(w, identity.MsgForbidden, http.StatusForbidden)
 		return
 	}
 
@@ -85,6 +96,8 @@ func (h *HTTPHandler) HandleRun(w http.ResponseWriter, r *http.Request) {
 	}
 	template := mcp.ActionContext{
 		AgentID:     claims.Subject,
+		TokenID:     claims.ID,
+		APIKeyID:    claims.APIKeyID,
 		AgentUUID:   agentRec.ID,
 		AgentName:   agentName,
 		OrgID:       agentRec.OrgID,

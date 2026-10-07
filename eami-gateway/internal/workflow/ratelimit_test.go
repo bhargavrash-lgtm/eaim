@@ -39,9 +39,13 @@ func newTestIdentityManager(t *testing.T) *identity.Manager {
 // every real token minted after the cutover has one, and every consumer
 // of it (including RateLimitRunMiddleware) requires it. See
 // issueTestTokenNoOrg for the specific pre-cutover case.
-func issueTestToken(t *testing.T, idm *identity.Manager, agentSubject, orgID string) string {
+func issueTestToken(t *testing.T, idm *identity.Manager, agentSubject, orgID string, agentUUID ...string) string {
 	t.Helper()
-	resp, err := idm.Issue(identity.IssueRequest{AgentID: agentSubject, OrgID: orgID, TTLSeconds: 300})
+	req := identity.IssueRequest{AgentID: agentSubject, OrgID: orgID, TTLSeconds: 300}
+	if len(agentUUID) > 0 {
+		req.AgentUUID = agentUUID[0] // B-301: bound to the agent row
+	}
+	resp, err := idm.Issue(req)
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -108,7 +112,7 @@ func (f *fakeResolver) LookupByNameAndOrg(_ context.Context, name, orgID string)
 // once the configured per-agent threshold is crossed.
 func TestRateLimitRunMiddleware_TripsAfterThreshold_ForSameAgent(t *testing.T) {
 	idm := newTestIdentityManager(t)
-	token := issueTestToken(t, idm, "agent:limiter-test-1", "org-a")
+	token := issueTestToken(t, idm, "agent:limiter-test-1", "org-a", "agent-uuid-1")
 	resolver := newFakeResolver().add("limiter-test-1", "org-a", &registry.AgentRecord{ID: "agent-uuid-1", OrgID: "org-a", Status: "active"})
 	h := RateLimitRunMiddleware(idm, resolver, 5, time.Minute, alwaysOKHandler)
 
@@ -137,8 +141,8 @@ func TestRateLimitRunMiddleware_TripsAfterThreshold_ForSameAgent(t *testing.T) {
 // per-agent-identity, not global.
 func TestRateLimitRunMiddleware_DifferentAgents_IndependentLimits(t *testing.T) {
 	idm := newTestIdentityManager(t)
-	tokenA := issueTestToken(t, idm, "agent:limiter-test-a", "org-a")
-	tokenB := issueTestToken(t, idm, "agent:limiter-test-b", "org-a")
+	tokenA := issueTestToken(t, idm, "agent:limiter-test-a", "org-a", "agent-uuid-a")
+	tokenB := issueTestToken(t, idm, "agent:limiter-test-b", "org-a", "agent-uuid-b")
 	resolver := newFakeResolver().
 		add("limiter-test-a", "org-a", &registry.AgentRecord{ID: "agent-uuid-a", OrgID: "org-a", Status: "active"}).
 		add("limiter-test-b", "org-a", &registry.AgentRecord{ID: "agent-uuid-b", OrgID: "org-a", Status: "active"})
@@ -177,8 +181,8 @@ func TestRateLimitRunMiddleware_DifferentAgents_IndependentLimits(t *testing.T) 
 // is exactly what this test now exercises directly.
 func TestRateLimitRunMiddleware_SameName_DifferentOrgs_IndependentLimits(t *testing.T) {
 	idm := newTestIdentityManager(t)
-	tokenOrgA := issueTestToken(t, idm, "agent:researcher", "org-a")
-	tokenOrgB := issueTestToken(t, idm, "agent:researcher", "org-b")
+	tokenOrgA := issueTestToken(t, idm, "agent:researcher", "org-a", "agent-uuid-org-a")
+	tokenOrgB := issueTestToken(t, idm, "agent:researcher", "org-b", "agent-uuid-org-b")
 
 	resolver := newFakeResolver().
 		add("researcher", "org-a", &registry.AgentRecord{ID: "agent-uuid-org-a", OrgID: "org-a", Name: "researcher", Status: "active"}).
@@ -205,7 +209,7 @@ func TestRateLimitRunMiddleware_SameName_DifferentOrgs_IndependentLimits(t *test
 // workflow-run call is never falsely rate-limited.
 func TestRateLimitRunMiddleware_SingleRun_NotBlocked(t *testing.T) {
 	idm := newTestIdentityManager(t)
-	token := issueTestToken(t, idm, "agent:limiter-test-single", "org-a")
+	token := issueTestToken(t, idm, "agent:limiter-test-single", "org-a", "agent-uuid-single")
 	resolver := newFakeResolver().add("limiter-test-single", "org-a", &registry.AgentRecord{ID: "agent-uuid-single", OrgID: "org-a", Status: "active"})
 	h := RateLimitRunMiddleware(idm, resolver, 5, time.Minute, alwaysOKHandler)
 
@@ -277,5 +281,28 @@ func TestRateLimitRunMiddleware_PreCutoverToken_PassesThroughUnmodified(t *testi
 
 	if rec := doRun(t, h, token); rec.Code != http.StatusForbidden {
 		t.Fatalf("pre-cutover token: want pass-through to next()'s 403, got %d", rec.Code)
+	}
+}
+
+// TestRateLimitRunMiddleware_UnboundTokenDoesNotConsumeQuota (B-301): a token
+// not bound to the agent row (for example one issued for a deleted agent of
+// the same name) never counts against that agent's bucket, so it can't
+// exhaust the real agent's run quota. HandleRun refuses it separately.
+func TestRateLimitRunMiddleware_UnboundTokenDoesNotConsumeQuota(t *testing.T) {
+	idm := newTestIdentityManager(t)
+	unbound := issueTestToken(t, idm, "agent:limiter-rebound", "org-a", "agent-uuid-old")
+	bound := issueTestToken(t, idm, "agent:limiter-rebound", "org-a", "agent-uuid-new")
+	resolver := newFakeResolver().add("limiter-rebound", "org-a", &registry.AgentRecord{ID: "agent-uuid-new", OrgID: "org-a", Status: "active"})
+	h := RateLimitRunMiddleware(idm, resolver, 3, time.Minute, alwaysOKHandler)
+
+	for i := 0; i < 10; i++ {
+		if rec := doRun(t, h, unbound); rec.Code != http.StatusOK {
+			t.Fatalf("unbound token attempt %d: want 200 (passed through, not counted), got %d", i+1, rec.Code)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if rec := doRun(t, h, bound); rec.Code != http.StatusOK {
+			t.Fatalf("bound token attempt %d after unbound traffic: want 200, got %d", i+1, rec.Code)
+		}
 	}
 }

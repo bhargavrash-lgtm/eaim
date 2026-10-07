@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -28,6 +29,9 @@ import (
 // gets returned below.
 type AgentResolver interface {
 	LookupByNameAndOrg(ctx context.Context, name, orgID string) (*registry.AgentRecord, error)
+	// CheckLive (B-301): episode content is readable only while the
+	// governed agent, its token and its issuing key are live.
+	CheckLive(ctx context.Context, agentID, orgID, jti, keyID string) (registry.Liveness, error)
 }
 
 // Handler serves the dual-auth HTTP surface for full episode content:
@@ -105,11 +109,12 @@ func (h *Handler) authenticateCaller(r *http.Request) (orgID uuid.UUID, status i
 
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "Bearer ") {
-		return uuid.Nil, http.StatusUnauthorized, errors.New("missing X-Service-Key or Authorization: Bearer")
+		return uuid.Nil, http.StatusUnauthorized, errors.New(identity.MsgUnauthorized)
 	}
 	claims, err := h.identity.Validate(auth[7:])
 	if err != nil {
-		return uuid.Nil, http.StatusUnauthorized, fmt.Errorf("invalid bearer token: %w", err)
+		slog.Info("episode: bearer token rejected", "err", err)
+		return uuid.Nil, http.StatusUnauthorized, errors.New(identity.MsgUnauthorized)
 	}
 	agentName := strings.TrimPrefix(claims.Subject, "agent:")
 	// B-141: hard cutover -- a pre-cutover token (no org_id claim) is
@@ -118,11 +123,20 @@ func (h *Handler) authenticateCaller(r *http.Request) (orgID uuid.UUID, status i
 	// resolved rec.OrgID below is the ONLY value that scopes which org's
 	// episode content this request can read.
 	if claims.OrgID == "" {
-		return uuid.Nil, http.StatusUnauthorized, errors.New("token missing org_id claim -- reissue a new token")
+		return uuid.Nil, http.StatusUnauthorized, errors.New(identity.MsgUnauthorized)
 	}
 	rec, err := h.resolver.LookupByNameAndOrg(r.Context(), agentName, claims.OrgID)
 	if err != nil {
-		return uuid.Nil, http.StatusForbidden, fmt.Errorf("agent not registered or suspended: %w", err)
+		slog.Info("episode: governed agent not authorized", "err", err)
+		return uuid.Nil, http.StatusForbidden, errors.New(identity.MsgForbidden)
+	}
+	if !claims.BoundTo(rec.ID) {
+		slog.Info("episode: token not bound to this governed agent")
+		return uuid.Nil, http.StatusForbidden, errors.New(identity.MsgForbidden)
+	}
+	if lv, err := h.resolver.CheckLive(r.Context(), rec.ID, rec.OrgID, claims.ID, claims.APIKeyID); err != nil || lv != registry.Live {
+		slog.Info("episode: token or governed agent not live", "err", err)
+		return uuid.Nil, http.StatusUnauthorized, errors.New(identity.MsgUnauthorized)
 	}
 	orgID, err = uuid.Parse(rec.OrgID)
 	if err != nil {

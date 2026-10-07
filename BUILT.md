@@ -1,5 +1,40 @@
 # BUILT.md — EAMI (Enterprise AI Monitoring & Intelligence)
 
+## B-301 + B-302 — suspend/revoke stops a governed agent on its next call; fixed gateway 401/403 — 2026-10-07 (Claude Code)
+
+Evidence: `B-301_B-302_VERIFICATION.md`. Plan: `B-301_LIVE_TEST_AND_FIX_PLAN.md` §4. Design: `AGENT_IDENTITY_DESIGN.md` Slice A1.
+
+**eami-gateway**
+- `internal/registry/liveness.go` (new): `CheckLive(agent, org, jti, key)`, one primary-key query (agent status by id and org, revoked token, revoked issuing key).
+- `cmd/gateway/dispatcher.go`: `AgentLiveness` required by `NewDispatcher`; first check in `Dispatch` (`rejectOnNotLive`: denied audit row, `mcp.ErrNotLive`); nil checker or error refuses (fail closed); approved-call refusals mapped to `ErrNotLive`.
+- `internal/approval/router.go`: resume-time re-check (fails closed), `ErrAgentNotLive`, `resume_outcome = agent_not_active` (migration **000030**).
+- `internal/identity`: tokens carry server-set `agent_uuid` and `api_key_id` (`Claims.BoundTo`); hard cutover for older tokens; revocations notify `token_revoked` in the same statement; `IsRevoked`/`MarkRevoked`/`ReloadRevoked`; fixed `MsgUnauthorized`/`MsgForbidden`.
+- `internal/mcp`: binding + live check at SSE open, `tools/list` live check, per-message in-memory pre-check, sessions end on `ErrNotLive` with `-32001 unauthorized: session ended`; `LivenessListener` (new): `agent_status`/`token_revoked`, payloads validated and confirmed in the database, catch-up on reconnect and every 60 s outside the session lock.
+- `internal/workflow`: binding at run start; rate limiter counts only bound tokens. `internal/episode`: binding + live check.
+
+**eami-api**
+- `store/agent_liveness.go` (new): `NotifyAgentStatus`; `RevokeAPIKeyAndTokens`.
+- `RevokeAPIKey` in one transaction with the token revocations and an admin audit event (`api_key.revoked`); 404 / `key_revocation_failed` / `audit_write_failed`.
+- `UpdateAgent`/`DeleteAgent` notify `agent_status`. Dead `store.RevokeAPIKey` removed.
+- `TestRBACSplit_*` moved to a throwaway database (it revokes a key, which now writes a permanent audit event).
+
+**Tests:** 22 real-Postgres gateway tests (T1–T8, conditions 1 and 2, resume after suspend and after token revocation, B-302 bodies, delete-and-re-create, revoked key without events, `tools/list`, episode reads, pre-check, reconnect catch-up, unbound token), a rate-limit test, and 2 eami-api T9 tests. **26 of 26 deliberate breakages caught.** Suites: gateway 379/0, eami-api 633/0, migrationtest pass.
+
+**Measured:** per-call query 0.27 ms p50 / 0.37 p95 / 0.47 p99 inside Docker (1.13 / 1.74 / 2.07 ms from the host); 4 ms p50 / 5 ms p95 end to end on the policy-denied path.
+
+**Live (before → after, deny policy proven on the baseline):** a suspended agent's open session went from processing calls to ending at once; a revoked key's token went from working to 401 and session end; a second node went from accepting a revoked token (200) to 401.
+
+**Reviews:** security (2 High, 2 Medium, 4 Low; all fixed or recorded), code (no High; all fixed), security re-review of the fixes (no Critical/High; Low A, Low B and Info 3 fixed).
+
+**Limitations**
+- A call already running finishes (at most 30 s).
+- Pre-existing raw error text in some gateway replies (`-32000` dispatch and `tools/list` errors, parse errors, workflow-run and episode non-auth errors) is proposed as a follow-up item.
+- `revoked_ai_tokens` still cascades on agent delete (harmless with binding).
+- The catch-up checks sessions sequentially.
+- An empty `api_key_id` skips the key check (no production token lacks it).
+- Deploy all gateway nodes together; every token minted before the deploy is refused.
+- 10 inert `b301-*` fixture agents and one leaked test org (`b253-rbac-9723bccb`, holds one admin audit event) remain in the dev database, clearly marked.
+
 ## B-269 Slice 0b — minimal admin audit trail (`admin_audit_events`) — 2026-10-06 (Claude Code)
 
 Evidence: `B-269_SLICE0B_VERIFICATION.md`. Design: `B-269_SLICE0B_PART_A_INVESTIGATION.md`. Decisions B0b-1..9 (founder, all yes). First slice of B-224.

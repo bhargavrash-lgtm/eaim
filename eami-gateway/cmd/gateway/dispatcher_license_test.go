@@ -161,7 +161,7 @@ func newDispatcherTestEnvRealLicense(t *testing.T, action string) *dispatcherTes
 	t.Cleanup(cancel)
 
 	dispatcher := NewDispatcher(
-		toolRouter, aiProviderRouter, licenseStore, staticEvaluatorSource{ev: &fakeEvaluator{action: action}},
+		toolRouter, aiProviderRouter, licenseStore, alwaysLive{}, staticEvaluatorSource{ev: &fakeEvaluator{action: action}},
 		auditWriter, episodeRecorder, approvalRouter, fwd,
 		"", "", 5*time.Second,
 	)

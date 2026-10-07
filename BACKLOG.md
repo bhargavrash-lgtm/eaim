@@ -4201,9 +4201,9 @@ Choose in the brief.
 
 **Status:** PARKED: listed under "Parked (not scheduled)" in the master sequence. Not in the active sequence; no build.
 
-**Minted from Part A (2026-10-06):** **B-301** (C2, open MCP session keeps dispatching after suspension; High pending live test) and **B-302** (C6, raw error text in gateway 401/403). Slice A split into A1/A2/A3 and C5 recorded as a Slice B constraint in `AGENT_IDENTITY_DESIGN.md`.
+**Slice A1 delivered by B-301 (2026-10-07).** **Minted from Part A (2026-10-06):** **B-301** (C2, open MCP session keeps dispatching after suspension; High pending live test) and **B-302** (C6, raw error text in gateway 401/403). Slice A split into A1/A2/A3 and C5 recorded as a Slice B constraint in `AGENT_IDENTITY_DESIGN.md`.
 
-### B-301 — A suspended or revoked governed agent's open MCP session keeps dispatching — **QUEUED, High (CONFIRMED live), 2026-10-06**
+### B-301 — A suspended or revoked governed agent's open MCP session keeps dispatching — **DONE, 2026-10-07** (High, confirmed live, fixed; `B-301_B-302_VERIFICATION.md`)
 **Origin:** B-300 Part A, conflict C2 (`AGENT_IDENTITY_PART_A_INVESTIGATION.md` §3). Minted at founder direction 2026-10-06; confirmed free against BACKLOG.md directly (the counter read B-301, and no file mentioned B-301).
 **Problem (code trace):**
 - `POST /v1/mcp/messages?sessionId=…` authenticates **by session ID only**. It doesn't re-validate the token or re-check the governed agent's status; it uses the agent record cached when the session opened (`internal/mcp/handler.go` `ServeMessages`, `sess.Agent`). The dispatcher doesn't check status either.
@@ -4216,15 +4216,19 @@ Choose in the brief.
 - token expiry does end the session (404, nothing dispatched); new sessions are refused on the node that handled the change.
 **Fix plan (no build yet):** a per-call status and revoked-JTI check at `Dispatcher.Dispatch` (covers MCP and every workflow step; measured 1.1 ms p50, 2.1 ms p99), `NOTIFY`-driven session close on suspend and revoke across nodes, reload on reconnect, optional key-to-token revocation (founder decision), tests T1–T9 mutation-proven, B-302 folded in. Slice A1 of `AGENT_IDENTITY_DESIGN.md`.
 **Related:** B-300 (agent identity), B-253 (RBAC split: containment must be real), B-230 (revoked isn't terminal).
-**Status:** QUEUED.
+**Status:** DONE 2026-10-07.
 
-### B-302 — Gateway 401/403 responses echo raw error text; distinct text can reveal whether a governed agent exists or is suspended — **QUEUED, Low-Medium, 2026-10-06**
+**Done 2026-10-07:** per-call database check at `Dispatcher.Dispatch` (agent status, revoked token, revoked issuing key; fails closed), sessions end with a fixed error, notifications close sessions promptly on every node (optimisation only), catch-up on reconnect and every 60 s, resume-time re-check for approved escalations, live checks on `tools/list`, SSE open and episode reads, tokens bound to the agent row and key (`agent_uuid`, `api_key_id`; hard cutover), key revocation revokes its tokens in one transaction with an admin audit event. 26/26 deliberate breakages caught; live before → after shown.
+
+### B-302 — Gateway 401/403 responses echo raw error text; distinct text can reveal whether a governed agent exists or is suspended — **DONE, 2026-10-07** (`B-301_B-302_VERIFICATION.md`)
 **Origin:** B-300 Part A, conflict C6. Minted at founder direction 2026-10-06; confirmed free against BACKLOG.md directly.
 **Problem:**
 - The MCP SSE handler and the workflow-run handler return `"unauthorized: " + err.Error()` / `"invalid bearer token: " + err.Error()` (JWT parse errors, and the JTI of a revoked token) and `"agent not registered or suspended: " + err.Error()`, whose wrapped text includes the agent name and `status=suspended`/`status=revoked`. `identity.Middleware` (unused) does the same.
 - Distinct texts let a token holder learn whether a governed agent exists and its status, and send raw error text across a trust boundary (the standing check).
 **Fix:** fixed messages with short reason codes; detail only in the local log.
 **Related:** B-234 (app-wide raw error text in eami-api 500s), B-300.
-**Status:** QUEUED.
+**Status:** DONE 2026-10-07.
+
+**Done 2026-10-07:** fixed `401 unauthorized: invalid or expired token` / `403 forbidden: agent not authorized` on the MCP SSE, workflow-run and episode routes (and the token-revoke route's 403); unknown, other-org, suspended and unbound look identical. Remaining pre-existing raw error text elsewhere in the gateway (JSON-RPC `-32000`, parse errors, workflow-run and episode non-auth errors) is proposed as a new item, pending a founder B-ID.
 
 ## Next B-ID: B-303

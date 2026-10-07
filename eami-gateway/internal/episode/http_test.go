@@ -38,6 +38,13 @@ type fakeResolver struct {
 	err     error // when set, returned regardless of records (mirrors registry's suspended/not-found contract)
 }
 
+// CheckLive (B-301): the fake treats every resolvable agent as live; the
+// per-call liveness behaviour is proven against a real database in
+// cmd/gateway/b301_liveness_pg_test.go.
+func (f *fakeResolver) CheckLive(context.Context, string, string, string, string) (registry.Liveness, error) {
+	return registry.Live, nil
+}
+
 func (f *fakeResolver) LookupByNameAndOrg(_ context.Context, name, orgID string) (*registry.AgentRecord, error) {
 	if f.err != nil {
 		return nil, f.err
@@ -65,9 +72,13 @@ func newTestManager(t *testing.T) *identity.Manager {
 // required (B-141): a token missing its org_id claim is rejected outright
 // by authenticateCaller's hard cutover before the resolver is ever
 // consulted -- see issueBearerForNoOrg below for that specific case.
-func issueBearerFor(t *testing.T, m *identity.Manager, agentName, orgID string) string {
+func issueBearerFor(t *testing.T, m *identity.Manager, agentName, orgID string, agentUUID ...string) string {
 	t.Helper()
-	resp, err := m.Issue(identity.IssueRequest{AgentID: "agent:" + agentName, OrgID: orgID, TTLSeconds: 300})
+	req := identity.IssueRequest{AgentID: "agent:" + agentName, OrgID: orgID, TTLSeconds: 300}
+	if len(agentUUID) > 0 {
+		req.AgentUUID = agentUUID[0] // B-301: tokens are bound to the agent row
+	}
+	resp, err := m.Issue(req)
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -185,7 +196,7 @@ func TestHandler_ListEpisodes_ValidBearerJWT_ResolvesOrgFromRegistry(t *testing.
 	h := newHandler(t, store, resolver, idm)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/gateway/episodes", nil)
-	req.Header.Set("Authorization", "Bearer "+issueBearerFor(t, idm, "test-agent", orgID.String()))
+	req.Header.Set("Authorization", "Bearer "+issueBearerFor(t, idm, "test-agent", orgID.String(), resolver.records["test-agent"].ID))
 	rec := httptest.NewRecorder()
 
 	h.ListEpisodes(rec, req)
@@ -273,7 +284,7 @@ func TestHandler_ListEpisodes_BearerJWT_ClientSuppliedOrgIDIgnored_UsesRegistryO
 	h := episode.NewHTTPHandler(reader, idm, resolver, testServiceKey)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/gateway/episodes?org_id="+forgedOrg.String(), nil)
-	req.Header.Set("Authorization", "Bearer "+issueBearerFor(t, idm, "test-agent", realOrg.String()))
+	req.Header.Set("Authorization", "Bearer "+issueBearerFor(t, idm, "test-agent", realOrg.String(), resolver.records["test-agent"].ID))
 	rec := httptest.NewRecorder()
 
 	h.ListEpisodes(rec, req)

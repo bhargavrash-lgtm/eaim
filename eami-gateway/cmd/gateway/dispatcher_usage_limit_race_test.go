@@ -76,7 +76,7 @@ func newDispatcherTestEnvRealLicenseSlowDownstream(t *testing.T, delay time.Dura
 	t.Cleanup(cancel)
 
 	dispatcher := NewDispatcher(
-		toolRouter, aiProviderRouter, licenseStore, staticEvaluatorSource{ev: &fakeEvaluator{action: policy.ActionAllow}},
+		toolRouter, aiProviderRouter, licenseStore, alwaysLive{}, staticEvaluatorSource{ev: &fakeEvaluator{action: policy.ActionAllow}},
 		auditWriter, episodeRecorder, approvalRouter, fwd,
 		"", "", 5*time.Second,
 	)
@@ -209,7 +209,7 @@ func TestDispatchApproved_UsageLimitNearCap_ConcurrentResumesSerialize(t *testin
 		t.Cleanup(cancel)
 		episodeRecorder := episode.New(env.pool)
 		return NewDispatcher(
-			toolRouter, aiProviderRouter, licenseStore, staticEvaluatorSource{ev: &fakeEvaluator{action: policy.ActionEscalate}},
+			toolRouter, aiProviderRouter, licenseStore, alwaysLive{}, staticEvaluatorSource{ev: &fakeEvaluator{action: policy.ActionEscalate}},
 			auditWriter, episodeRecorder, approvalRouter, fwd,
 			"", "", 5*time.Second,
 		)

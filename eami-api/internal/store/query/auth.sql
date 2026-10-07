@@ -41,8 +41,8 @@ INSERT INTO api_keys (org_id, name, key_hash, prefix, scopes, created_by, expire
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING id, org_id, name, prefix, scopes, created_by, created_at, last_used, expires_at, agent_id, revoked;
 
--- name: RevokeAPIKey :exec
-UPDATE api_keys SET revoked = TRUE WHERE id = $1 AND org_id = $2;
+-- RevokeAPIKey removed (B-301): key revocation is store.RevokeAPIKeyAndTokens
+-- (agent_liveness.go), in one transaction with its tokens and audit event.
 
 -- name: GetAPIKeyByHash :one
 SELECT id, org_id, name, prefix, scopes, created_by, created_at, last_used, expires_at, agent_id, revoked

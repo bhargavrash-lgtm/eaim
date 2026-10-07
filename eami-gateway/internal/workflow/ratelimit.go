@@ -120,7 +120,11 @@ func RateLimitRunMiddleware(idm *identity.Manager, resolver AgentResolver, limit
 				// LookupByNameAndOrg call performs the real, authoritative
 				// rejection of a pre-cutover token.
 				agentName := strings.TrimPrefix(claims.Subject, "agent:")
-				if agentRec, err := resolver.LookupByNameAndOrg(r.Context(), agentName, claims.OrgID); err == nil {
+				// B-301: only a token bound to this exact agent row counts
+				// against its bucket; an old token for a deleted agent of
+				// the same name can't exhaust the re-created agent's quota
+				// (HandleRun refuses it anyway).
+				if agentRec, err := resolver.LookupByNameAndOrg(r.Context(), agentName, claims.OrgID); err == nil && claims.BoundTo(agentRec.ID) {
 					if ok, retryAfter := limiter.Allow(agentRec.ID); !ok {
 						setRetryAfter(w, retryAfter)
 						http.Error(w, "too many workflow-run requests for this agent -- try again later", http.StatusTooManyRequests)

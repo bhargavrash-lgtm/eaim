@@ -104,11 +104,11 @@ func TestHandleRun_OrgScoping_TwoOrgsSameAgentName_ResolvesCorrectAgentEachTime(
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
-	tokenA, err := idm.Issue(identity.IssueRequest{AgentID: "agent:" + sharedName, OrgID: env.orgID.String(), TTLSeconds: 300})
+	tokenA, err := idm.Issue(identity.IssueRequest{AgentID: "agent:" + sharedName, OrgID: env.orgID.String(), AgentUUID: agentA.String(), TTLSeconds: 300})
 	if err != nil {
 		t.Fatalf("issue org A token: %v", err)
 	}
-	tokenB, err := idm.Issue(identity.IssueRequest{AgentID: "agent:" + sharedName, OrgID: orgB.String(), TTLSeconds: 300})
+	tokenB, err := idm.Issue(identity.IssueRequest{AgentID: "agent:" + sharedName, OrgID: orgB.String(), AgentUUID: agentB.String(), TTLSeconds: 300})
 	if err != nil {
 		t.Fatalf("issue org B token: %v", err)
 	}

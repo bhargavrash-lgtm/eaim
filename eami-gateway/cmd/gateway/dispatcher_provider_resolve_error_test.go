@@ -85,7 +85,7 @@ func newDispatcherTestEnvBrokenAIProviderResolve(t *testing.T, action string) (*
 	episodeRecorder := episode.New(env.pool)
 
 	dispatcher := NewDispatcher(
-		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, staticEvaluatorSource{ev: &fakeEvaluator{action: action}},
+		toolRouter, aiProviderRouter, alwaysLicensedChecker{}, alwaysLive{}, staticEvaluatorSource{ev: &fakeEvaluator{action: action}},
 		auditWriter, episodeRecorder, approvalRouter, fwd,
 		"", "", holdTimeout,
 	)
