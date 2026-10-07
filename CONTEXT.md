@@ -2,7 +2,7 @@
 # Updated by: Claude Code (after every task) AND the PM chat (after every
 # planning decision). Read by both at the start of every session, before
 # anything else.
-ACTIVE AGENT: Code — chat app + discovery bundle: design record, roadmap pass, Part A (read-only) — started 2026-10-07
+ACTIVE AGENT: none
 STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing index and order for the whole AI ITAM program. It carries the same standing weight as `MULTI_AGENT_PROTOCOL.md`.
 - Before building anything in the program, read it and confirm that the next unchecked item matches what you're about to build.
 - When an item completes, tick its own checkbox, with the date and commit hash, in that item's own completion commit.
@@ -13,7 +13,19 @@ STANDING INDEX: `AI_ITAM_EPIC_MASTER_SEQUENCE.md` (repo root) is the standing in
 - **Part 0** (one docs commit, since the new rule puts a design record and its roadmap line in the same commit): `CHAT_APP_AND_DISCOVERY_BUNDLE_DESIGN.md` saved; **B-305** minted (parked) and cross-referenced from B-152, B-193, B-269, B-295, B-138, B-300; parked line in the master sequence; `DISCOVERY_PRESETS_DESIGN.md` §12: enrollment keys bind to a preset, never a package type.
 - **Roadmap pass:** present already: B-269 (Discovery presets, its own setup destination) and B-267 (Discovery Probe). Added one line each: B-280 epic, agent identity (B-300, placement **proposed**), Dynamic Asset Grouping, AI/LLM Service Mapping, CI-reconciliation keys and CMDB export (no record yet), the chat app (under the Chat Engine item), and the hosted visibility layer and GxP/CSV gate (no record; nearest is ADR-020). No existing line changed.
 - **CLAUDE.md:** design-record commits update their roadmap line in the same commit.
-- **Part A:** `CHAT_APP_AND_DISCOVERY_BUNDLE_PART_A_INVESTIGATION.md` (own commit). Next free B-ID **B-306**.
+- **Part A** (`CHAT_APP_AND_DISCOVERY_BUNDLE_PART_A_INVESTIGATION.md`, read-only):
+  - completions are an MCP `tool_call` to `<connector>.messages`, **fully buffered (no streaming)**;
+  - redaction is **request-side only**;
+  - token cost is per governed agent, written fire-and-forget;
+  - no user identity in calls;
+  - installers are per-machine and elevated (LocalSystem, root, LaunchDaemon);
+  - **the service has no local interface**;
+  - no chat code exists.
+- **Flagged for the founder:**
+  - **C1:** **B-130 already exists** for the same desktop-client product.
+  - **C2:** the roadmap's Chat Engine item is the *web* surface, distinct from B-130, but the new line was placed under it per the brief.
+  - **C8:** the native-messaging host is a user-level process that already sends as the agent (cf. B-297); don't copy it.
+- Next free B-ID **B-306**.
 
 ## Active decision thread (2026-10-07) — B-303 and B-304 minted; B-224 and B-132 notes
 
@@ -3099,6 +3111,9 @@ agentless collector — not buildable now, B-139 itself has zero
 investigation done).
 
 ## Last updated
+2026-10-07 by Claude Code — B-305 chat app and discovery bundle: design record parked, B-305 minted, roadmap pass (7 lines added, none changed), design-record roadmap rule; Part A reported (B-130 overlap and Chat Engine placement flagged). Docs only. Marker cleared.
+
+Prior entry:
 2026-10-07 by Claude Code — minted B-303 (gateway raw error text) and B-304 (shared-database write tests); B-224 org-deletion note; B-132 database-dependency note. Docs only. Marker cleared.
 
 Prior entry:

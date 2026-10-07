@@ -4293,6 +4293,7 @@ Choose in the brief.
 **Summary:** a desktop chat app (the governed interaction layer between a user and LLMs through the gateway), shipped as one bundle with the privileged discovery service (same binary as the standalone agent, never one process). One enrollment and one endpoint identity per machine; chat without the service is not a v1 mode; disclosure in the app. Delegated identity per `AGENT_IDENTITY_DESIGN.md` (blocked on C5 for "audit records the user"). Proposed slices 0–4.
 **Roadmap:** Horizon 2, extending the Chat Engine item.
 **Related:** B-152, B-193, B-269 (enrollment keys bind to a preset, never a package type; design §12), B-295, B-138, B-300.
+**Part A (read-only) done 2026-10-07:** `CHAT_APP_AND_DISCOVERY_BUNDLE_PART_A_INVESTIGATION.md`. **Overlaps B-130** (EPIC: Native Governed AI Desktop Client), the same product: founder to decide whether B-305 folds into B-130 (C1); the roadmap line's placement under the web Chat Engine item is flagged (C2).
 **Status:** PARKED: listed under "Parked (not scheduled)" in the master sequence. No build.
 
 ## Next B-ID: B-306
